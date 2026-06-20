@@ -29,7 +29,7 @@ The versioned, human-approved store of Rules. The source of truth for the rest o
 _Avoid_: rule database, policy DB
 
 **Citation**:
-The full anchor binding a Rule to its source: document id, document version, stable section id (heading path + content hash), verbatim quote, and character offsets. A Rule is invalid without a resolvable Citation.
+The full anchor binding a Rule to its source: document id, document version, stable section id (heading path + content hash), verbatim quote, and character offsets. An extracted Rule is invalid without a resolvable Citation; a Manual Rule may omit Citation when the policy knowledge is not anchored to a Policy Document.
 _Avoid_: reference, source link
 
 **QA Flag**:
@@ -60,7 +60,7 @@ _Avoid_: reviewer, user
 - Only `enforceable` **Rules** carry machine-checkable conditions; `guidance`/`subjective` are stored as cited, human-routed items
 - Approved **Rules** live in the **Structured Policy Store**
 - A **Policy Document** has many immutable **Document Versions**; extraction runs against one **Document Version**
-- A **Candidate Rule** carries a **Citation** and zero or more **QA Flags** before reaching an **Approver**
+- An extracted **Candidate Rule** carries a **Citation** and zero or more **QA Flags** before reaching an **Approver**
 - An **Approver** publishes a set of approved **Rules** as an immutable **Policy Version**
 - Re-ingesting a new **Document Version** diffs candidate **Rules** against the current **Policy Version** so only deltas need re-approval
 

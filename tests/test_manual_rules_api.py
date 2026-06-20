@@ -164,6 +164,74 @@ async def test_admin_and_approver_can_create_manual_rule_without_citation_and_au
 
 
 @pytest.mark.anyio
+async def test_approver_can_create_manual_rule_with_citation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    payload = build_manual_rule_payload()
+    payload["rule_id"] = "rule-manual-meal-cap-with-citation"
+    payload["citation"] = {
+        "document_id": "doc-expense-policy",
+        "document_version_id": "docv-2026-06-01",
+        "section_id": "offsites#abc123",
+        "quote": "Team offsites may reimburse dinner up to $120 with director approval.",
+        "start_char": 120,
+        "end_char": 191,
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        create_response = await client.post(
+            "/rules/manual",
+            headers={"Authorization": "Bearer approver-token"},
+            json=payload,
+        )
+        audit_response = await client.get(
+            "/audit-events",
+            headers={"Authorization": "Bearer viewer-token"},
+            params={"entity_type": "rule", "entity_id": payload["rule_id"]},
+        )
+
+    assert create_response.status_code == 201
+    assert create_response.json()["citation"] == payload["citation"]
+    assert audit_response.status_code == 200
+    assert audit_response.json()["items"] == [
+        {
+            "action": "rule.created",
+            "actor_subject": "approver-user",
+            "actor_roles": ["approver"],
+            "entity_type": "rule",
+            "entity_id": payload["rule_id"],
+            "payload": {
+                "origin": "manual",
+                "rationale": payload["rationale"],
+                "has_citation": True,
+            },
+        }
+    ]
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        stored_rule = session.scalar(
+            select(RuleRecord).where(RuleRecord.rule_id == payload["rule_id"])
+        )
+    engine.dispose()
+
+    assert stored_rule is not None
+    assert stored_rule.payload["citation"] == payload["citation"]
+
+
+@pytest.mark.anyio
 async def test_manual_rule_creation_fails_without_rationale(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

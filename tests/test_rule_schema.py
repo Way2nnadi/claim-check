@@ -89,6 +89,38 @@ def test_manual_guidance_rule_payload_is_valid_without_citation() -> None:
     assert rule.condition is None
 
 
+def test_manual_guidance_rule_payload_is_valid_with_citation() -> None:
+    rule = Rule.model_validate(
+        {
+            "rule_id": "rule-entertainment-guidance-cited",
+            "statement": "Entertainment spending should remain modest and in good taste.",
+            "enforceability_class": "guidance",
+            "lifecycle_state": "in_review",
+            "origin": {
+                "source_type": "manual",
+                "rationale": "Approver captured cited guidance from the Policy Document.",
+            },
+            "scope": {
+                "expense_category": "entertainment",
+                "employee_group": "all",
+            },
+            "citation": {
+                "document_id": "doc-expense-policy",
+                "document_version_id": "docv-2026-06-01",
+                "section_id": "meals-and-entertainment#def456",
+                "quote": "Entertainment spending should remain modest and in good taste.",
+                "start_char": 901,
+                "end_char": 962,
+            },
+            "exceptions": [],
+        }
+    )
+
+    assert rule.origin.source_type is RuleOriginType.MANUAL
+    assert rule.citation is not None
+    assert rule.citation.document_version_id == "docv-2026-06-01"
+
+
 def test_rule_enums_publish_expected_contract_values() -> None:
     assert {state.value for state in LifecycleState} == {
         "extracted",
