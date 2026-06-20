@@ -65,8 +65,6 @@ def publish_policy_version(
         payload["lifecycle_state"] = LifecycleState.PUBLISHED.value
         published_rule = Rule.model_validate(payload)
         published_rules.append(published_rule)
-        record.lifecycle_state = published_rule.lifecycle_state.value
-        record.payload = published_rule.model_dump(mode="json")
 
     snapshot = PolicyVersionSnapshot(
         policy_version_id=policy_version_id,

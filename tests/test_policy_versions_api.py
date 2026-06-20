@@ -163,8 +163,8 @@ async def test_publishes_first_policy_version_and_reads_versioned_snapshot(
 
         stored_rule = session.get(RuleRecord, "rule-123")
         assert stored_rule is not None
-        assert stored_rule.lifecycle_state == "published"
-        assert stored_rule.payload["lifecycle_state"] == "published"
+        assert stored_rule.lifecycle_state == "approved"
+        assert stored_rule.payload["lifecycle_state"] == "approved"
     engine.dispose()
 
 
@@ -204,3 +204,72 @@ async def test_rejects_attempt_to_overwrite_published_policy_version(
     assert second_publish.json() == {
         "detail": "Published Policy Versions are immutable and cannot be overwritten.",
     }
+
+
+@pytest.mark.anyio
+async def test_new_policy_version_retains_previously_approved_rules_in_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+    _seed_rule(database_url, rule_id="rule-123", lifecycle_state="approved")
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        first_publish = await client.post(
+            "/policy-versions",
+            headers={"Authorization": "Bearer approver-token"},
+            json={
+                "policy_version_id": "policy-v1",
+                "change_summary": "Initial immutable snapshot of approved manual Rules.",
+            },
+        )
+
+    _seed_rule(database_url, rule_id="rule-456", lifecycle_state="approved")
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        second_publish = await client.post(
+            "/policy-versions",
+            headers={"Authorization": "Bearer approver-token"},
+            json={
+                "policy_version_id": "policy-v2",
+                "change_summary": "Second immutable snapshot includes prior approved Rules.",
+            },
+        )
+        read_response = await client.get(
+            "/policy-versions/policy-v2",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert first_publish.status_code == 201
+    assert second_publish.status_code == 201
+    assert second_publish.json() == {
+        "policy_version_id": "policy-v2",
+        "rule_count": 2,
+        "status": "published",
+        "published_by": "approver-user",
+    }
+    assert read_response.status_code == 200
+    assert [rule["rule_id"] for rule in read_response.json()["rules"]] == [
+        "rule-123",
+        "rule-456",
+    ]
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        first_rule = session.get(RuleRecord, "rule-123")
+        second_rule = session.get(RuleRecord, "rule-456")
+        assert first_rule is not None
+        assert second_rule is not None
+        assert first_rule.lifecycle_state == "approved"
+        assert second_rule.lifecycle_state == "approved"
+        assert first_rule.payload["lifecycle_state"] == "approved"
+        assert second_rule.payload["lifecycle_state"] == "approved"
+    engine.dispose()
