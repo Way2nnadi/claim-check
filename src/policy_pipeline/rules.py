@@ -102,8 +102,8 @@ class Rule(BaseModel):
 
     @model_validator(mode="after")
     def validate_rule(self) -> "Rule":
-        if self.origin.source_type is RuleOriginType.EXTRACTED and self.citation is None:
-            raise ValueError("Extracted Rule requires a Citation.")
+        if self.citation is None:
+            raise ValueError("Rule requires a Citation.")
         if self.enforceability_class is EnforceabilityClass.ENFORCEABLE and self.condition is None:
             raise ValueError("Enforceable Rule requires a machine-checkable condition.")
         if (

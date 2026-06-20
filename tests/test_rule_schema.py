@@ -63,7 +63,7 @@ def test_extracted_enforceable_quantitative_rule_payload_is_valid() -> None:
     assert rule.exceptions[0].required_evidence == ["manager_approval"]
 
 
-def test_manual_guidance_rule_payload_is_valid_without_citation() -> None:
+def test_manual_guidance_rule_payload_is_valid_with_citation() -> None:
     rule = Rule.model_validate(
         {
             "rule_id": "rule-entertainment-guidance",
@@ -78,6 +78,14 @@ def test_manual_guidance_rule_payload_is_valid_without_citation() -> None:
                 "expense_category": "entertainment",
                 "employee_group": "all",
             },
+            "citation": {
+                "document_id": "doc-expense-policy",
+                "document_version_id": "docv-2026-06-01",
+                "section_id": "meals-and-entertainment#def456",
+                "quote": "Entertainment spending should remain modest and in good taste.",
+                "start_char": 901,
+                "end_char": 962,
+            },
             "exceptions": [],
         }
     )
@@ -85,7 +93,7 @@ def test_manual_guidance_rule_payload_is_valid_without_citation() -> None:
     assert rule.enforceability_class is EnforceabilityClass.GUIDANCE
     assert rule.lifecycle_state is LifecycleState.IN_REVIEW
     assert rule.origin.source_type is RuleOriginType.MANUAL
-    assert rule.citation is None
+    assert rule.citation is not None
     assert rule.condition is None
 
 
@@ -115,7 +123,7 @@ def test_rule_enums_publish_expected_contract_values() -> None:
     [
         (
             lambda payload: payload.pop("citation"),
-            "Extracted Rule requires a Citation.",
+            "Rule requires a Citation.",
         ),
         (
             lambda payload: payload["origin"].pop("extraction_run_id"),
@@ -156,6 +164,25 @@ def test_manual_rule_requires_rationale() -> None:
                 },
                 "scope": {
                     "expense_category": "meals",
+                },
+            }
+        )
+
+
+def test_manual_rule_requires_citation() -> None:
+    with pytest.raises(ValidationError, match="Rule requires a Citation."):
+        Rule.model_validate(
+            {
+                "rule_id": "rule-manual-without-citation",
+                "statement": "Entertainment spending should remain modest and in good taste.",
+                "enforceability_class": "guidance",
+                "lifecycle_state": "in_review",
+                "origin": {
+                    "source_type": "manual",
+                    "rationale": "Approver captured guidance from the policy document.",
+                },
+                "scope": {
+                    "expense_category": "entertainment",
                 },
             }
         )
