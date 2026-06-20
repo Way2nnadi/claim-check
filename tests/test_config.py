@@ -7,6 +7,7 @@ def test_settings_use_local_defaults() -> None:
     assert settings.environment == "local"
     assert settings.service_name == "policy-pipeline"
     assert settings.database_url == "postgresql+psycopg://postgres:postgres@localhost:5432/policy_pipeline"
+    assert settings.is_local_auth_enabled is True
 
 
 def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
@@ -22,3 +23,12 @@ def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
     assert settings.database.host == "db.internal"
     assert settings.database.port == 5433
     assert settings.database.name == "claim_check"
+    assert settings.is_local_auth_enabled is True
+
+
+def test_local_auth_is_disabled_outside_local_and_test_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("POLICY_PIPELINE_ENVIRONMENT", "production")
+
+    settings = get_settings()
+
+    assert settings.is_local_auth_enabled is False
