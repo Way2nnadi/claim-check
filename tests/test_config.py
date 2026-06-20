@@ -15,7 +15,6 @@ def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
         "POLICY_PIPELINE_DATABASE_URL",
         "postgresql+psycopg://claimcheck:secret@db.internal:5433/claim_check",
     )
-    get_settings.cache_clear()
 
     settings = get_settings()
 
@@ -23,5 +22,3 @@ def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
     assert settings.database.host == "db.internal"
     assert settings.database.port == 5433
     assert settings.database.name == "claim_check"
-
-    get_settings.cache_clear()

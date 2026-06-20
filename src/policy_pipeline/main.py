@@ -16,11 +16,13 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/config")
-    def config_smoke() -> dict[str, str | dict[str, str | int | None]]:
+    def config_smoke() -> dict[str, str | dict[str, str]]:
         return {
             "service": settings.service_name,
             "environment": settings.environment,
-            "database": settings.database.model_dump(),
+            "database": {
+                "driver": settings.database.driver,
+            },
         }
 
     return app

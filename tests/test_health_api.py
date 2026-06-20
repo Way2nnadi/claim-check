@@ -34,8 +34,5 @@ async def test_config_endpoint_reports_safe_runtime_configuration() -> None:
         "environment": "local",
         "database": {
             "driver": "postgresql+psycopg",
-            "host": "localhost",
-            "port": 5432,
-            "name": "policy_pipeline",
         },
     }
