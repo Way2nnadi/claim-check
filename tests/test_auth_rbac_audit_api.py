@@ -140,3 +140,33 @@ async def test_viewer_cannot_approve_candidate_rule(
     assert response.json() == {
         "detail": "You do not have access to this resource.",
     }
+
+
+@pytest.mark.anyio
+async def test_local_auth_is_rejected_outside_local_and_test_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+    monkeypatch.setenv("POLICY_PIPELINE_ENVIRONMENT", "production")
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/candidate-rules/rule-123/approvals",
+            headers={"Authorization": "Bearer approver-token"},
+            json={"rationale": "Citation verified by finance."},
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Authentication credentials are invalid.",
+    }
