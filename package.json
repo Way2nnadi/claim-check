@@ -1,0 +1,14 @@
+{
+	"name": "claim-check-agent",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"agent:build": "sandcastle docker build-image --image-name sandcastle:claim-check",
+		"agent:run": "tsx .sandcastle/main.mts"
+	},
+	"devDependencies": {
+		"@ai-hero/sandcastle": "latest",
+		"@types/node": "^26.0.0",
+		"tsx": "^4.19.0"
+	}
+}
