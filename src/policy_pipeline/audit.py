@@ -31,6 +31,7 @@ def record_audit_event(
     entity_type: str,
     entity_id: str,
     payload: dict[str, Any],
+    commit: bool = True,
 ) -> AuditEventRecord:
     record = AuditEventRecord(
         action=action,
@@ -41,8 +42,9 @@ def record_audit_event(
         payload=payload,
     )
     session.add(record)
-    session.commit()
-    session.refresh(record)
+    if commit:
+        session.commit()
+        session.refresh(record)
     return record
 
 

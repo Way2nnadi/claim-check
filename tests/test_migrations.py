@@ -19,3 +19,5 @@ def test_head_migration_bootstraps_postgres_and_pgvector() -> None:
     assert "CREATE EXTENSION IF NOT EXISTS vector" in sql
     assert "CREATE TABLE service_metadata" in sql
     assert "CREATE TABLE audit_events" in sql
+    assert "CREATE TABLE rules" in sql
+    assert "CREATE TABLE policy_versions" in sql

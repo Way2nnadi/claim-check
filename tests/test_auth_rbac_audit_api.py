@@ -3,8 +3,9 @@ import json
 import httpx
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base
+from policy_pipeline.database import Base, RuleRecord
 from policy_pipeline.main import create_app
 
 
@@ -34,6 +35,49 @@ def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) ->
     )
 
 
+def _seed_manual_rule(
+    database_url: str,
+    *,
+    rule_id: str,
+    lifecycle_state: str = "in_review",
+) -> None:
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            RuleRecord(
+                rule_id=rule_id,
+                origin_source_type="manual",
+                lifecycle_state=lifecycle_state,
+                payload={
+                    "rule_id": rule_id,
+                    "statement": "Entertainment spending should remain modest and in good taste.",
+                    "enforceability_class": "guidance",
+                    "lifecycle_state": lifecycle_state,
+                    "origin": {
+                        "source_type": "manual",
+                        "rationale": "Approver captured policy guidance from the document.",
+                    },
+                    "scope": {
+                        "expense_category": "entertainment",
+                        "employee_group": "all",
+                    },
+                    "citation": {
+                        "document_id": "doc-expense-policy",
+                        "document_version_id": "docv-2026-06-01",
+                        "section_id": "meals-and-entertainment#def456",
+                        "quote": "Entertainment spending should remain modest and in good taste.",
+                        "start_char": 901,
+                        "end_char": 962,
+                    },
+                    "exceptions": [],
+                },
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_event(
     monkeypatch: pytest.MonkeyPatch,
@@ -42,10 +86,7 @@ async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_e
     database_path = tmp_path / "policy-pipeline.db"
     database_url = f"sqlite+pysqlite:///{database_path}"
     _configure_local_auth(monkeypatch, database_url)
-
-    engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
-    engine.dispose()
+    _seed_manual_rule(database_url, rule_id="rule-123")
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app()),
@@ -84,6 +125,14 @@ async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_e
         ]
     }
 
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        stored_rule = session.get(RuleRecord, "rule-123")
+        assert stored_rule is not None
+        assert stored_rule.lifecycle_state == "approved"
+        assert stored_rule.payload["lifecycle_state"] == "approved"
+    engine.dispose()
+
 
 @pytest.mark.anyio
 async def test_protected_approval_requires_authenticated_identity(
@@ -93,10 +142,7 @@ async def test_protected_approval_requires_authenticated_identity(
     database_path = tmp_path / "policy-pipeline.db"
     database_url = f"sqlite+pysqlite:///{database_path}"
     _configure_local_auth(monkeypatch, database_url)
-
-    engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
-    engine.dispose()
+    _seed_manual_rule(database_url, rule_id="rule-123")
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app()),
@@ -151,10 +197,7 @@ async def test_local_auth_is_rejected_outside_local_and_test_by_default(
     database_url = f"sqlite+pysqlite:///{database_path}"
     _configure_local_auth(monkeypatch, database_url)
     monkeypatch.setenv("POLICY_PIPELINE_ENVIRONMENT", "production")
-
-    engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
-    engine.dispose()
+    _seed_manual_rule(database_url, rule_id="rule-123")
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app()),

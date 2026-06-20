@@ -114,3 +114,16 @@ class Rule(BaseModel):
                 "Guidance and subjective Rules must not include a machine-checkable condition."
             )
         return self
+
+
+class PolicyVersionSnapshot(BaseModel):
+    policy_version_id: str = Field(min_length=1)
+    change_summary: str = Field(min_length=1)
+    published_by: str = Field(min_length=1)
+    rules: list[Rule] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_snapshot(self) -> "PolicyVersionSnapshot":
+        if any(rule.lifecycle_state is not LifecycleState.PUBLISHED for rule in self.rules):
+            raise ValueError("Published Policy Version snapshots may only include published Rules.")
+        return self
