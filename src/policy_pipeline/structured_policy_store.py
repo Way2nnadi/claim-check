@@ -72,6 +72,20 @@ def get_policy_version_snapshot(
     return PolicyVersionSnapshot.model_validate(record.snapshot)
 
 
+def get_latest_policy_version_snapshot(session: Session) -> PolicyVersionSnapshot | None:
+    record = session.scalar(
+        select(PolicyVersionRecord)
+        .order_by(
+            PolicyVersionRecord.created_at.desc(),
+            PolicyVersionRecord.policy_version_id.desc(),
+        )
+        .limit(1)
+    )
+    if record is None:
+        return None
+    return PolicyVersionSnapshot.model_validate(record.snapshot)
+
+
 def _published_rule_payload(record: RuleRecord) -> dict[str, object]:
     payload = deepcopy(record.payload)
     payload["lifecycle_state"] = LifecycleState.PUBLISHED.value
