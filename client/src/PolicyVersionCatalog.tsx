@@ -454,11 +454,11 @@ export default function PolicyVersionCatalog({
       <header className="policy-version-catalog-head reveal">
         <div className="policy-version-command-deck">
           <div className="policy-version-command-copy">
-            <p className="eyebrow">Release Desk</p>
+            <p className="eyebrow">Publication Desk</p>
             <h3>Publish immutable Policy Versions from approved Rules.</h3>
             <p className="policy-version-catalog-lede">
               Cut a new snapshot with a precise identifier and a change summary
-              that explains why this release exists.
+              that explains why this Policy Version exists.
             </p>
           </div>
           <div className="policy-version-command-actions">
@@ -546,7 +546,7 @@ export default function PolicyVersionCatalog({
               </div>
               <div>
                 <dt>Outcome</dt>
-                <dd>Redirects into the new release ledger entry</dd>
+                <dd>Redirects into the new Policy Version entry</dd>
               </div>
             </dl>
 
@@ -589,7 +589,7 @@ export default function PolicyVersionCatalog({
       {status === "ready" && policyVersions.length === 0 ? (
         <div className="catalog-empty reveal">
           <h3>No published versions</h3>
-          <p>Published releases appear here.</p>
+          <p>Published Policy Versions appear here.</p>
         </div>
       ) : null}
 
@@ -616,7 +616,7 @@ export default function PolicyVersionCatalog({
                   <p className="policy-version-summary">{version.change_summary}</p>
                   <dl className="catalog-meta">
                     <div>
-                      <dt>Released</dt>
+                      <dt>Published</dt>
                       <dd>{formatPolicyVersionDate(version.created_at)}</dd>
                     </div>
                     <div>

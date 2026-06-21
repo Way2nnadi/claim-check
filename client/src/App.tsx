@@ -95,7 +95,7 @@ const shellSections: readonly ShellSection[] = [
 	{
 		id: "policy-versions",
 		label: "Policy Versions",
-		kicker: "Release Ledger",
+		kicker: "Version Ledger",
 		actions: [
 			{
 				label: "Publish Policy Version",
@@ -103,7 +103,7 @@ const shellSections: readonly ShellSection[] = [
 				unavailableBehavior: "disable",
 			},
 		],
-		ledger: ["Change summaries explain why a release exists."],
+		ledger: ["Change summaries explain why a Policy Version was published."],
 	},
 	{
 		id: "manual-rules",
