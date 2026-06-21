@@ -43,6 +43,12 @@ class StructuredOutputRejectedError(Exception):
         self.detail = detail
 
 
+class DeletedDocumentVersionError(Exception):
+    def __init__(self, document_version_id: str) -> None:
+        super().__init__(document_version_id)
+        self.document_version_id = document_version_id
+
+
 class ExtractionExecutionResult(BaseModel):
     extraction_run_id: str
     document_version_id: str
@@ -122,6 +128,8 @@ def execute_extraction_run(
     )
     if document_version is None:
         raise UnknownDocumentVersionError(document_version_id)
+    if document_version.deleted_at is not None:
+        raise DeletedDocumentVersionError(document_version_id)
 
     prompt_template = get_prompt_template(
         session,
@@ -184,7 +192,6 @@ def execute_extraction_run(
 
         for rule in candidate_rules:
             create_rule(session, rule=rule, commit=False)
-        session.commit()
         return ExtractionExecutionResult(
             extraction_run_id=extraction_run.extraction_run_id,
             document_version_id=extraction_run.document_version_id,
@@ -196,7 +203,6 @@ def execute_extraction_run(
             candidate_rules=candidate_rules,
         )
 
-    session.commit()
     raise StructuredOutputRejectedError(attempts=max_attempts, detail=last_error)
 
 

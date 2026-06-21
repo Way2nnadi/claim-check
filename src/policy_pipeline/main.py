@@ -36,6 +36,7 @@ from policy_pipeline.extraction_registry import (
     UnknownPromptTemplateVersionError,
 )
 from policy_pipeline.extraction_runs import (
+    DeletedDocumentVersionError,
     ExtractionExecutionResult,
     StructuredOutputRejectedError,
     execute_extraction_run,
@@ -338,9 +339,8 @@ def create_app() -> FastAPI:
         ],
         session: Annotated[Session, Depends(get_session)],
     ) -> ExtractionExecutionResult:
-        del principal
         try:
-            return execute_extraction_run(
+            result = execute_extraction_run(
                 session,
                 extraction_run_id=request.extraction_run_id,
                 document_id=document_id,
@@ -350,6 +350,27 @@ def create_app() -> FastAPI:
                 model_configuration_id=request.model_configuration_id,
                 model_configuration_version=request.model_configuration_version,
             )
+            record_audit_event(
+                session,
+                action="extraction_run.created",
+                actor_subject=principal.subject,
+                actor_roles=[role.value for role in principal.roles],
+                entity_type="extraction_run",
+                entity_id=result.extraction_run_id,
+                payload={
+                    "document_id": document_id,
+                    "document_version_id": result.document_version_id,
+                    "prompt_template_id": result.prompt_template_id,
+                    "prompt_template_version": result.prompt_template_version,
+                    "model_configuration_id": result.model_configuration_id,
+                    "model_configuration_version": result.model_configuration_version,
+                    "attempt_count": result.attempt_count,
+                    "candidate_rule_count": len(result.candidate_rules),
+                },
+                commit=False,
+            )
+            session.commit()
+            return result
         except ExtractionRunConflictError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -359,6 +380,11 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Document Version was not found.",
+            ) from exc
+        except DeletedDocumentVersionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Document Version has been deleted.",
             ) from exc
         except UnknownPromptTemplateVersionError as exc:
             raise HTTPException(
@@ -371,6 +397,7 @@ def create_app() -> FastAPI:
                 detail="Model Configuration version was not found.",
             ) from exc
         except StructuredOutputRejectedError as exc:
+            session.commit()
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(

@@ -195,9 +195,18 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
                 "model_configuration_version": "v1",
             },
         )
+        audit_response = await client.get(
+            "/audit-events",
+            headers={"Authorization": "Bearer viewer-token"},
+            params={
+                "entity_type": "extraction_run",
+                "entity_id": "extract-expense-policy-v1",
+            },
+        )
 
     assert upload_response.status_code == 201
     assert extraction_response.status_code == 201
+    assert audit_response.status_code == 200
     response_body = extraction_response.json()
     assert response_body["extraction_run_id"] == "extract-expense-policy-v1"
     assert response_body["document_version_id"] == document_version_id
@@ -281,6 +290,27 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
     second_citation = response_body["candidate_rules"][1]["citation"]
     assert first_citation["end_char"] > first_citation["start_char"]
     assert second_citation["end_char"] > second_citation["start_char"]
+    assert audit_response.json() == {
+        "items": [
+            {
+                "action": "extraction_run.created",
+                "actor_subject": "admin-user",
+                "actor_roles": ["admin"],
+                "entity_type": "extraction_run",
+                "entity_id": "extract-expense-policy-v1",
+                "payload": {
+                    "document_id": "expense-policy",
+                    "document_version_id": document_version_id,
+                    "prompt_template_id": "rule-extraction",
+                    "prompt_template_version": "v1",
+                    "model_configuration_id": "fake-openai",
+                    "model_configuration_version": "v1",
+                    "attempt_count": 1,
+                    "candidate_rule_count": 2,
+                },
+            }
+        ]
+    }
 
     engine = create_engine(database_url)
     with Session(engine) as session:
@@ -516,3 +546,86 @@ async def test_extraction_run_rejects_unresolvable_citations_after_attempt_limit
     assert extraction_run is not None
     assert extraction_run.document_version_id == document_version_id
     assert stored_rules == []
+
+
+@pytest.mark.anyio
+async def test_extraction_run_rejects_deleted_document_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        save_prompt_template(
+            session,
+            prompt_template_id="rule-extraction",
+            version="v1",
+            template="Extract candidate Rules from the Policy Document.",
+        )
+        save_model_configuration(
+            session,
+            model_configuration_id="fake-openai",
+            version="v1",
+            model="gpt-5-mini",
+            endpoint="https://fake-openai.local/v1/chat/completions",
+            settings={"fake_structured_outputs": []},
+        )
+    engine.dispose()
+
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        document_version_id = upload_response.json()["document_version_id"]
+        delete_response = await client.request(
+            "DELETE",
+            f"/policy-documents/expense-policy/versions/{document_version_id}",
+            headers={"Authorization": "Bearer admin-token"},
+            json={"reason": "Retention policy satisfied."},
+        )
+        extraction_response = await client.post(
+            f"/policy-documents/expense-policy/versions/{document_version_id}/extraction-runs",
+            headers={"Authorization": "Bearer admin-token"},
+            json={
+                "extraction_run_id": "extract-expense-policy-v4",
+                "prompt_template_id": "rule-extraction",
+                "prompt_template_version": "v1",
+                "model_configuration_id": "fake-openai",
+                "model_configuration_version": "v1",
+            },
+        )
+
+    assert upload_response.status_code == 201
+    assert delete_response.status_code == 200
+    assert extraction_response.status_code == 410
+    assert extraction_response.json() == {"detail": "Document Version has been deleted."}
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        extraction_run = session.get(ExtractionRunRecord, "extract-expense-policy-v4")
+    engine.dispose()
+
+    assert extraction_run is None
