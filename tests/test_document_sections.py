@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from policy_pipeline.database import Base, DocumentVersionRecord
 from policy_pipeline.documents import (
+    DocumentQualityGateRejectedError,
     create_document_version,
     list_document_sections,
     resolve_citation_anchor,
@@ -450,3 +451,47 @@ def test_docx_document_version_persists_quality_gate_results_and_table_metadata(
             }
         ],
     }
+
+
+def test_malformed_pdf_document_version_is_rejected_by_quality_gate() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        try:
+            create_document_version(
+                session,
+                document_id="expense-policy",
+                filename="expense-policy.pdf",
+                content_type="application/pdf",
+                document_bytes=b"not a pdf",
+            )
+        except DocumentQualityGateRejectedError as exc:
+            assert str(exc) == (
+                "Malformed PDF files are not supported because the file could not be parsed."
+            )
+        else:
+            raise AssertionError("Expected malformed PDF upload to be rejected.")
+
+
+def test_malformed_docx_document_version_is_rejected_by_quality_gate() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        try:
+            create_document_version(
+                session,
+                document_id="expense-policy",
+                filename="expense-policy.docx",
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
+                document_bytes=b"not a docx archive",
+            )
+        except DocumentQualityGateRejectedError as exc:
+            assert str(exc) == (
+                "Malformed DOCX files are not supported because the file could not be parsed."
+            )
+        else:
+            raise AssertionError("Expected malformed DOCX upload to be rejected.")

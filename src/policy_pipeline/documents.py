@@ -41,6 +41,12 @@ _EMBEDDING_WARNING = (
 _IMAGE_ONLY_PDF_REASON = (
     "Image-only PDFs are not supported because no extractable text was found."
 )
+_MALFORMED_PDF_REASON = (
+    "Malformed PDF files are not supported because the file could not be parsed."
+)
+_MALFORMED_DOCX_REASON = (
+    "Malformed DOCX files are not supported because the file could not be parsed."
+)
 
 
 @dataclass(frozen=True)
@@ -298,7 +304,10 @@ def _analyze_pdf_document(document_bytes: bytes) -> _DocumentAnalysis:
     except (PdfReadError, PdfStreamError):
         return _DocumentAnalysis(
             sections=[],
-            quality_gate=_quality_gate_result(),
+            quality_gate=_quality_gate_result(
+                status="rejected",
+                rejection_reason=_MALFORMED_PDF_REASON,
+            ),
             table_extraction=_table_extraction_result(),
         )
 
@@ -423,7 +432,10 @@ def _analyze_docx_document(document_bytes: bytes) -> _DocumentAnalysis:
     except (BadZipFile, ElementTree.ParseError, KeyError):
         return _DocumentAnalysis(
             sections=[],
-            quality_gate=_quality_gate_result(),
+            quality_gate=_quality_gate_result(
+                status="rejected",
+                rejection_reason=_MALFORMED_DOCX_REASON,
+            ),
             table_extraction=_table_extraction_result(),
         )
 

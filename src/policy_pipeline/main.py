@@ -407,7 +407,7 @@ def create_app() -> FastAPI:
             ) from exc
         except NoApprovedRulesError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Policy Version requires at least one approved Rule.",
             ) from exc
 
