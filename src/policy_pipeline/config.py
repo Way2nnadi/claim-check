@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     environment: str = "local"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/policy_pipeline"
     object_storage_root: str = ".policy-pipeline/object-storage"
+    object_storage_encryption_at_rest_required: bool = True
+    object_storage_server_side_encryption_algorithm: str = "AES256"
+    object_storage_kms_key_id: str | None = None
     local_auth_enabled: bool | None = None
     local_auth_identities: tuple[LocalIdentitySettings, ...] = (
         LocalIdentitySettings(

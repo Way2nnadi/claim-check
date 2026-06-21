@@ -1,7 +1,18 @@
 import re
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile, status
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -13,6 +24,7 @@ from policy_pipeline.database import get_session
 from policy_pipeline.documents import (
     DocumentVersion,
     create_document_version,
+    document_version_from_record,
     get_document_version,
     validate_upload_file,
 )
@@ -49,6 +61,25 @@ def _snapshot_filename(policy_version_id: str) -> str:
     return f"{safe_stem}.json"
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _serialize_datetime(value: datetime | None) -> str | None:
+    normalized = _as_utc(value)
+    if normalized is None:
+        return None
+    return normalized.isoformat().replace("+00:00", "Z")
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.service_name)
@@ -62,12 +93,21 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/config")
-    def config_smoke() -> dict[str, str | dict[str, str]]:
+    def config_smoke() -> dict[str, str | dict[str, str | bool | None]]:
         return {
             "service": settings.service_name,
             "environment": settings.environment,
             "database": {
                 "driver": settings.database.driver,
+            },
+            "object_storage": {
+                "encryption_at_rest_required": (
+                    settings.object_storage_encryption_at_rest_required
+                ),
+                "server_side_encryption_algorithm": (
+                    settings.object_storage_server_side_encryption_algorithm
+                ),
+                "kms_key_id": settings.object_storage_kms_key_id,
             },
         }
 
@@ -100,6 +140,9 @@ def create_app() -> FastAPI:
         status: str
         published_by: str
 
+    class DocumentVersionDeletionRequest(BaseModel):
+        reason: str = Field(min_length=1, max_length=500)
+
     @app.post(
         "/policy-documents/{document_id}/versions",
         response_model=DocumentVersion,
@@ -113,6 +156,8 @@ def create_app() -> FastAPI:
             Depends(require_roles(Role.ADMIN)),
         ],
         session: Annotated[Session, Depends(get_session)],
+        retention_until: Annotated[datetime | None, Form()] = None,
+        retention_reason: Annotated[str | None, Form(max_length=500)] = None,
     ) -> DocumentVersion:
         filename, content_type = validate_upload_file(file)
         document_bytes = await file.read()
@@ -122,6 +167,8 @@ def create_app() -> FastAPI:
             filename=filename,
             content_type=content_type,
             document_bytes=document_bytes,
+            retention_until=retention_until,
+            retention_reason=retention_reason,
             commit=False,
         )
         record_audit_event(
@@ -137,6 +184,8 @@ def create_app() -> FastAPI:
                 "content_type": document_version.content_type,
                 "size_bytes": document_version.size_bytes,
                 "sha256": document_version.sha256,
+                "retention_until": _serialize_datetime(document_version.retention_until),
+                "retention_reason": document_version.retention_reason,
             },
             commit=False,
         )
@@ -160,6 +209,11 @@ def create_app() -> FastAPI:
         )
         if record is None:
             return Response(status_code=status.HTTP_404_NOT_FOUND)
+        if record.deleted_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Document Version has been deleted.",
+            )
 
         document_bytes = get_object_storage().get_bytes(key=record.storage_key)
         record_audit_event(
@@ -181,6 +235,68 @@ def create_app() -> FastAPI:
             media_type=record.content_type,
             headers={"Content-Disposition": f'attachment; filename="{record.filename}"'},
         )
+
+    @app.delete(
+        "/policy-documents/{document_id}/versions/{document_version_id}",
+        response_model=DocumentVersion,
+    )
+    def delete_policy_document_version(
+        document_id: str,
+        document_version_id: str,
+        deletion: Annotated[DocumentVersionDeletionRequest, Body()],
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> DocumentVersion:
+        record = get_document_version(
+            session,
+            document_id=document_id,
+            document_version_id=document_version_id,
+        )
+        if record is None:
+            return Response(status_code=status.HTTP_404_NOT_FOUND)
+        if record.deleted_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document Version has already been deleted.",
+            )
+        retention_until = _as_utc(record.retention_until)
+        if retention_until is not None and retention_until > _utc_now():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Document Version is retained until "
+                    f"{_serialize_datetime(retention_until)} "
+                    "and cannot be deleted yet."
+                ),
+            )
+
+        record.deleted_at = _utc_now()
+        record.deleted_by = principal.subject
+        record.deletion_reason = deletion.reason
+        session.flush()
+        record_audit_event(
+            session,
+            action="document_version.deleted",
+            actor_subject=principal.subject,
+            actor_roles=[role.value for role in principal.roles],
+            entity_type="document_version",
+            entity_id=record.document_version_id,
+            payload={
+                "document_id": record.document_id,
+                "filename": record.filename,
+                "retention_until": _serialize_datetime(retention_until),
+                "deleted_at": _serialize_datetime(record.deleted_at),
+                "reason": deletion.reason,
+            },
+            commit=False,
+        )
+        session.commit()
+        # Persist the tombstone and audit trail before removing the source bytes.
+        get_object_storage().delete_bytes(key=record.storage_key)
+        return document_version_from_record(record)
 
     @app.post(
         "/candidate-rules/{candidate_rule_id}/approvals",

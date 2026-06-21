@@ -55,6 +55,11 @@ class DocumentVersionRecord(Base):
     storage_key: Mapped[str] = mapped_column(sa.String(length=500), nullable=False, unique=True)
     size_bytes: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
     sha256: Mapped[str] = mapped_column(sa.String(length=64), nullable=False)
+    retention_until: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    retention_reason: Mapped[str | None] = mapped_column(sa.String(length=500))
+    deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    deleted_by: Mapped[str | None] = mapped_column(sa.String(length=120))
+    deletion_reason: Mapped[str | None] = mapped_column(sa.String(length=500))
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
         nullable=False,

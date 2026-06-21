@@ -6,8 +6,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0006_add_document_sections_table"
-down_revision = "0005_add_policy_versions_table"
+revision = "0007_add_document_sections_table"
+down_revision = "0006_add_document_retention_and_deletion_fields"
 branch_labels = None
 depends_on = None
 
