@@ -133,6 +133,11 @@ def execute_extraction_run(
             f"{model_configuration_id}@{model_configuration_version}"
         )
 
+    runtime_settings = settings or get_settings()
+    client = llm_client or build_llm_client(
+        settings=runtime_settings,
+        model_configuration=model_configuration,
+    )
     extraction_run = create_extraction_run(
         session,
         extraction_run_id=extraction_run_id,
@@ -149,11 +154,6 @@ def execute_extraction_run(
         document_version_id=document_version_id,
     )
     document_text = "\n\n".join(section.content for section in sections)
-    runtime_settings = settings or get_settings()
-    client = llm_client or build_llm_client(
-        settings=runtime_settings,
-        model_configuration=model_configuration,
-    )
     max_attempts = _max_validation_attempts(model_configuration=model_configuration)
     last_error = "Structured extraction output did not pass validation."
 
@@ -190,6 +190,8 @@ def execute_extraction_run(
         )
 
     raise StructuredOutputRejectedError(attempts=max_attempts, detail=last_error)
+
+
 def _max_validation_attempts(*, model_configuration: ModelConfiguration) -> int:
     raw_value = model_configuration.settings.get("max_validation_attempts", 2)
     if not isinstance(raw_value, int) or raw_value < 1:
