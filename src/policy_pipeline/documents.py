@@ -562,6 +562,10 @@ class DocumentVersionListResponse(BaseModel):
     items: list[DocumentVersion]
 
 
+class DocumentSectionListResponse(BaseModel):
+    items: list[DocumentSection]
+
+
 class PolicyDocumentSummary(BaseModel):
     document_id: str
     latest_document_version_id: str

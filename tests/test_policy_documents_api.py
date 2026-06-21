@@ -352,6 +352,80 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
 
 
 @pytest.mark.anyio
+async def test_viewer_lists_parsed_sections_for_uploaded_document_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+            ("Lodging", 18),
+            ("Hotel stays require itemized receipts.", 12),
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        assert upload_response.status_code == 201
+        document_version_id = upload_response.json()["document_version_id"]
+
+        sections_response = await client.get(
+            f"/policy-documents/expense-policy/versions/{document_version_id}/sections",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+        missing_response = await client.get(
+            "/policy-documents/expense-policy/versions/docv-missing/sections",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {"detail": "Document Version was not found."}
+
+    assert sections_response.status_code == 200
+    payload = sections_response.json()
+    assert len(payload["items"]) == 2
+
+    first_section = payload["items"][0]
+    second_section = payload["items"][1]
+
+    assert first_section["document_id"] == "expense-policy"
+    assert first_section["document_version_id"] == document_version_id
+    assert first_section["heading_path"] == ["Travel Policy"]
+    assert first_section["content"] == "Travel Policy\nMeals are capped at $75 per day."
+    assert first_section["start_char"] == 0
+    assert first_section["end_char"] == len(first_section["content"])
+    assert first_section["section_id"]
+
+    assert second_section["heading_path"] == ["Lodging"]
+    assert second_section["content"] == "Lodging\nHotel stays require itemized receipts."
+    assert second_section["start_char"] > first_section["end_char"]
+    assert second_section["section_id"] != first_section["section_id"]
+
+
+@pytest.mark.anyio
 async def test_upload_rejects_image_only_pdf_with_clear_reason(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

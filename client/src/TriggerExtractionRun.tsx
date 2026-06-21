@@ -87,18 +87,18 @@ export default function TriggerExtractionRun({
 
     const trimmedRunId = extractionRunId.trim();
     if (!trimmedRunId) {
-      setTriggerError("Enter an Extraction Run id before commissioning.");
+      setTriggerError("Enter a run id.");
       return;
     }
 
     const prompt = parseRegistrySelection(promptSelection);
     const model = parseRegistrySelection(modelSelection);
     if (!prompt) {
-      setTriggerError("Select a Prompt Template version.");
+      setTriggerError("Select a prompt.");
       return;
     }
     if (!model) {
-      setTriggerError("Select a Model Configuration version.");
+      setTriggerError("Select a model.");
       return;
     }
 
@@ -115,7 +115,7 @@ export default function TriggerExtractionRun({
         model_configuration_version: model.version,
       });
       setTriggerSuccess(
-        `Commissioned ${result.extraction_run_id} — ${result.candidate_rules.length} Candidate Rule${result.candidate_rules.length === 1 ? "" : "s"} extracted after ${result.attempt_count} attempt${result.attempt_count === 1 ? "" : "s"}.`,
+        `${result.candidate_rules.length} rule${result.candidate_rules.length === 1 ? "" : "s"} extracted.`,
       );
       setExtractionRunId(defaultExtractionRunId(documentVersionId));
       onCompleted();
@@ -134,18 +134,13 @@ export default function TriggerExtractionRun({
   return (
     <section className="extraction-trigger reveal" aria-labelledby={`trigger-${documentVersionId}`}>
       <div className="extraction-trigger-head">
-        <span className="folio">Extraction module</span>
-        <h5 id={`trigger-${documentVersionId}`}>Commission an Extraction Run</h5>
-        <p>
-          Pin a Prompt Template and Model Configuration, then extract Candidate Rules from this
-          Document Version.
-        </p>
+        <h5 id={`trigger-${documentVersionId}`}>Extract rules</h5>
       </div>
 
       {registryStatus === "loading" ? (
         <p className="catalog-status compact">
           <span className="catalog-status-rule" aria-hidden="true" />
-          Loading registry pins…
+          Loading…
         </p>
       ) : null}
 
@@ -157,15 +152,14 @@ export default function TriggerExtractionRun({
 
       {registryEmpty ? (
         <p className="extraction-trigger-empty">
-          No Prompt Templates or Model Configurations are registered. Seed the extraction registry
-          before commissioning a run.
+          No prompts or models registered yet.
         </p>
       ) : null}
 
       {registryStatus === "ready" && !registryEmpty ? (
         <form className="extraction-trigger-form" onSubmit={(event) => void handleSubmit(event)}>
           <label htmlFor={`extraction-run-id-${documentVersionId}`}>
-            Extraction Run id
+            Run id
             <input
               id={`extraction-run-id-${documentVersionId}`}
               name="extraction-run-id"
@@ -181,7 +175,7 @@ export default function TriggerExtractionRun({
           </label>
 
           <RegistryPicker
-            label="Prompt Template"
+            label="Prompt"
             value={promptSelection}
             disabled={isSubmitting}
             isOpen={openPicker === "prompt"}
@@ -194,12 +188,11 @@ export default function TriggerExtractionRun({
             options={promptTemplates.map((template) => ({
               value: formatRegistrySelection(template.prompt_template_id, template.version),
               primary: formatPinningLabel(template.prompt_template_id, template.version),
-              secondary: template.description,
             }))}
           />
 
           <RegistryPicker
-            label="Model Configuration"
+            label="Model"
             value={modelSelection}
             disabled={isSubmitting}
             isOpen={openPicker === "model"}
@@ -218,13 +211,12 @@ export default function TriggerExtractionRun({
                 configuration.model_configuration_id,
                 configuration.version,
               ),
-              secondary: configuration.model,
             }))}
           />
 
           <div className="extraction-trigger-actions">
             <button type="submit" className="extraction-trigger-submit" disabled={isSubmitting}>
-              {isSubmitting ? "Extracting…" : "Commission extraction"}
+              {isSubmitting ? "Extracting…" : "Extract"}
             </button>
           </div>
         </form>

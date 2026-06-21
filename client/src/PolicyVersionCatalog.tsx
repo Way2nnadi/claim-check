@@ -14,7 +14,6 @@ import {
   formatPolicyVersionDate,
   formatRuleCount,
   latestPolicyVersionId,
-  policyVersionClearanceBlurb,
   summarizeApplicability,
   summarizeRuleScope,
 } from "./policyVersionFormat";
@@ -158,7 +157,7 @@ function PolicyVersionDetail({
       <div className="catalog-stage">
         <p className="catalog-status">
           <span className="catalog-status-rule" aria-hidden="true" />
-          Retrieving immutable snapshot…
+          Loading…
         </p>
       </div>
     );
@@ -168,13 +167,12 @@ function PolicyVersionDetail({
     return (
       <div className="policy-version-detail">
         <button type="button" className="detail-back" onClick={onBack}>
-          ← Back to Policy Versions
+          ← Versions
         </button>
         <section className="document-not-found">
-          <span className="folio">Release ledger · missing node</span>
-          <h4>Policy Version not found</h4>
+          <h4>Version not found</h4>
           <p>
-            The published snapshot <code>{policyVersionId}</code> could not be resolved.
+            No snapshot exists for <code>{policyVersionId}</code>.
           </p>
         </section>
       </div>
@@ -185,7 +183,7 @@ function PolicyVersionDetail({
     return (
       <div className="policy-version-detail">
         <button type="button" className="detail-back" onClick={onBack}>
-          ← Back to Policy Versions
+          ← Versions
         </button>
         <p className="error-banner">{errorMessage}</p>
       </div>
@@ -196,11 +194,10 @@ function PolicyVersionDetail({
     <div className="policy-version-detail content-enter">
       <header className="policy-version-detail-head">
         <button type="button" className="detail-back" onClick={onBack}>
-          ← Back to Policy Versions
+          ← Versions
         </button>
         <div className="policy-version-detail-head-row">
           <div className="policy-version-detail-intro">
-            <span className="folio">Published release · immutable</span>
             <h3>{snapshot.policy_version_id}</h3>
             <p className="policy-version-detail-lede">{snapshot.change_summary}</p>
           </div>
@@ -211,30 +208,22 @@ function PolicyVersionDetail({
               onClick={() => void handleDownload()}
               disabled={isDownloading}
             >
-              {isDownloading ? "Exporting…" : "Export JSON snapshot"}
+              {isDownloading ? "Exporting…" : "Export JSON"}
             </button>
           </div>
         </div>
         <div className="policy-version-detail-badges">
           <span className="version-badge">{formatRuleCount(snapshot.rules.length)}</span>
-          <span className="version-badge muted">Published by {snapshot.published_by}</span>
+          <span className="version-badge muted">{snapshot.published_by}</span>
         </div>
         {downloadError ? <p className="error-banner">{downloadError}</p> : null}
       </header>
 
       <section className="policy-version-rule-stage reveal">
-        <div className="policy-version-rule-stage-head">
-          <h4>Rule snapshot</h4>
-          <p>
-            Published Rules stay frozen in this Policy Version so downstream systems can pin
-            to a reproducible snapshot.
-          </p>
-        </div>
+        <h4 className="policy-version-rule-stage-head">Rules</h4>
 
         {snapshot.rules.length === 0 ? (
-          <p className="review-detail-empty">
-            This Policy Version contains no published Rules.
-          </p>
+          <p className="review-detail-empty">No rules in this version.</p>
         ) : (
           <ul className="policy-rule-stack" aria-label="Published Rule snapshot">
             {snapshot.rules.map((rule, index) => {
@@ -345,23 +334,13 @@ export default function PolicyVersionCatalog({
   }
 
   const latestId = latestPolicyVersionId(policyVersions);
-  const primaryRole = principal.roles[0] ?? "viewer";
 
   return (
     <div className="policy-version-catalog content-enter">
-      <header className="policy-version-catalog-head reveal">
-        <span className="folio">Release ledger · published</span>
-        <p className="policy-version-catalog-lede">
-          Browse published Policy Versions, inspect the frozen Rule snapshot, and export the
-          attachment that downstream systems pin to for reproducible runs.
-        </p>
-        <p className="policy-version-clearance">{policyVersionClearanceBlurb(primaryRole)}</p>
-      </header>
-
       {status === "loading" ? (
         <p className="catalog-status">
           <span className="catalog-status-rule" aria-hidden="true" />
-          Consulting the release ledger…
+          Loading…
         </p>
       ) : null}
 
@@ -369,26 +348,17 @@ export default function PolicyVersionCatalog({
 
       {status === "ready" && policyVersions.length === 0 ? (
         <div className="catalog-empty reveal">
-          <span className="folio">Release ledger · null set</span>
-          <h3>No published Policy Versions</h3>
-          <p>
-            Once approved Rules are published, immutable Policy Versions will appear here for
-            browse and export.
-          </p>
+          <h3>No published versions</h3>
+          <p>Published releases appear here.</p>
         </div>
       ) : null}
 
       {status === "ready" && policyVersions.length > 0 ? (
         <>
-          <div className="catalog-header">
-            <p className="catalog-count">
-              <span className="folio">{policyVersions.length} published</span>
-            </p>
-            <p className="catalog-status">
-              <span className="catalog-status-rule" aria-hidden="true" />
-              Latest snapshot: {latestId}
-            </p>
-          </div>
+          <p className="catalog-scope">
+            {policyVersions.length} published
+            {latestId ? ` · latest ${latestId}` : ""}
+          </p>
 
           <ul className="catalog-grid" aria-label="Published Policy Version catalog">
             {policyVersions.map((version, index) => (
@@ -401,21 +371,16 @@ export default function PolicyVersionCatalog({
                   onClick={() => setSelectedPolicyVersionId(version.policy_version_id)}
                 >
                   <div className="catalog-folio-head">
-                    <p className="catalog-slug">Policy Version</p>
                     <h3>{version.policy_version_id}</h3>
                   </div>
                   <p className="policy-version-summary">{version.change_summary}</p>
                   <dl className="catalog-meta">
                     <div>
-                      <dt>Published by</dt>
-                      <dd>{version.published_by}</dd>
-                    </div>
-                    <div>
                       <dt>Released</dt>
                       <dd>{formatPolicyVersionDate(version.created_at)}</dd>
                     </div>
                     <div>
-                      <dt>Contents</dt>
+                      <dt>Rules</dt>
                       <dd>{formatRuleCount(version.rule_count)}</dd>
                     </div>
                   </dl>
@@ -428,12 +393,9 @@ export default function PolicyVersionCatalog({
                       }
                       aria-hidden={version.policy_version_id !== latestId}
                     >
-                      Latest published snapshot
+                      Latest
                     </p>
-                    <div className="policy-version-folio-foot">
-                      <span className="version-badge">{formatRuleCount(version.rule_count)}</span>
-                      <p className="catalog-open-hint">Inspect snapshot →</p>
-                    </div>
+                    <p className="catalog-open-hint">Open →</p>
                   </div>
                 </button>
               </li>

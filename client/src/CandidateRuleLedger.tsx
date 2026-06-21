@@ -12,22 +12,26 @@ interface CandidateRuleLedgerProps {
   reviews: CandidateRuleReview[];
   onOpenReview: (candidateRuleId: string) => void;
   emptyMessage?: string;
+  showEmptyHint?: boolean;
 }
 
 export default function CandidateRuleLedger({
   reviews,
   onOpenReview,
   emptyMessage = "No Candidate Rules are waiting in this queue.",
+  showEmptyHint = true,
 }: CandidateRuleLedgerProps) {
   if (reviews.length === 0) {
     return (
       <div className="review-empty reveal">
         <span className="folio">Approval desk · clear</span>
         <p>{emptyMessage}</p>
-        <p className="review-empty-hint">
-          Extracted Rules appear here after an Extraction Run completes. Adjust filters if you
-          expected to see pending work.
-        </p>
+        {showEmptyHint ? (
+          <p className="review-empty-hint">
+            Extracted Rules appear here after an Extraction Run completes. Adjust filters if you
+            expected to see pending work.
+          </p>
+        ) : null}
       </div>
     );
   }

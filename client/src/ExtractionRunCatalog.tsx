@@ -8,13 +8,41 @@ import type { ExtractionRun, ExtractionRunFilters, PolicyDocumentSummary } from 
 
 type CatalogStatus = "loading" | "ready" | "error";
 
+interface ScopeFilters {
+  documentId: string;
+  documentVersionId: string;
+}
+
+function countScopeFilters(filters: ExtractionRunFilters): number {
+  return (
+    Number(Boolean(filters.documentId)) + Number(Boolean(filters.documentVersionId))
+  );
+}
+
+function buildFilters(scope: ScopeFilters): ExtractionRunFilters {
+  const filters: ExtractionRunFilters = {};
+  const trimmedDocumentId = scope.documentId.trim();
+  const trimmedVersionId = scope.documentVersionId.trim();
+
+  if (trimmedDocumentId) {
+    filters.documentId = trimmedDocumentId;
+  }
+  if (trimmedVersionId) {
+    filters.documentVersionId = trimmedVersionId;
+  }
+
+  return filters;
+}
+
 export default function ExtractionRunCatalog() {
   const [status, setStatus] = useState<CatalogStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
   const [runs, setRuns] = useState<ExtractionRun[]>([]);
-  const [documentFilter, setDocumentFilter] = useState("");
-  const [versionFilter, setVersionFilter] = useState("");
+  const [scopeDraft, setScopeDraft] = useState<ScopeFilters>({
+    documentId: "",
+    documentVersionId: "",
+  });
   const [appliedFilters, setAppliedFilters] = useState<ExtractionRunFilters>({});
 
   const loadRuns = useCallback(async (filters: ExtractionRunFilters): Promise<void> => {
@@ -36,82 +64,72 @@ export default function ExtractionRunCatalog() {
   }, []);
 
   useEffect(() => {
-    void loadRuns({});
-  }, [loadRuns]);
+    void loadRuns(appliedFilters);
+  }, [appliedFilters, loadRuns]);
 
-  function handleFilterSubmit(event: FormEvent<HTMLFormElement>): void {
+  function handleScopeSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    const nextFilters: ExtractionRunFilters = {};
-    const trimmedDocumentId = documentFilter.trim();
-    const trimmedVersionId = versionFilter.trim();
-    if (trimmedDocumentId) {
-      nextFilters.documentId = trimmedDocumentId;
-    }
-    if (trimmedVersionId) {
-      nextFilters.documentVersionId = trimmedVersionId;
-    }
-    setAppliedFilters(nextFilters);
-    void loadRuns(nextFilters);
+    setAppliedFilters(buildFilters(scopeDraft));
   }
 
-  function handleClearFilters(): void {
-    setDocumentFilter("");
-    setVersionFilter("");
+  function handleClearScope(): void {
+    const clearedScope: ScopeFilters = { documentId: "", documentVersionId: "" };
+    setScopeDraft(clearedScope);
     setAppliedFilters({});
-    void loadRuns({});
   }
 
-  const activeFilterCount =
-    Number(Boolean(appliedFilters.documentId)) + Number(Boolean(appliedFilters.documentVersionId));
+  const scopeFilterCount = countScopeFilters(appliedFilters);
+  const scopeActiveInDraft =
+    Boolean(scopeDraft.documentId.trim()) || Boolean(scopeDraft.documentVersionId.trim());
 
   return (
-    <div className="extraction-catalog content-enter">
-      <header className="extraction-catalog-head reveal">
-        <span className="folio">Extraction log · archive</span>
-        <p className="extraction-catalog-lede">
-          Each run records the document version, prompt, and model used. Failed runs include error
-          details.
-        </p>
-      </header>
-
-      <form className="extraction-filter reveal" onSubmit={handleFilterSubmit}>
-        <div className="extraction-filter-grid">
-          <DocumentFilterPicker
-            value={documentFilter}
-            documents={documents}
-            onChange={setDocumentFilter}
-          />
-          <label htmlFor="extraction-filter-version">
-            Document version id
-            <input
-              id="extraction-filter-version"
-              name="extraction-filter-version"
-              value={versionFilter}
-              placeholder="docv-…"
-              spellCheck={false}
-              onChange={(event) => setVersionFilter(event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="extraction-filter-actions">
-          <button type="submit" className="extraction-filter-apply">
-            Apply filters
-          </button>
-          <button
-            type="button"
-            className="extraction-filter-clear"
-            disabled={activeFilterCount === 0 && !documentFilter && !versionFilter}
-            onClick={handleClearFilters}
-          >
-            Clear
-          </button>
-          {activeFilterCount > 0 ? (
-            <p className="extraction-filter-active">
-              {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active
-            </p>
+    <div className="catalog-page content-enter">
+      <details className="review-scope-panel">
+        <summary>
+          Scope filters
+          {scopeFilterCount > 0 ? (
+            <span className="review-scope-panel-badge">{scopeFilterCount} active</span>
           ) : null}
-        </div>
-      </form>
+        </summary>
+        <form className="review-scope-form" onSubmit={handleScopeSubmit}>
+          <div className="review-filter-grid">
+            <DocumentFilterPicker
+              value={scopeDraft.documentId}
+              documents={documents}
+              onChange={(value) => setScopeDraft((current) => ({ ...current, documentId: value }))}
+            />
+            <label htmlFor="extraction-filter-version">
+              Document version id
+              <input
+                id="extraction-filter-version"
+                name="extraction-filter-version"
+                value={scopeDraft.documentVersionId}
+                placeholder="docv-…"
+                spellCheck={false}
+                onChange={(event) =>
+                  setScopeDraft((current) => ({
+                    ...current,
+                    documentVersionId: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          </div>
+          <div className="review-filter-actions">
+            <button type="submit" className="review-filter-apply">
+              Apply scope
+            </button>
+            <button
+              type="button"
+              className="review-filter-clear"
+              disabled={scopeFilterCount === 0 && !scopeActiveInDraft}
+              onClick={handleClearScope}
+            >
+              Clear scope
+            </button>
+          </div>
+        </form>
+      </details>
 
       {status === "loading" ? (
         <p className="catalog-status">
@@ -124,8 +142,8 @@ export default function ExtractionRunCatalog() {
 
       {status === "ready" ? (
         <>
-          {activeFilterCount > 0 ? (
-            <p className="extraction-catalog-scope">
+          {scopeFilterCount > 0 ? (
+            <p className="catalog-scope">
               {appliedFilters.documentId ? appliedFilters.documentId : null}
               {appliedFilters.documentId && appliedFilters.documentVersionId ? " · " : null}
               {appliedFilters.documentVersionId ? appliedFilters.documentVersionId : null}
@@ -135,7 +153,7 @@ export default function ExtractionRunCatalog() {
             runs={runs}
             showDocumentContext
             emptyMessage={
-              activeFilterCount > 0
+              scopeFilterCount > 0
                 ? "No Extraction Runs match the current filters."
                 : "No Extraction Runs have been recorded yet."
             }

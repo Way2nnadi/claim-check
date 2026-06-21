@@ -3,6 +3,7 @@ import type {
   CandidateRuleFilters,
   CandidateRuleReview,
   CandidateRuleReviewListResponse,
+  DocumentSectionListResponse,
   DocumentVersion,
   DocumentVersionListResponse,
   ExtractionExecutionResult,
@@ -223,6 +224,15 @@ export function fetchDocumentVersionExtractionRuns(
 ): Promise<ExtractionRunListResponse> {
   return apiRequest<ExtractionRunListResponse>(
     `/api/policy-documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(documentVersionId)}/extraction-runs`,
+  );
+}
+
+export function fetchDocumentSections(
+  documentId: string,
+  documentVersionId: string,
+): Promise<DocumentSectionListResponse> {
+  return apiRequest<DocumentSectionListResponse>(
+    `/api/policy-documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(documentVersionId)}/sections`,
   );
 }
 

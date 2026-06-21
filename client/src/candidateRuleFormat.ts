@@ -1,5 +1,5 @@
 import { ApiError } from "./api";
-import type { EnforceabilityClass, LifecycleState, QAFlagCode } from "./types";
+import type { CandidateRuleReview, EnforceabilityClass, LifecycleState, QAFlagCode } from "./types";
 
 const CANDIDATE_RULE_ERROR_FALLBACK = "Unable to load Candidate Rules.";
 
@@ -62,6 +62,57 @@ export function lifecycleStatesForTab(
   }
 }
 
+export function filterReviewsForTab(
+  reviews: readonly CandidateRuleReview[],
+  tab: LifecycleTabId,
+  customSelection: readonly LifecycleState[] = REVIEW_QUEUE_LIFECYCLE_STATES,
+): CandidateRuleReview[] {
+  if (tab === "flagged") {
+    return reviews.filter(
+      (review) =>
+        REVIEW_QUEUE_LIFECYCLE_STATES.includes(review.lifecycle_state) &&
+        review.qa_flags.length > 0,
+    );
+  }
+
+  const states = lifecycleStatesForTab(tab, customSelection);
+  if (states === undefined) {
+    return [...reviews];
+  }
+
+  return reviews.filter((review) => states.includes(review.lifecycle_state));
+}
+
+export function emptyMessageForLifecycleTab(
+  tab: LifecycleTabId,
+  hasNonDefaultFilters: boolean,
+): string {
+  if (hasNonDefaultFilters) {
+    return "No Candidate Rules match the current filters.";
+  }
+
+  switch (tab) {
+    case "queue":
+      return "The review queue is empty — no extracted Rules are waiting for triage.";
+    case "flagged":
+      return "No flagged Candidate Rules in the current scope.";
+    case "approved":
+      return "No approved Candidate Rules are waiting to publish.";
+    case "published":
+      return "No Candidate Rules have been published yet.";
+    case "closed":
+      return "No rejected, withdrawn, or superseded Candidate Rules.";
+    case "all":
+      return "No Candidate Rules found.";
+    case "custom":
+      return "No Candidate Rules match the selected lifecycle states.";
+  }
+}
+
+export function showEmptyStateHint(tab: LifecycleTabId): boolean {
+  return tab === "queue" || tab === "all" || tab === "flagged";
+}
+
 export function isDefaultCustomSelection(selection: readonly LifecycleState[]): boolean {
   if (selection.length !== REVIEW_QUEUE_LIFECYCLE_STATES.length) {
     return false;
@@ -85,6 +136,51 @@ export function formatQAFlagCode(code: QAFlagCode): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export type QAFlagDomain =
+  | "citation"
+  | "extraction"
+  | "structure"
+  | "scope"
+  | "semantics";
+
+const QA_FLAG_DOMAINS: Record<QAFlagCode, QAFlagDomain> = {
+  unresolvable_citation: "citation",
+  approximate_citation: "citation",
+  low_extraction_confidence: "extraction",
+  missing_threshold: "structure",
+  missing_applicability: "structure",
+  invalid_enum: "structure",
+  ambiguous_scope: "scope",
+  possible_contradiction: "semantics",
+  undefined_term: "semantics",
+};
+
+export function qaFlagDomain(code: QAFlagCode): QAFlagDomain {
+  return QA_FLAG_DOMAINS[code];
+}
+
+export function formatQAFlagDomain(domain: QAFlagDomain): string {
+  switch (domain) {
+    case "citation":
+      return "Citation fidelity";
+    case "extraction":
+      return "Extraction confidence";
+    case "structure":
+      return "Rule structure";
+    case "scope":
+      return "Scope clarity";
+    case "semantics":
+      return "Semantic consistency";
+  }
+}
+
+export function formatScopeField(label: string, value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  return `${label}: ${value}`;
 }
 
 export function lifecycleStateClassName(state: LifecycleState): string {

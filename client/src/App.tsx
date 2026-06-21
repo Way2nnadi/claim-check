@@ -74,10 +74,7 @@ const shellSections: readonly ShellSection[] = [
 		label: "Documents",
 		kicker: "Source Intake",
 		actions: [],
-		ledger: [
-			"Capture source documents without mutating prior Document Versions.",
-			"Preserve Citation fidelity before any Candidate Rule enters review.",
-		],
+		ledger: ["Preserve Citation fidelity before any Candidate Rule enters review."],
 	},
 	{
 		id: "extraction-runs",
@@ -85,7 +82,6 @@ const shellSections: readonly ShellSection[] = [
 		kicker: "Machine Dossier",
 		actions: [],
 		ledger: [
-			"Pinning makes referenced template and model versions immutable for reproducibility.",
 			"Failed runs surface validation detail so editors can retry with corrected configuration.",
 		],
 	},
@@ -94,10 +90,7 @@ const shellSections: readonly ShellSection[] = [
 		label: "Review",
 		kicker: "Approval Desk",
 		actions: [],
-		ledger: [
-			"Keep machine-checkable Rules separate from guidance and subjective statements.",
-			"Preserve an auditable rationale before publication.",
-		],
+		ledger: ["Preserve an auditable rationale before publication."],
 	},
 	{
 		id: "policy-versions",
@@ -110,10 +103,7 @@ const shellSections: readonly ShellSection[] = [
 				unavailableBehavior: "disable",
 			},
 		],
-		ledger: [
-			"Downstream systems pin to a Policy Version, never to mutable in-flight edits.",
-			"Change summaries explain why a release exists.",
-		],
+		ledger: ["Change summaries explain why a release exists."],
 	},
 	{
 		id: "manual-rules",
@@ -126,20 +116,14 @@ const shellSections: readonly ShellSection[] = [
 				unavailableBehavior: "disable",
 			},
 		],
-		ledger: [
-			"Manual Rules are explicit interventions, not silent mutations.",
-			"Rationale matters because Citation may be absent for this path.",
-		],
+		ledger: ["Rationale matters because Citation may be absent for this path."],
 	},
 	{
 		id: "audit",
 		label: "Audit",
 		kicker: "Trace Archive",
 		actions: [],
-		ledger: [
-			"Actor, entity, and rationale stay legible for regulated buyers.",
-			"The audit trail explains both what changed and who recorded it.",
-		],
+		ledger: ["The audit trail explains both what changed and who recorded it."],
 	},
 ];
 
@@ -458,12 +442,14 @@ export default function App() {
 					) : activeSection === "policy-versions" ? (
 						<PolicyVersionCatalog principal={principal} />
 					) : (
-						<div className="ledger-grid">
-							{currentSection.ledger.map((item) => (
-								<article key={item} className="ledger-card">
-									<p>{item}</p>
-								</article>
-							))}
+						<div className="catalog-page content-enter">
+							<div className="ledger-grid">
+								{currentSection.ledger.map((item) => (
+									<article key={item} className="ledger-card">
+										<p>{item}</p>
+									</article>
+								))}
+							</div>
 						</div>
 					)}
 				</section>

@@ -185,7 +185,7 @@ describe("PolicyVersionCatalog", () => {
         expect(
           await screen.findByRole("heading", { name: "International lodging is capped at $325 per night." }),
         ).toBeInTheDocument();
-        expect(screen.getByText("Rule snapshot")).toBeInTheDocument();
+        expect(screen.getByText("Rules")).toBeInTheDocument();
         expect(screen.getByText("Conference hotel rates may exceed the cap with approver sign-off.")).toBeInTheDocument();
 
         const detailRequest = fetchMock.mock.calls[1]?.[1];
@@ -193,7 +193,7 @@ describe("PolicyVersionCatalog", () => {
           `Bearer ${token}`,
         );
 
-        await userEvent.click(screen.getByRole("button", { name: "Export JSON snapshot" }));
+        await userEvent.click(screen.getByRole("button", { name: "Export JSON" }));
 
         await waitFor(() => {
           expect(fetchMock).toHaveBeenCalledWith(

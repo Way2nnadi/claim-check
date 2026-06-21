@@ -68,10 +68,10 @@ describe("TriggerExtractionRun", () => {
       />,
     );
 
-    await screen.findByLabelText("Prompt Template");
-    await userEvent.clear(screen.getByLabelText("Extraction Run id"));
-    await userEvent.type(screen.getByLabelText("Extraction Run id"), "extract-docv-expense-v2-test");
-    await userEvent.click(screen.getByRole("button", { name: "Commission extraction" }));
+    await screen.findByLabelText("Prompt");
+    await userEvent.clear(screen.getByLabelText("Run id"));
+    await userEvent.type(screen.getByLabelText("Run id"), "extract-docv-expense-v2-test");
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -89,9 +89,7 @@ describe("TriggerExtractionRun", () => {
       );
     });
 
-    expect(
-      await screen.findByText(/1 Candidate Rule extracted after 1 attempt/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/1 rule extracted/)).toBeInTheDocument();
     expect(onCompleted).toHaveBeenCalled();
   });
 
@@ -128,8 +126,8 @@ describe("TriggerExtractionRun", () => {
       />,
     );
 
-    await screen.findByLabelText("Prompt Template");
-    await userEvent.click(screen.getByRole("button", { name: "Commission extraction" }));
+    await screen.findByLabelText("Prompt");
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
 
     expect(
       await screen.findByText(

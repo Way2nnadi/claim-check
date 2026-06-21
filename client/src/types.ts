@@ -34,6 +34,20 @@ export interface DocumentVersionListResponse {
   items: DocumentVersion[];
 }
 
+export interface DocumentSection {
+  document_id: string;
+  document_version_id: string;
+  section_id: string;
+  heading_path: string[];
+  content: string;
+  start_char: number;
+  end_char: number;
+}
+
+export interface DocumentSectionListResponse {
+  items: DocumentSection[];
+}
+
 export type ExtractionRunStatus = "completed" | "failed";
 
 export interface ExtractionRun {
