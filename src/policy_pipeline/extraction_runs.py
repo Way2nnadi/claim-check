@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from policy_pipeline.config import Settings, get_settings
@@ -42,10 +42,12 @@ from policy_pipeline.rules import (
     QAFlag,
     QAFlagCode,
     RuleCondition,
-    RuleException,
     RuleOrigin,
     RuleOriginType,
-    Scope,
+)
+from policy_pipeline.structured_extraction import (
+    StructuredCandidateRule,
+    StructuredCandidateRulesPayload,
 )
 
 _LOW_EXTRACTION_CONFIDENCE_THRESHOLD = 0.75
@@ -75,61 +77,6 @@ class ExtractionExecutionResult(BaseModel):
     model_configuration_version: str
     attempt_count: int
     candidate_rules: list[CandidateRule] = Field(default_factory=list)
-
-
-class _CandidateRuleConditionDraft(BaseModel):
-    field: str | None = None
-    operator: str | None = None
-    value: str | None = None
-
-
-class _CandidateRuleApplicabilityDraft(BaseModel):
-    aggregation_period: str | None = None
-    unit: str | None = None
-    currency: str | None = None
-    limit_basis: str | None = None
-
-
-class _CandidateRuleDraft(BaseModel):
-    statement: str = Field(min_length=1)
-    enforceability_class: EnforceabilityClass
-    scope: Scope
-    citation_quote: str = Field(min_length=1)
-    condition: _CandidateRuleConditionDraft | None = None
-    applicability: _CandidateRuleApplicabilityDraft | None = None
-    exceptions: list[RuleException] = Field(default_factory=list)
-    extraction_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-
-    @model_validator(mode="after")
-    def validate_candidate_rule(self) -> _CandidateRuleDraft:
-        if self.condition is not None:
-            has_field = bool(self.condition.field)
-            has_operator = bool(self.condition.operator)
-            has_value = bool(self.condition.value)
-
-            if has_value and (not has_field or not has_operator):
-                raise ValueError(
-                    "Candidate Rule condition with a threshold value must include field "
-                    "and operator."
-                )
-            if (has_field or has_operator) and not (has_field and has_operator):
-                raise ValueError(
-                    "Candidate Rule condition must include both field and operator when "
-                    "partially specified."
-                )
-        if (
-            self.enforceability_class is not EnforceabilityClass.ENFORCEABLE
-            and self.condition is not None
-        ):
-            raise ValueError(
-                "Guidance and subjective Candidate Rules must not include "
-                "a machine-checkable condition."
-            )
-        return self
-
-
-class _StructuredCandidateRules(BaseModel):
-    candidate_rules: list[_CandidateRuleDraft] = Field(default_factory=list)
 
 
 def execute_extraction_run(
@@ -273,7 +220,7 @@ def _materialize_candidate_rules(
     document_version_id: str,
     session: Session,
 ) -> list[CandidateRule]:
-    payload = _StructuredCandidateRules.model_validate(structured_output)
+    payload = StructuredCandidateRulesPayload.model_validate(structured_output)
     candidate_rules: list[CandidateRule] = []
     for index, draft in enumerate(payload.candidate_rules, start=1):
         qa_flags: list[QAFlag] = []
@@ -341,7 +288,7 @@ def _materialize_candidate_rules(
     return candidate_rules
 
 
-def _normalize_condition(*, draft: _CandidateRuleDraft) -> RuleCondition | None:
+def _normalize_condition(*, draft: StructuredCandidateRule) -> RuleCondition | None:
     if draft.condition is None:
         return None
     if not draft.condition.field or not draft.condition.operator or not draft.condition.value:
@@ -351,7 +298,7 @@ def _normalize_condition(*, draft: _CandidateRuleDraft) -> RuleCondition | None:
 
 def _normalize_applicability(
     *,
-    draft: _CandidateRuleDraft,
+    draft: StructuredCandidateRule,
     qa_flags: list[QAFlag],
 ) -> tuple[Applicability | None, bool]:
     if draft.applicability is None:
@@ -422,7 +369,7 @@ def _resolve_citation(
     )
 
 
-def _is_quantitative_candidate_rule(*, draft: _CandidateRuleDraft) -> bool:
+def _is_quantitative_candidate_rule(*, draft: StructuredCandidateRule) -> bool:
     if draft.enforceability_class is not EnforceabilityClass.ENFORCEABLE:
         return False
     if _QUANTITATIVE_STATEMENT_PATTERN.search(draft.statement) is not None:
