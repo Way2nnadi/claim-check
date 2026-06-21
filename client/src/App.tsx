@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   ApiError,
   clearStoredToken,
@@ -257,12 +258,17 @@ export default function App() {
   if (status === "booting" || (status === "authenticating" && principal === null)) {
     return (
       <main className="loading-stage">
-        <section className="loading-card">
+        <section className="loading-card page-enter">
           <p className="eyebrow">Policy Pipeline</p>
           <h1>Authorizing the editorial desk.</h1>
           <p>
             Resolving the current bearer token and loading the role-aware publication shell.
           </p>
+          <div className="loading-indicator" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
         </section>
       </main>
     );
@@ -270,8 +276,9 @@ export default function App() {
 
   if (status === "signed_out" || principal === null) {
     return (
-      <main className="signin-page">
+      <main className="signin-page page-enter">
         <section className="signin-hero">
+          <span className="folio">Vol. I · Local Development Edition</span>
           <p className="eyebrow">Editorial Shell</p>
           <h1>Policy Pipeline Gazette</h1>
           <p className="hero-copy">
@@ -280,8 +287,12 @@ export default function App() {
           </p>
           <div className="masthead-rule" />
           <ul className="persona-grid">
-            {personaOptions.map((persona) => (
-              <li key={persona.role} className="persona-card">
+            {personaOptions.map((persona, index) => (
+              <li
+                key={persona.role}
+                className="persona-card reveal"
+                style={{ "--reveal-delay": `${180 + index * 90}ms` } as CSSProperties}
+              >
                 <div>
                   <p className="persona-role">{formatRole(persona.role)}</p>
                   <h2>{persona.label}</h2>
@@ -302,7 +313,7 @@ export default function App() {
           </ul>
         </section>
 
-        <aside className="signin-panel">
+        <aside className="signin-panel reveal" style={{ "--reveal-delay": "480ms" } as CSSProperties}>
           <p className="eyebrow">Custom Token</p>
           <h2>Bring your own principal</h2>
           <p className="panel-copy">
@@ -338,9 +349,10 @@ export default function App() {
   });
 
   return (
-    <main className="shell-page">
+    <main className="shell-page page-enter">
       <aside className="shell-sidebar">
         <div className="sidebar-header">
+          <span className="folio">Structured Policy Store</span>
           <p className="eyebrow">Policy Pipeline</p>
           <h1>Editorial Desk</h1>
           <p className="sidebar-copy">
@@ -386,7 +398,7 @@ export default function App() {
           </div>
         </header>
 
-        <section className="section-card">
+        <section key={activeSection} className="section-card content-enter">
           <div className="lede-block">
             <p>{currentSection.detail}</p>
           </div>
