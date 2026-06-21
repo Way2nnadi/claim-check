@@ -242,6 +242,130 @@ async def test_list_document_versions_excludes_deleted_by_default(
 
 
 @pytest.mark.anyio
+async def test_list_policy_documents_returns_catalog_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    expense_bytes = _make_pdf_bytes(
+        [
+            ("Expense Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
+    travel_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Flights require manager approval.", 12),
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        expense_v1 = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy-v1.pdf",
+                    expense_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        expense_v2 = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy-v2.pdf",
+                    expense_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        travel_v1 = await client.post(
+            "/policy-documents/travel-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "travel-policy-v1.pdf",
+                    travel_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        expense_v1_id = expense_v1.json()["document_version_id"]
+        expense_v2_id = expense_v2.json()["document_version_id"]
+        travel_v1_id = travel_v1.json()["document_version_id"]
+
+        await client.request(
+            "DELETE",
+            f"/policy-documents/expense-policy/versions/{expense_v1_id}",
+            headers={"Authorization": "Bearer admin-token"},
+            json={"reason": "superseded by v2"},
+        )
+
+        admin_catalog = await client.get(
+            "/policy-documents",
+            headers={"Authorization": "Bearer admin-token"},
+        )
+        approver_catalog = await client.get(
+            "/policy-documents",
+            headers={"Authorization": "Bearer approver-token"},
+        )
+        viewer_catalog = await client.get(
+            "/policy-documents",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+        include_deleted_catalog = await client.get(
+            "/policy-documents",
+            headers={"Authorization": "Bearer viewer-token"},
+            params={"include_deleted": "true"},
+        )
+        unauthenticated = await client.get("/policy-documents")
+
+    assert expense_v1.status_code == 201
+    assert expense_v2.status_code == 201
+    assert travel_v1.status_code == 201
+    assert admin_catalog.status_code == 200
+    assert approver_catalog.status_code == 200
+    assert viewer_catalog.status_code == 200
+    assert include_deleted_catalog.status_code == 200
+    assert unauthenticated.status_code == 401
+
+    catalog_by_id = {item["document_id"]: item for item in admin_catalog.json()["items"]}
+    assert set(catalog_by_id) == {"expense-policy", "travel-policy"}
+
+    expense_item = catalog_by_id["expense-policy"]
+    travel_item = catalog_by_id["travel-policy"]
+
+    assert expense_item["latest_document_version_id"] == expense_v2_id
+    assert expense_item["version_count"] == 2
+    assert expense_item["active_version_count"] == 1
+    assert expense_item["has_deleted_versions"] is True
+    assert expense_item["latest_uploaded_at"]
+
+    assert travel_item["latest_document_version_id"] == travel_v1_id
+    assert travel_item["version_count"] == 1
+    assert travel_item["active_version_count"] == 1
+    assert travel_item["has_deleted_versions"] is False
+
+    assert viewer_catalog.json()["items"] == admin_catalog.json()["items"]
+    assert include_deleted_catalog.json()["items"] == admin_catalog.json()["items"]
+
+
+@pytest.mark.anyio
 async def test_list_candidate_rules_supports_lifecycle_and_document_filters(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -396,7 +520,136 @@ async def test_list_extraction_runs_returns_run_metadata_and_candidate_counts(
     assert run_item["document_id"] == "expense-policy"
     assert run_item["document_version_id"] == document_version_id
     assert run_item["candidate_rule_count"] == 1
+    assert run_item["status"] == "completed"
+    assert run_item["created_at"]
+    assert run_item["failure_detail"] is None
     assert global_list.json()["items"] == nested_list.json()["items"]
+
+
+@pytest.mark.anyio
+async def test_list_extraction_runs_surfaces_failed_run_detail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        save_prompt_template(
+            session,
+            prompt_template_id="rule-extraction",
+            version="v1",
+            template="Extract candidate Rules from the Policy Document.",
+        )
+        save_model_configuration(
+            session,
+            model_configuration_id="fake-openai",
+            version="v1",
+            model="gpt-5-mini",
+            endpoint="https://fake-openai.local/v1/chat/completions",
+            settings={
+                "max_validation_attempts": 1,
+                "fake_structured_outputs": [{"candidate_rules": [{"statement": "Broken"}]}],
+            },
+        )
+    engine.dispose()
+
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        document_version_id = upload_response.json()["document_version_id"]
+        failed_response = await client.post(
+            f"/policy-documents/expense-policy/versions/{document_version_id}/extraction-runs",
+            headers={"Authorization": "Bearer admin-token"},
+            json={
+                "extraction_run_id": "extract-expense-policy-failed",
+                "prompt_template_id": "rule-extraction",
+                "prompt_template_version": "v1",
+                "model_configuration_id": "fake-openai",
+                "model_configuration_version": "v1",
+            },
+        )
+        list_response = await client.get(
+            "/extraction-runs",
+            headers={"Authorization": "Bearer approver-token"},
+            params={"document_version_id": document_version_id},
+        )
+
+    assert failed_response.status_code == 422
+    assert list_response.status_code == 200
+
+    run_item = list_response.json()["items"][0]
+    assert run_item["extraction_run_id"] == "extract-expense-policy-failed"
+    assert run_item["status"] == "failed"
+    assert run_item["candidate_rule_count"] == 0
+    assert run_item["failure_detail"]
+    assert run_item["created_at"]
+
+
+@pytest.mark.anyio
+async def test_list_extraction_registries_for_admin_trigger_form(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        _seed_registry(session)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        admin_prompts = await client.get(
+            "/prompt-templates",
+            headers={"Authorization": "Bearer admin-token"},
+        )
+        admin_models = await client.get(
+            "/model-configurations",
+            headers={"Authorization": "Bearer admin-token"},
+        )
+        viewer_prompts = await client.get(
+            "/prompt-templates",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert admin_prompts.status_code == 200
+    assert admin_models.status_code == 200
+    assert viewer_prompts.status_code == 403
+
+    prompt_items = admin_prompts.json()["items"]
+    model_items = admin_models.json()["items"]
+    assert prompt_items[0]["prompt_template_id"] == "rule-extraction"
+    assert model_items[0]["model_configuration_id"] == "fake-openai"
 
 
 @pytest.mark.anyio

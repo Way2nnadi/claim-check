@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 
 from policy_pipeline.config import Settings, get_settings
 from policy_pipeline.documents import (
+    CitationMatchKind,
     get_document_version,
     list_document_sections,
-    resolve_citation_anchor,
+    resolve_citation_anchor_with_fallback,
 )
 from policy_pipeline.extraction_registry import (
     ExtractionRun,
@@ -229,6 +230,7 @@ def _materialize_candidate_rules(
             document_id=document_id,
             document_version_id=document_version_id,
             citation_quote=draft.citation_quote,
+            fallback_quotes=[draft.statement],
             qa_flags=qa_flags,
         )
         condition = _normalize_condition(draft=draft)
@@ -339,15 +341,17 @@ def _resolve_citation(
     document_id: str,
     document_version_id: str,
     citation_quote: str,
+    fallback_quotes: list[str] = [],
     qa_flags: list[QAFlag],
 ) -> Citation | None:
-    anchor = resolve_citation_anchor(
+    resolution = resolve_citation_anchor_with_fallback(
         session,
         document_id=document_id,
         document_version_id=document_version_id,
         quote=citation_quote,
+        fallback_quotes=fallback_quotes,
     )
-    if anchor is None:
+    if resolution is None:
         qa_flags.append(
             QAFlag(
                 code=QAFlagCode.UNRESOLVABLE_CITATION,
@@ -359,6 +363,20 @@ def _resolve_citation(
         )
         return None
 
+    if resolution.match_kind is not CitationMatchKind.EXACT:
+        qa_flags.append(
+            QAFlag(
+                code=QAFlagCode.APPROXIMATE_CITATION,
+                detail=(
+                    "Candidate Rule citation was resolved via "
+                    f"{resolution.match_kind.value} matching. LLM quote "
+                    f"{resolution.requested_quote!r} anchored to document text "
+                    f"{resolution.anchor.quote!r}."
+                ),
+            )
+        )
+
+    anchor = resolution.anchor
     return Citation(
         document_id=anchor.document_id,
         document_version_id=anchor.document_version_id,

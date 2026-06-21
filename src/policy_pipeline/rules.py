@@ -37,6 +37,7 @@ class QAFlagCode(StrEnum):
     INVALID_ENUM = "invalid_enum"
     MISSING_APPLICABILITY = "missing_applicability"
     UNRESOLVABLE_CITATION = "unresolvable_citation"
+    APPROXIMATE_CITATION = "approximate_citation"
     LOW_EXTRACTION_CONFIDENCE = "low_extraction_confidence"
     AMBIGUOUS_SCOPE = "ambiguous_scope"
     POSSIBLE_CONTRADICTION = "possible_contradiction"

@@ -27,19 +27,25 @@ from policy_pipeline.documents import (
     DocumentQualityGateRejectedError,
     DocumentVersion,
     DocumentVersionListResponse,
+    PolicyDocumentListResponse,
     create_document_version,
     document_version_from_record,
     get_document_version,
     list_document_versions,
+    list_policy_document_summaries,
     validate_upload_file,
 )
 from policy_pipeline.extraction_registry import (
     ExtractionRunConflictError,
     ExtractionRunListResponse,
+    ModelConfigurationListResponse,
+    PromptTemplateListResponse,
     UnknownDocumentVersionError,
     UnknownModelConfigurationVersionError,
     UnknownPromptTemplateVersionError,
     list_extraction_runs,
+    list_model_configurations,
+    list_prompt_templates,
 )
 from policy_pipeline.extraction_runs import (
     DeletedDocumentVersionError,
@@ -239,6 +245,20 @@ def create_app() -> FastAPI:
     class DocumentVersionDeletionRequest(BaseModel):
         reason: str = Field(min_length=1, max_length=500)
 
+    @app.get("/policy-documents", response_model=PolicyDocumentListResponse)
+    def list_policy_documents(
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+        include_deleted: Annotated[bool, Query()] = False,
+    ) -> PolicyDocumentListResponse:
+        del principal
+        return PolicyDocumentListResponse(
+            items=list_policy_document_summaries(session, include_deleted=include_deleted)
+        )
+
     @app.get(
         "/policy-documents/{document_id}/versions",
         response_model=DocumentVersionListResponse,
@@ -389,6 +409,24 @@ def create_app() -> FastAPI:
                 ),
             ) from exc
         except StructuredOutputRejectedError as exc:
+            record_audit_event(
+                session,
+                action="extraction_run.failed",
+                actor_subject=principal.subject,
+                actor_roles=[role.value for role in principal.roles],
+                entity_type="extraction_run",
+                entity_id=extraction_run_id,
+                payload={
+                    "document_id": document_id,
+                    "prompt_template_id": prompt_template_id,
+                    "prompt_template_version": prompt_template_version,
+                    "model_configuration_id": model_configuration_id,
+                    "model_configuration_version": model_configuration_version,
+                    "attempt_count": exc.attempts,
+                    "failure_detail": exc.detail,
+                },
+                commit=False,
+            )
             session.commit()
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -544,6 +582,28 @@ def create_app() -> FastAPI:
         get_object_storage().delete_bytes(key=record.storage_key)
         return document_version_from_record(record)
 
+    @app.get("/prompt-templates", response_model=PromptTemplateListResponse)
+    def list_prompt_templates_endpoint(
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> PromptTemplateListResponse:
+        del principal
+        return PromptTemplateListResponse(items=list_prompt_templates(session))
+
+    @app.get("/model-configurations", response_model=ModelConfigurationListResponse)
+    def list_model_configurations_endpoint(
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> ModelConfigurationListResponse:
+        del principal
+        return ModelConfigurationListResponse(items=list_model_configurations(session))
+
     @app.get(
         "/policy-documents/{document_id}/versions/{document_version_id}/extraction-runs",
         response_model=ExtractionRunListResponse,
@@ -676,6 +736,25 @@ def create_app() -> FastAPI:
                 ),
             ) from exc
         except StructuredOutputRejectedError as exc:
+            record_audit_event(
+                session,
+                action="extraction_run.failed",
+                actor_subject=principal.subject,
+                actor_roles=[role.value for role in principal.roles],
+                entity_type="extraction_run",
+                entity_id=request.extraction_run_id,
+                payload={
+                    "document_id": document_id,
+                    "document_version_id": document_version_id,
+                    "prompt_template_id": request.prompt_template_id,
+                    "prompt_template_version": request.prompt_template_version,
+                    "model_configuration_id": request.model_configuration_id,
+                    "model_configuration_version": request.model_configuration_version,
+                    "attempt_count": exc.attempts,
+                    "failure_detail": exc.detail,
+                },
+                commit=False,
+            )
             session.commit()
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

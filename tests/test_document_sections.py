@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 
 from policy_pipeline.database import Base, DocumentVersionRecord
 from policy_pipeline.documents import (
+    CitationMatchKind,
     DocumentQualityGateRejectedError,
     create_document_version,
     list_document_sections,
     resolve_citation_anchor,
+    resolve_citation_anchor_with_fallback,
 )
 
 
@@ -378,6 +380,74 @@ def test_quote_anchor_lookup_resolves_quote_back_to_section_and_offsets() -> Non
     assert anchor.section_id == sections[1].section_id
     assert anchor.start_char == sections[1].start_char + sections[1].content.index(anchor.quote)
     assert anchor.end_char == anchor.start_char + len(anchor.quote)
+
+
+def test_quote_anchor_lookup_resolves_paraphrased_quote_via_fuzzy_matching() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    document_bytes = _make_docx_bytes(
+        [
+            ("Travel Policy", "Heading1"),
+            ("Meals", "Heading2"),
+            ("Domestic meals are capped at $75 per day.", "Normal"),
+        ]
+    )
+
+    with Session(engine) as session:
+        document_version = create_document_version(
+            session,
+            document_id="expense-policy",
+            filename="expense-policy.docx",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            document_bytes=document_bytes,
+        )
+
+        resolution = resolve_citation_anchor_with_fallback(
+            session,
+            document_id="expense-policy",
+            document_version_id=document_version.document_version_id,
+            quote="Meals are capped at $75 per day.",
+        )
+
+    assert resolution is not None
+    assert resolution.match_kind is CitationMatchKind.FUZZY
+    assert resolution.anchor.quote == "Domestic meals are capped at $75 per day."
+
+
+def test_quote_anchor_lookup_rejects_wrong_amount_with_fuzzy_matching() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    document_bytes = _make_docx_bytes(
+        [
+            ("Travel Policy", "Heading1"),
+            ("Meals", "Heading2"),
+            ("Meals are capped at $75 per day.", "Normal"),
+        ]
+    )
+
+    with Session(engine) as session:
+        document_version = create_document_version(
+            session,
+            document_id="expense-policy",
+            filename="expense-policy.docx",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            document_bytes=document_bytes,
+        )
+
+        resolution = resolve_citation_anchor_with_fallback(
+            session,
+            document_id="expense-policy",
+            document_version_id=document_version.document_version_id,
+            quote="International breakfasts are capped at $40 per day.",
+        )
+
+    assert resolution is None
 
 
 def test_docx_document_version_persists_quality_gate_results_and_table_metadata() -> None:

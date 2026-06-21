@@ -18,7 +18,7 @@ from policy_pipeline.extraction_registry import (
 )
 
 RULE_EXTRACTION_PROMPT_TEMPLATE_ID = "rule-extraction"
-RULE_EXTRACTION_PROMPT_TEMPLATE_VERSION = "v1"
+RULE_EXTRACTION_PROMPT_TEMPLATE_VERSION = "v2"
 
 OPENAI_MODEL_CONFIGURATION_ID = "openai-primary"
 OPENAI_MODEL_CONFIGURATION_VERSION = "v1"
@@ -74,7 +74,8 @@ Rules:
 - Do not include condition on guidance or subjective rules.
 - For quantitative enforceable rules (amounts, counts, limits), include condition and applicability when present in the source text.
 - citation_quote must be copied exactly from the supplied document text so it can be anchored back to the source.
-- Use null or omit optional fields when the document does not specify them.
+- scope must always be a JSON object. Use {} when no scope dimensions apply. Never set scope to null.
+- Use null or omit optional scalar fields (including individual scope fields) when the document does not specify them.
 - Return only valid JSON. Do not wrap the JSON in markdown fences."""
 
 
@@ -136,7 +137,10 @@ def seed_extraction_registry(
         prompt_template_id=RULE_EXTRACTION_PROMPT_TEMPLATE_ID,
         version=RULE_EXTRACTION_PROMPT_TEMPLATE_VERSION,
         template=rule_extraction_prompt_template(),
-        description="Extract atomic candidate Rules with citation anchors and structured fields.",
+        description=(
+            "Extract atomic candidate Rules with citation anchors and structured fields. "
+            "Requires scope as an object (use {} when unspecified)."
+        ),
         commit=False,
     )
 

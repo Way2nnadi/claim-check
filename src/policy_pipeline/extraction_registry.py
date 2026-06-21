@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -58,6 +60,11 @@ class ExtractionRun(BaseModel):
     model_configuration_version: str = Field(min_length=1)
 
 
+class ExtractionRunStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class ExtractionRunListItem(BaseModel):
     extraction_run_id: str = Field(min_length=1)
     document_id: str = Field(min_length=1)
@@ -67,10 +74,67 @@ class ExtractionRunListItem(BaseModel):
     model_configuration_id: str = Field(min_length=1)
     model_configuration_version: str = Field(min_length=1)
     candidate_rule_count: int = Field(ge=0)
+    created_at: datetime
+    status: ExtractionRunStatus
+    failure_detail: str | None = None
 
 
 class ExtractionRunListResponse(BaseModel):
     items: list[ExtractionRunListItem]
+
+
+class PromptTemplateListItem(BaseModel):
+    prompt_template_id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    description: str | None = None
+
+
+class PromptTemplateListResponse(BaseModel):
+    items: list[PromptTemplateListItem]
+
+
+class ModelConfigurationListItem(BaseModel):
+    model_configuration_id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+
+
+class ModelConfigurationListResponse(BaseModel):
+    items: list[ModelConfigurationListItem]
+
+
+def list_prompt_templates(session: Session) -> list[PromptTemplateListItem]:
+    records = session.scalars(
+        select(PromptTemplateRecord).order_by(
+            PromptTemplateRecord.prompt_template_id,
+            PromptTemplateRecord.version,
+        )
+    ).all()
+    return [
+        PromptTemplateListItem(
+            prompt_template_id=record.prompt_template_id,
+            version=record.version,
+            description=record.description,
+        )
+        for record in records
+    ]
+
+
+def list_model_configurations(session: Session) -> list[ModelConfigurationListItem]:
+    records = session.scalars(
+        select(ModelConfigurationRecord).order_by(
+            ModelConfigurationRecord.model_configuration_id,
+            ModelConfigurationRecord.version,
+        )
+    ).all()
+    return [
+        ModelConfigurationListItem(
+            model_configuration_id=record.model_configuration_id,
+            version=record.version,
+            model=record.model,
+        )
+        for record in records
+    ]
 
 
 def _build_prompt_template(
@@ -381,6 +445,23 @@ def list_extraction_runs_for_prompt_template(
     return [extraction_run_from_record(record) for record in session.scalars(statement)]
 
 
+def _extraction_run_failure_details(session: Session) -> dict[str, str]:
+    from policy_pipeline.database import AuditEventRecord
+
+    failure_details: dict[str, str] = {}
+    audit_records = session.scalars(
+        select(AuditEventRecord).where(
+            AuditEventRecord.entity_type == "extraction_run",
+            AuditEventRecord.action == "extraction_run.failed",
+        )
+    ).all()
+    for audit_record in audit_records:
+        failure_detail = audit_record.payload.get("failure_detail")
+        if isinstance(failure_detail, str) and failure_detail:
+            failure_details[audit_record.entity_id] = failure_detail
+    return failure_details
+
+
 def list_extraction_runs(
     session: Session,
     *,
@@ -388,6 +469,9 @@ def list_extraction_runs(
     document_version_id: str | None = None,
 ) -> list[ExtractionRunListItem]:
     from policy_pipeline.database import RuleRecord
+    from policy_pipeline.documents import _normalize_datetime
+
+    failure_details = _extraction_run_failure_details(session)
 
     statement: Select[tuple[ExtractionRunRecord, DocumentVersionRecord]] = (
         select(ExtractionRunRecord, DocumentVersionRecord)
@@ -422,9 +506,19 @@ def list_extraction_runs(
 
     items: list[ExtractionRunListItem] = []
     for extraction_run_record, document_version_record in session.execute(statement):
+        run_id = extraction_run_record.extraction_run_id
+        created_at = _normalize_datetime(extraction_run_record.created_at)
+        assert created_at is not None
+        if run_id in failure_details:
+            status = ExtractionRunStatus.FAILED
+            failure_detail = failure_details[run_id]
+        else:
+            status = ExtractionRunStatus.COMPLETED
+            failure_detail = None
+
         items.append(
             ExtractionRunListItem(
-                extraction_run_id=extraction_run_record.extraction_run_id,
+                extraction_run_id=run_id,
                 document_id=document_version_record.document_id,
                 document_version_id=extraction_run_record.document_version_id,
                 prompt_template_id=extraction_run_record.prompt_template_id,
@@ -433,10 +527,10 @@ def list_extraction_runs(
                 model_configuration_version=(
                     extraction_run_record.model_configuration_version
                 ),
-                candidate_rule_count=candidate_rule_counts.get(
-                    extraction_run_record.extraction_run_id,
-                    0,
-                ),
+                candidate_rule_count=candidate_rule_counts.get(run_id, 0),
+                created_at=created_at,
+                status=status,
+                failure_detail=failure_detail,
             )
         )
     return items
