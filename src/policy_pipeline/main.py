@@ -42,6 +42,7 @@ from policy_pipeline.extraction_runs import (
     execute_extraction_run,
 )
 from policy_pipeline.identity import AuthenticatedPrincipal, Role
+from policy_pipeline.llm_clients import HostedEndpointDisabledError
 from policy_pipeline.object_storage import get_object_storage
 from policy_pipeline.rule_store import create_rule
 from policy_pipeline.rules import (
@@ -395,6 +396,14 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Model Configuration version was not found.",
+            ) from exc
+        except HostedEndpointDisabledError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Hosted OpenAI-compatible endpoints are disabled by runtime "
+                    "configuration."
+                ),
             ) from exc
         except StructuredOutputRejectedError as exc:
             session.commit()

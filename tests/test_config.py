@@ -10,6 +10,9 @@ def test_settings_use_local_defaults() -> None:
     assert settings.object_storage_encryption_at_rest_required is True
     assert settings.object_storage_server_side_encryption_algorithm == "AES256"
     assert settings.object_storage_kms_key_id is None
+    assert settings.llm_api_key is None
+    assert settings.llm_hosted_endpoints_enabled is True
+    assert settings.llm_request_timeout_seconds == 30.0
     assert settings.is_local_auth_enabled is True
 
 
@@ -21,6 +24,9 @@ def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
     )
     monkeypatch.setenv("POLICY_PIPELINE_OBJECT_STORAGE_SERVER_SIDE_ENCRYPTION_ALGORITHM", "aws:kms")
     monkeypatch.setenv("POLICY_PIPELINE_OBJECT_STORAGE_KMS_KEY_ID", "kms-key-123")
+    monkeypatch.setenv("POLICY_PIPELINE_LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("POLICY_PIPELINE_LLM_HOSTED_ENDPOINTS_ENABLED", "false")
+    monkeypatch.setenv("POLICY_PIPELINE_LLM_REQUEST_TIMEOUT_SECONDS", "12.5")
 
     settings = get_settings()
 
@@ -30,6 +36,9 @@ def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
     assert settings.database.name == "claim_check"
     assert settings.object_storage_server_side_encryption_algorithm == "aws:kms"
     assert settings.object_storage_kms_key_id == "kms-key-123"
+    assert settings.llm_api_key == "test-api-key"
+    assert settings.llm_hosted_endpoints_enabled is False
+    assert settings.llm_request_timeout_seconds == 12.5
     assert settings.is_local_auth_enabled is True
 
 
