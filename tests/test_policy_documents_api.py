@@ -225,3 +225,79 @@ async def test_reuploading_docx_policy_document_creates_new_immutable_document_v
     assert first_access_response.content == first_document_bytes
     assert second_access_response.status_code == 200
     assert second_access_response.content == second_document_bytes
+
+
+@pytest.mark.anyio
+async def test_uploading_duplicate_pdf_bytes_still_creates_distinct_document_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    document_bytes = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"
+    expected_sha256 = sha256(document_bytes).hexdigest()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        first_upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        second_upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+
+        assert first_upload_response.status_code == 201
+        assert second_upload_response.status_code == 201
+        first_version = first_upload_response.json()
+        second_version = second_upload_response.json()
+
+        first_access_response = await client.get(
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{first_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+        second_access_response = await client.get(
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{second_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert first_version["document_id"] == "expense-policy"
+    assert second_version["document_id"] == "expense-policy"
+    assert first_version["document_version_id"] != second_version["document_version_id"]
+    assert first_version["sha256"] == expected_sha256
+    assert second_version["sha256"] == expected_sha256
+
+    assert first_access_response.status_code == 200
+    assert first_access_response.content == document_bytes
+    assert second_access_response.status_code == 200
+    assert second_access_response.content == document_bytes
