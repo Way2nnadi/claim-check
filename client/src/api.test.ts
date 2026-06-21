@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { apiRequest, downloadDocumentVersion, downloadPolicyVersionSnapshot } from "./api";
+import {
+  apiRequest,
+  downloadDocumentVersion,
+  downloadPolicyVersionSnapshot,
+} from "./api";
 
 describe("apiRequest", () => {
   beforeEach(() => {
@@ -123,6 +127,36 @@ describe("apiRequest", () => {
     expect(headers.get("Authorization")).toBe("Bearer viewer-token");
     expect(clickMock).toHaveBeenCalled();
     expect(link.download).toBe("policy-v2.json");
+  });
+
+  it("posts Policy Version publish requests with JSON bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        policy_version_id: "policy-v3",
+        rule_count: 3,
+        status: "published",
+        published_by: "approver-user",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { publishPolicyVersion } = await import("./api");
+    await publishPolicyVersion({
+      policy_version_id: "policy-v3",
+      change_summary: "Raised lodging cap and clarified approval evidence.",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/policy-versions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          policy_version_id: "policy-v3",
+          change_summary: "Raised lodging cap and clarified approval evidence.",
+        }),
+      }),
+    );
   });
 
   it("builds extraction run query parameters", async () => {

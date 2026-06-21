@@ -153,6 +153,7 @@ export default function App() {
 	const [customToken, setCustomToken] = useState("");
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
+	const [policyVersionPublishIntent, setPolicyVersionPublishIntent] = useState(0);
 
 	useEffect(() => {
 		const token = getStoredToken();
@@ -426,6 +427,15 @@ export default function App() {
 										type="button"
 										className="action-chip"
 										disabled={!allowed}
+										onClick={() => {
+											if (
+												allowed &&
+												currentSection.id === "policy-versions" &&
+												action.label === "Publish Policy Version"
+											) {
+												setPolicyVersionPublishIntent((current) => current + 1);
+											}
+										}}
 									>
 										{action.label}
 									</button>
@@ -440,7 +450,10 @@ export default function App() {
 					) : activeSection === "review" ? (
 						<CandidateRuleCatalog principal={principal} />
 					) : activeSection === "policy-versions" ? (
-						<PolicyVersionCatalog principal={principal} />
+						<PolicyVersionCatalog
+							principal={principal}
+							publishIntentToken={policyVersionPublishIntent}
+						/>
 					) : (
 						<div className="catalog-page content-enter">
 							<div className="ledger-grid">

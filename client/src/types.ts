@@ -146,6 +146,18 @@ export interface PolicyVersionListResponse {
   items: PolicyVersionSummary[];
 }
 
+export interface PolicyVersionPublishRequest {
+  policy_version_id: string;
+  change_summary: string;
+}
+
+export interface PolicyVersionPublishResponse {
+  policy_version_id: string;
+  rule_count: number;
+  status: string;
+  published_by: string;
+}
+
 export type LifecycleState =
   | "extracted"
   | "in_review"

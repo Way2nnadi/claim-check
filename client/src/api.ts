@@ -13,6 +13,8 @@ import type {
   ExtractionRunListResponse,
   ModelConfigurationListResponse,
   PolicyVersionListResponse,
+  PolicyVersionPublishRequest,
+  PolicyVersionPublishResponse,
   PolicyVersionSnapshot,
   PolicyDocumentListResponse,
   PromptTemplateListResponse,
@@ -101,6 +103,15 @@ export function fetchPolicyVersion(
   return apiRequest<PolicyVersionSnapshot>(
     `/api/policy-versions/${encodeURIComponent(policyVersionId)}`,
   );
+}
+
+export function publishPolicyVersion(
+  request: PolicyVersionPublishRequest,
+): Promise<PolicyVersionPublishResponse> {
+  return apiRequest<PolicyVersionPublishResponse>("/api/policy-versions", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
 }
 
 export function fetchPolicyDocuments(
