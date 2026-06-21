@@ -24,6 +24,10 @@ export function clearStoredToken(): void {
   window.sessionStorage.removeItem(SESSION_STORAGE_TOKEN_KEY);
 }
 
+function shouldSetJsonContentType(body: BodyInit | null | undefined): body is string {
+  return typeof body === "string";
+}
+
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
@@ -34,7 +38,7 @@ export async function apiRequest<T>(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  if (init.body && !headers.has("Content-Type")) {
+  if (shouldSetJsonContentType(init.body) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 

@@ -57,4 +57,54 @@ describe("App", () => {
     });
     expect(screen.getByRole("heading", { name: "Policy Pipeline Gazette" })).toBeInTheDocument();
   });
+
+  it("authenticates with a persona token and shows role-allowed actions", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        subject: "admin-user",
+        roles: ["admin"],
+        auth_backend: "local",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in as Admin" }));
+
+    expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload Document Version" })).toBeInTheDocument();
+    expect(window.sessionStorage.getItem(SESSION_STORAGE_TOKEN_KEY)).toBe("local-admin-token");
+
+    const request = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(request?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer local-admin-token");
+  });
+
+  it("authenticates with a custom token and stores it for later requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        subject: "custom-approver",
+        roles: ["approver"],
+        auth_backend: "local",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await userEvent.type(screen.getByLabelText("Bearer token"), "custom-token");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in with custom token" }));
+
+    expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload Document Version" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Schedule Re-ingestion" })).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem(SESSION_STORAGE_TOKEN_KEY)).toBe("custom-token");
+
+    const request = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(request?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer custom-token");
+  });
 });
