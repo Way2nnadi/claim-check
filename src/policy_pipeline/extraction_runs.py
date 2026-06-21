@@ -92,6 +92,21 @@ class _CandidateRuleDraft(BaseModel):
 
     @model_validator(mode="after")
     def validate_candidate_rule(self) -> _CandidateRuleDraft:
+        if self.condition is not None:
+            has_field = bool(self.condition.field)
+            has_operator = bool(self.condition.operator)
+            has_value = bool(self.condition.value)
+
+            if has_value and (not has_field or not has_operator):
+                raise ValueError(
+                    "Candidate Rule condition with a threshold value must include field "
+                    "and operator."
+                )
+            if (has_field or has_operator) and not (has_field and has_operator):
+                raise ValueError(
+                    "Candidate Rule condition must include both field and operator when "
+                    "partially specified."
+                )
         if (
             self.enforceability_class is not EnforceabilityClass.ENFORCEABLE
             and self.condition is not None

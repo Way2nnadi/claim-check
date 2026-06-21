@@ -449,6 +449,111 @@ async def test_extraction_run_retries_invalid_structured_output_before_persistin
 
 
 @pytest.mark.anyio
+async def test_extraction_run_rejects_malformed_partial_conditions_instead_of_flagging_them(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        save_prompt_template(
+            session,
+            prompt_template_id="rule-extraction",
+            version="v1",
+            template="Extract candidate Rules from the Policy Document.",
+        )
+        save_model_configuration(
+            session,
+            model_configuration_id="fake-openai",
+            version="v1",
+            model="gpt-5-mini",
+            endpoint="https://fake-openai.local/v1/chat/completions",
+            settings={
+                "max_validation_attempts": 1,
+                "fake_structured_outputs": [
+                    {
+                        "candidate_rules": [
+                            {
+                                "statement": "Meals are capped at $75 per day.",
+                                "enforceability_class": "enforceable",
+                                "scope": {
+                                    "expense_category": "meals",
+                                },
+                                "condition": {
+                                    "operator": "<=",
+                                    "value": "75",
+                                },
+                                "applicability": {
+                                    "aggregation_period": "per_day",
+                                    "unit": "money",
+                                    "currency": "USD",
+                                },
+                                "citation_quote": "Meals are capped at $75 per day.",
+                            }
+                        ]
+                    }
+                ],
+            },
+        )
+    engine.dispose()
+
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        document_version_id = upload_response.json()["document_version_id"]
+        extraction_response = await client.post(
+            f"/policy-documents/expense-policy/versions/{document_version_id}/extraction-runs",
+            headers={"Authorization": "Bearer admin-token"},
+            json={
+                "extraction_run_id": "extract-expense-policy-v2b",
+                "prompt_template_id": "rule-extraction",
+                "prompt_template_version": "v1",
+                "model_configuration_id": "fake-openai",
+                "model_configuration_version": "v1",
+            },
+        )
+
+    assert upload_response.status_code == 201
+    assert extraction_response.status_code == 422
+    assert extraction_response.json() == {
+        "detail": "Structured extraction output could not be validated after 1 attempts."
+    }
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        extraction_run = session.get(ExtractionRunRecord, "extract-expense-policy-v2b")
+        stored_rules = session.scalars(select(RuleRecord).order_by(RuleRecord.rule_id)).all()
+    engine.dispose()
+
+    assert extraction_run is not None
+    assert stored_rules == []
+
+
+@pytest.mark.anyio
 async def test_extraction_run_attaches_deterministic_qa_flags_to_candidate_rules(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
