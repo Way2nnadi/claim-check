@@ -28,3 +28,6 @@ def test_head_migration_bootstraps_postgres_and_pgvector() -> None:
     assert "deletion_reason" in sql
     assert "CREATE TABLE document_sections" in sql
     assert "CREATE TABLE policy_versions" in sql
+    assert "CREATE TABLE prompt_templates" in sql
+    assert "CREATE TABLE model_configurations" in sql
+    assert "CREATE TABLE extraction_runs" in sql
