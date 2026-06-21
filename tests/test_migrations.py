@@ -27,6 +27,9 @@ def test_head_migration_bootstraps_postgres_and_pgvector() -> None:
     assert "deleted_by" in sql
     assert "deletion_reason" in sql
     assert "CREATE TABLE document_sections" in sql
+    assert "CREATE TABLE document_section_embeddings" in sql
+    assert "embedding VECTOR(16)" in sql
+    assert "USING ivfflat (embedding vector_cosine_ops)" in sql
     assert "quality_gate" in sql
     assert "table_extraction" in sql
     assert "CREATE TABLE policy_versions" in sql

@@ -15,6 +15,68 @@ class Base(DeclarativeBase):
     pass
 
 
+class _PostgresVectorType(sa.types.UserDefinedType):
+    cache_ok = True
+
+    def __init__(self, dimensions: int) -> None:
+        self.dimensions = dimensions
+
+    def get_col_spec(self, **_kwargs: Any) -> str:
+        return f"VECTOR({self.dimensions})"
+
+
+class VectorType(sa.types.TypeDecorator):
+    impl = sa.JSON
+    cache_ok = True
+
+    def __init__(self, dimensions: int) -> None:
+        super().__init__()
+        self.dimensions = dimensions
+
+    def load_dialect_impl(self, dialect: sa.engine.Dialect) -> sa.types.TypeEngine[Any]:
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(_PostgresVectorType(self.dimensions))
+        return dialect.type_descriptor(sa.JSON())
+
+    def process_bind_param(
+        self,
+        value: list[float] | None,
+        dialect: sa.engine.Dialect,
+    ) -> str | list[float] | None:
+        if value is None:
+            return None
+
+        normalized = [float(component) for component in value]
+        if len(normalized) != self.dimensions:
+            raise ValueError(
+                f"Expected {self.dimensions}-dimensional vector, got {len(normalized)}."
+            )
+        if dialect.name == "postgresql":
+            return "[" + ",".join(f"{component:.12g}" for component in normalized) + "]"
+        return normalized
+
+    def process_result_value(
+        self,
+        value: str | list[float] | None,
+        _dialect: sa.engine.Dialect,
+    ) -> list[float] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()[1:-1].strip()
+            if not stripped:
+                components: list[float] = []
+            else:
+                components = [float(component) for component in stripped.split(",")]
+        else:
+            components = [float(component) for component in value]
+        if len(components) != self.dimensions:
+            raise ValueError(
+                f"Expected {self.dimensions}-dimensional vector, got {len(components)}."
+            )
+        return components
+
+
 class AuditEventRecord(Base):
     __tablename__ = "audit_events"
 
@@ -79,6 +141,27 @@ class DocumentSectionRecord(Base):
     content: Mapped[str] = mapped_column(sa.Text(), nullable=False)
     start_char: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
     end_char: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.text("CURRENT_TIMESTAMP"),
+    )
+
+
+class DocumentSectionEmbeddingRecord(Base):
+    __tablename__ = "document_section_embeddings"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(
+            ["document_version_id", "section_id"],
+            ["document_sections.document_version_id", "document_sections.section_id"],
+        ),
+        sa.Index("ix_document_section_embeddings_document_id", "document_id"),
+    )
+
+    document_version_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
+    section_id: Mapped[str] = mapped_column(sa.String(length=255), primary_key=True)
+    document_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(VectorType(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
         nullable=False,

@@ -38,6 +38,9 @@ class QAFlagCode(StrEnum):
     MISSING_APPLICABILITY = "missing_applicability"
     UNRESOLVABLE_CITATION = "unresolvable_citation"
     LOW_EXTRACTION_CONFIDENCE = "low_extraction_confidence"
+    AMBIGUOUS_SCOPE = "ambiguous_scope"
+    POSSIBLE_CONTRADICTION = "possible_contradiction"
+    UNDEFINED_TERM = "undefined_term"
 
 
 class RuleOrigin(BaseModel):
