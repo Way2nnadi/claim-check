@@ -234,9 +234,10 @@ def _retrieve_related_sections(
             list(query_embedding),
             type_=VectorType(SECTION_EMBEDDING_DIMENSION),
         )
-        distance = DocumentSectionEmbeddingRecord.embedding.op("<=>")(query_literal).label(
-            "distance"
-        )
+        distance = sa.cast(
+            DocumentSectionEmbeddingRecord.embedding.op("<=>")(query_literal),
+            sa.Float,
+        ).label("distance")
         statement = (
             select(DocumentSectionRecord, distance)
             .join(

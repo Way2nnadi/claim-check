@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from policy_pipeline.database import PolicyVersionRecord, RuleRecord
 from policy_pipeline.rules import LifecycleState, PolicyVersionSnapshot, Rule
+
+
+class PolicyVersionSummary(BaseModel):
+    policy_version_id: str = Field(min_length=1)
+    published_by: str = Field(min_length=1)
+    change_summary: str = Field(min_length=1)
+    rule_count: int = Field(ge=0)
+    created_at: datetime
+
+
+class PolicyVersionListResponse(BaseModel):
+    items: list[PolicyVersionSummary]
 
 
 class PolicyVersionConflictError(Exception):
@@ -70,6 +84,33 @@ def get_policy_version_snapshot(
     if record is None:
         return None
     return PolicyVersionSnapshot.model_validate(record.snapshot)
+
+
+def list_policy_version_summaries(session: Session) -> list[PolicyVersionSummary]:
+    records = session.scalars(
+        select(PolicyVersionRecord).order_by(
+            PolicyVersionRecord.created_at.desc(),
+            PolicyVersionRecord.policy_version_id.desc(),
+        )
+    ).all()
+    summaries: list[PolicyVersionSummary] = []
+    for record in records:
+        snapshot = PolicyVersionSnapshot.model_validate(record.snapshot)
+        created_at = record.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        else:
+            created_at = created_at.astimezone(UTC)
+        summaries.append(
+            PolicyVersionSummary(
+                policy_version_id=record.policy_version_id,
+                published_by=record.published_by,
+                change_summary=record.change_summary,
+                rule_count=len(snapshot.rules),
+                created_at=created_at,
+            )
+        )
+    return summaries
 
 
 def get_latest_policy_version_snapshot(session: Session) -> PolicyVersionSnapshot | None:

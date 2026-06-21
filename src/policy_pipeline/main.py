@@ -9,6 +9,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
@@ -24,16 +25,20 @@ from policy_pipeline.database import get_session
 from policy_pipeline.documents import (
     DocumentQualityGateRejectedError,
     DocumentVersion,
+    DocumentVersionListResponse,
     create_document_version,
     document_version_from_record,
     get_document_version,
+    list_document_versions,
     validate_upload_file,
 )
 from policy_pipeline.extraction_registry import (
     ExtractionRunConflictError,
+    ExtractionRunListResponse,
     UnknownDocumentVersionError,
     UnknownModelConfigurationVersionError,
     UnknownPromptTemplateVersionError,
+    list_extraction_runs,
 )
 from policy_pipeline.extraction_runs import (
     DeletedDocumentVersionError,
@@ -47,6 +52,7 @@ from policy_pipeline.object_storage import get_object_storage
 from policy_pipeline.reingestion import ReingestionResult, reingest_document
 from policy_pipeline.rule_store import (
     CandidateRuleNotFoundError,
+    CandidateRuleReviewListResponse,
     InvalidCandidateRuleApprovalError,
     InvalidCandidateRuleReviewError,
     InvalidCandidateRuleTransitionError,
@@ -54,6 +60,7 @@ from policy_pipeline.rule_store import (
     bulk_approve_candidate_rule_reviews,
     create_rule,
     get_candidate_rule_review,
+    list_candidate_rule_reviews,
     reject_candidate_rule_review,
     update_candidate_rule_review,
 )
@@ -74,7 +81,9 @@ from policy_pipeline.rules import (
 from policy_pipeline.structured_policy_store import (
     NoApprovedRulesError,
     PolicyVersionConflictError,
+    PolicyVersionListResponse,
     get_policy_version_snapshot,
+    list_policy_version_summaries,
     publish_policy_version,
 )
 
@@ -214,6 +223,28 @@ def create_app() -> FastAPI:
 
     class DocumentVersionDeletionRequest(BaseModel):
         reason: str = Field(min_length=1, max_length=500)
+
+    @app.get(
+        "/policy-documents/{document_id}/versions",
+        response_model=DocumentVersionListResponse,
+    )
+    def list_policy_document_versions(
+        document_id: str,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+        include_deleted: Annotated[bool, Query()] = False,
+    ) -> DocumentVersionListResponse:
+        del principal
+        return DocumentVersionListResponse(
+            items=list_document_versions(
+                session,
+                document_id=document_id,
+                include_deleted=include_deleted,
+            )
+        )
 
     @app.post(
         "/policy-documents/{document_id}/versions",
@@ -498,6 +529,57 @@ def create_app() -> FastAPI:
         get_object_storage().delete_bytes(key=record.storage_key)
         return document_version_from_record(record)
 
+    @app.get(
+        "/policy-documents/{document_id}/versions/{document_version_id}/extraction-runs",
+        response_model=ExtractionRunListResponse,
+    )
+    def list_document_extraction_runs(
+        document_id: str,
+        document_version_id: str,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> ExtractionRunListResponse:
+        del principal
+        record = get_document_version(
+            session,
+            document_id=document_id,
+            document_version_id=document_version_id,
+        )
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document Version was not found.",
+            )
+        return ExtractionRunListResponse(
+            items=list_extraction_runs(
+                session,
+                document_id=document_id,
+                document_version_id=document_version_id,
+            )
+        )
+
+    @app.get("/extraction-runs", response_model=ExtractionRunListResponse)
+    def list_extraction_runs_endpoint(
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+        document_id: Annotated[str | None, Query()] = None,
+        document_version_id: Annotated[str | None, Query()] = None,
+    ) -> ExtractionRunListResponse:
+        del principal
+        return ExtractionRunListResponse(
+            items=list_extraction_runs(
+                session,
+                document_id=document_id,
+                document_version_id=document_version_id,
+            )
+        )
+
     @app.post(
         "/policy-documents/{document_id}/versions/{document_version_id}/extraction-runs",
         response_model=ExtractionExecutionResult,
@@ -587,6 +669,33 @@ def create_app() -> FastAPI:
                     f"{exc.attempts} attempts."
                 ),
             ) from exc
+
+    @app.get(
+        "/candidate-rules",
+        response_model=CandidateRuleReviewListResponse,
+    )
+    def list_candidate_rules(
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+        lifecycle_state: Annotated[list[LifecycleState] | None, Query()] = None,
+        document_id: Annotated[str | None, Query()] = None,
+        document_version_id: Annotated[str | None, Query()] = None,
+        extraction_run_id: Annotated[str | None, Query()] = None,
+    ) -> CandidateRuleReviewListResponse:
+        del principal
+        lifecycle_states = set(lifecycle_state) if lifecycle_state else None
+        return CandidateRuleReviewListResponse(
+            items=list_candidate_rule_reviews(
+                session,
+                lifecycle_states=lifecycle_states,
+                document_id=document_id,
+                document_version_id=document_version_id,
+                extraction_run_id=extraction_run_id,
+            )
+        )
 
     @app.post(
         "/candidate-rules/{candidate_rule_id}/approvals",
@@ -872,6 +981,17 @@ def create_app() -> FastAPI:
         )
         session.commit()
         return rule
+
+    @app.get("/policy-versions", response_model=PolicyVersionListResponse)
+    def list_policy_versions(
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> PolicyVersionListResponse:
+        del principal
+        return PolicyVersionListResponse(items=list_policy_version_summaries(session))
 
     @app.post(
         "/policy-versions",

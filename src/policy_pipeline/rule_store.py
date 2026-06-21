@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,7 @@ from policy_pipeline.rules import (
     LifecycleState,
     QAFlag,
     Rule,
+    RuleOriginType,
 )
 
 
@@ -60,6 +61,45 @@ def create_rule(session: Session, *, rule: Rule | CandidateRule, commit: bool = 
         session.commit()
         session.refresh(record)
     return record
+
+
+class CandidateRuleReviewListResponse(BaseModel):
+    items: list[CandidateRuleReview]
+
+
+def list_candidate_rule_reviews(
+    session: Session,
+    *,
+    lifecycle_states: set[LifecycleState] | None = None,
+    document_id: str | None = None,
+    document_version_id: str | None = None,
+    extraction_run_id: str | None = None,
+) -> list[CandidateRuleReview]:
+    statement = (
+        select(RuleRecord)
+        .where(RuleRecord.origin_source_type == RuleOriginType.EXTRACTED.value)
+        .order_by(RuleRecord.rule_id)
+    )
+    reviews: list[CandidateRuleReview] = []
+    for record in session.scalars(statement).all():
+        review = _build_candidate_rule_review(record)
+        if lifecycle_states is not None and review.lifecycle_state not in lifecycle_states:
+            continue
+        citation = review.current_rule.citation
+        if document_id is not None and (
+            citation is None or citation.document_id != document_id
+        ):
+            continue
+        if document_version_id is not None and (
+            citation is None or citation.document_version_id != document_version_id
+        ):
+            continue
+        if extraction_run_id is not None and (
+            review.current_rule.origin.extraction_run_id != extraction_run_id
+        ):
+            continue
+        reviews.append(review)
+    return reviews
 
 
 def get_candidate_rule_review(

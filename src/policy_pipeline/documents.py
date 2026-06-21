@@ -539,6 +539,30 @@ def create_document_version(
     return document_version_from_record(record)
 
 
+class DocumentVersionListResponse(BaseModel):
+    items: list[DocumentVersion]
+
+
+def list_document_versions(
+    session: Session,
+    *,
+    document_id: str | None = None,
+    include_deleted: bool = False,
+) -> list[DocumentVersion]:
+    statement: Select[tuple[DocumentVersionRecord]] = select(DocumentVersionRecord)
+    if document_id is not None:
+        statement = statement.where(DocumentVersionRecord.document_id == document_id)
+    if not include_deleted:
+        statement = statement.where(DocumentVersionRecord.deleted_at.is_(None))
+    statement = statement.order_by(
+        DocumentVersionRecord.created_at.desc(),
+        DocumentVersionRecord.document_version_id.desc(),
+    )
+    return [
+        document_version_from_record(record) for record in session.scalars(statement).all()
+    ]
+
+
 def get_document_version(
     session: Session,
     *,

@@ -51,7 +51,12 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish the issues to the issue tracker
 
-For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. These issues are considered ready for AFK agents, so publish them with the correct triage label unless instructed otherwise.
+For each approved slice, publish a new issue to the issue tracker. Use the issue body template below.
+
+Apply exactly one triage label per issue — never combine `ready-for-agent` and `human-in-the-loop`:
+
+- **AFK** slices: `ready-for-agent`
+- **HITL** slices: `human-in-the-loop` (never `ready-for-agent`)
 
 Publish issues in dependency order (blockers first) so you can reference real issue identifiers in the "Blocked by" field.
 
@@ -62,7 +67,7 @@ A reference to the parent issue on the issue tracker (if the source was an exist
 
 ## What to build
 
-A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
+A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation. Do not put HITL/AFK in the body — that is expressed by the issue label.
 
 Avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it here and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
 

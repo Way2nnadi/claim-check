@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 dev = "policy_pipeline.dev:main"
+seed = "policy_pipeline.seed:main"
 
 [dependency-groups]
 dev = [

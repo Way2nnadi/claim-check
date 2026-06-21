@@ -247,3 +247,37 @@ def test_store_section_embeddings_rejects_wrong_dimension_vectors(
         )
 
     engine.dispose()
+
+
+def test_postgres_related_section_distance_is_cast_to_float() -> None:
+    import sqlalchemy as sa
+    from sqlalchemy.dialects import postgresql
+
+    from policy_pipeline.database import DocumentSectionEmbeddingRecord, DocumentSectionRecord, VectorType
+    from policy_pipeline.qa_retrieval import SECTION_EMBEDDING_DIMENSION
+
+    query_literal = sa.literal(
+        [0.0] * SECTION_EMBEDDING_DIMENSION,
+        type_=VectorType(SECTION_EMBEDDING_DIMENSION),
+    )
+    distance = sa.cast(
+        DocumentSectionEmbeddingRecord.embedding.op("<=>")(query_literal),
+        sa.Float,
+    ).label("distance")
+
+    assert isinstance(distance.type, sa.Float)
+
+    statement = (
+        sa.select(DocumentSectionRecord, distance)
+        .join(
+            DocumentSectionEmbeddingRecord,
+            sa.and_(
+                DocumentSectionEmbeddingRecord.document_version_id
+                == DocumentSectionRecord.document_version_id,
+                DocumentSectionEmbeddingRecord.section_id == DocumentSectionRecord.section_id,
+            ),
+        )
+        .limit(1)
+    )
+    compiled = str(statement.compile(dialect=postgresql.dialect()))
+    assert "CAST" in compiled.upper()

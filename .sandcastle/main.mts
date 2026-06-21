@@ -42,11 +42,23 @@ const REPO =
 	runGh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]);
 
 const LABEL_READY = "ready-for-agent";
+const LABEL_HUMAN_IN_THE_LOOP = "human-in-the-loop";
 const LABEL_IN_PROGRESS = "agent-in-progress";
 const LABEL_PR_OPEN = "agent-pr-open";
 const LABEL_PRD = "prd";
+const LABEL_CLIENT = "client";
 
 const ISSUE_LABELS = [
+	{
+		name: LABEL_READY,
+		color: "0E8A16",
+		description: "AFK slice — ready for Sandcastle agent implementation",
+	},
+	{
+		name: LABEL_HUMAN_IN_THE_LOOP,
+		color: "F9D0C4",
+		description: "Human-in-the-loop — requires human interaction, not for Sandcastle",
+	},
 	{
 		name: LABEL_PRD,
 		color: "5319E7",
@@ -61,6 +73,11 @@ const ISSUE_LABELS = [
 		name: LABEL_PR_OPEN,
 		color: "1D76DB",
 		description: "Agent opened a PR; awaiting human review and merge",
+	},
+	{
+		name: LABEL_CLIENT,
+		color: "C5DEF5",
+		description: "Client/UI slice — Sandcastle uses frontend-design skill",
 	},
 ] as const;
 
@@ -124,8 +141,9 @@ const listReadyIssues = (): GhIssue[] => {
 };
 
 const isHitlIssue = (issue: GhIssue): boolean =>
-	issue.labels.some((label) => label.name.toLowerCase() === "hitl") ||
-	/\bHITL\b/i.test(issue.body);
+	issue.labels.some(
+		(label) => label.name.toLowerCase() === LABEL_HUMAN_IN_THE_LOOP,
+	);
 
 const isPrdIssue = (issue: GhIssue): boolean =>
 	issue.labels.some((label) => label.name.toLowerCase() === LABEL_PRD) ||
@@ -176,6 +194,13 @@ const isActionableIssue = (issue: GhIssue): boolean =>
 	!isPrdIssue(issue) &&
 	!isHitlIssue(issue) &&
 	!hasOpenBlockers(getBlockerNumbers(issue.body));
+
+const isClientIssue = (issue: GhIssue): boolean =>
+	issue.title.startsWith("Client:") ||
+	issue.labels.some((label) => label.name.toLowerCase() === LABEL_CLIENT);
+
+const clientVerifyCommand =
+	"uv run pytest && uv run ruff check . && (test -d client && npm ci --prefix client) && npm run client:build";
 
 /** Pick up to `maxCount` unblocked issues, lowest issue number first. */
 const pickNextIssues = (maxCount: number): GhIssue[] => {
@@ -365,6 +390,10 @@ const hooks = {
 			{ command: "codex login status", timeoutMs: 15_000 },
 			{ command: "gh auth setup-git", timeoutMs: 30_000 },
 			{ command: "uv sync --all-extras", timeoutMs: 300_000 },
+			{
+				command: "test -d client && npm ci --prefix client || true",
+				timeoutMs: 300_000,
+			},
 		],
 	},
 };
@@ -374,7 +403,10 @@ const agent = codex("gpt-5.4");
 type ClaimedIssue = { issue: GhIssue; branch: string };
 
 async function processIssue({ issue, branch }: ClaimedIssue): Promise<void> {
-	console.log(`Starting pipeline for issue #${issue.number} on ${branch}`);
+	const clientIssue = isClientIssue(issue);
+	console.log(
+		`Starting pipeline for issue #${issue.number} on ${branch}${clientIssue ? " (client)" : ""}`,
+	);
 
 	await using sandbox = await createSandbox({
 		branch,
@@ -386,7 +418,9 @@ async function processIssue({ issue, branch }: ClaimedIssue): Promise<void> {
 		name: "implementer",
 		maxIterations: 1,
 		agent,
-		promptFile: "./.sandcastle/implement-prompt.md",
+		promptFile: clientIssue
+			? "./.sandcastle/implement-prompt-client.md"
+			: "./.sandcastle/implement-prompt.md",
 		promptArgs: {
 			ISSUE_NUMBER: String(issue.number),
 			ISSUE_TITLE: issue.title,
@@ -412,16 +446,18 @@ async function processIssue({ issue, branch }: ClaimedIssue): Promise<void> {
 		name: "reviewer",
 		maxIterations: 1,
 		agent,
-		promptFile: "./.sandcastle/review-prompt.md",
+		promptFile: clientIssue
+			? "./.sandcastle/review-prompt-client.md"
+			: "./.sandcastle/review-prompt.md",
 		promptArgs: { BRANCH: branch },
 	});
 
 	console.log(`Issue #${issue.number}: review complete.`);
 
-	const verify = await execInSandbox(
-		sandbox.worktreePath,
-		"uv run pytest && uv run ruff check .",
-	);
+	const verifyCommand = clientIssue
+		? clientVerifyCommand
+		: "uv run pytest && uv run ruff check .";
+	const verify = await execInSandbox(sandbox.worktreePath, verifyCommand);
 	if (verify.exitCode !== 0) {
 		console.error(
 			`Issue #${issue.number}: verification failed — skipping publish.`,
@@ -433,7 +469,9 @@ async function processIssue({ issue, branch }: ClaimedIssue): Promise<void> {
 			extractIssueNumber(sandbox.worktreePath) ?? issue.number;
 		releaseIssueToBacklog(
 			issueNumber,
-			"Sandcastle verification failed after review (`pytest` / `ruff`). Returned issue to `ready-for-agent` for retry.",
+			clientIssue
+				? "Sandcastle verification failed after review (`pytest` / `ruff` / `client:build`). Returned issue to `ready-for-agent` for retry."
+				: "Sandcastle verification failed after review (`pytest` / `ruff`). Returned issue to `ready-for-agent` for retry.",
 		);
 		console.log(`Released issue #${issueNumber} back to ${LABEL_READY}.`);
 		return;
@@ -443,7 +481,9 @@ async function processIssue({ issue, branch }: ClaimedIssue): Promise<void> {
 		name: "publisher",
 		maxIterations: 1,
 		agent,
-		promptFile: "./.sandcastle/publish-prompt.md",
+		promptFile: clientIssue
+			? "./.sandcastle/publish-prompt-client.md"
+			: "./.sandcastle/publish-prompt.md",
 		promptArgs: { BRANCH: branch },
 	});
 

@@ -58,6 +58,21 @@ class ExtractionRun(BaseModel):
     model_configuration_version: str = Field(min_length=1)
 
 
+class ExtractionRunListItem(BaseModel):
+    extraction_run_id: str = Field(min_length=1)
+    document_id: str = Field(min_length=1)
+    document_version_id: str = Field(min_length=1)
+    prompt_template_id: str = Field(min_length=1)
+    prompt_template_version: str = Field(min_length=1)
+    model_configuration_id: str = Field(min_length=1)
+    model_configuration_version: str = Field(min_length=1)
+    candidate_rule_count: int = Field(ge=0)
+
+
+class ExtractionRunListResponse(BaseModel):
+    items: list[ExtractionRunListItem]
+
+
 def _build_prompt_template(
     *,
     prompt_template_id: str,
@@ -364,6 +379,67 @@ def list_extraction_runs_for_prompt_template(
         ExtractionRunRecord.prompt_template_version == version,
     )
     return [extraction_run_from_record(record) for record in session.scalars(statement)]
+
+
+def list_extraction_runs(
+    session: Session,
+    *,
+    document_id: str | None = None,
+    document_version_id: str | None = None,
+) -> list[ExtractionRunListItem]:
+    from policy_pipeline.database import RuleRecord
+
+    statement: Select[tuple[ExtractionRunRecord, DocumentVersionRecord]] = (
+        select(ExtractionRunRecord, DocumentVersionRecord)
+        .join(
+            DocumentVersionRecord,
+            ExtractionRunRecord.document_version_id
+            == DocumentVersionRecord.document_version_id,
+        )
+        .order_by(
+            ExtractionRunRecord.created_at.desc(),
+            ExtractionRunRecord.extraction_run_id.desc(),
+        )
+    )
+    if document_version_id is not None:
+        statement = statement.where(
+            ExtractionRunRecord.document_version_id == document_version_id
+        )
+    if document_id is not None:
+        statement = statement.where(DocumentVersionRecord.document_id == document_id)
+
+    rule_records = session.scalars(select(RuleRecord)).all()
+    candidate_rule_counts: dict[str, int] = {}
+    for rule_record in rule_records:
+        if rule_record.origin_source_type != "extracted":
+            continue
+        origin = rule_record.payload.get("origin")
+        if not isinstance(origin, dict):
+            continue
+        run_id = origin.get("extraction_run_id")
+        if isinstance(run_id, str):
+            candidate_rule_counts[run_id] = candidate_rule_counts.get(run_id, 0) + 1
+
+    items: list[ExtractionRunListItem] = []
+    for extraction_run_record, document_version_record in session.execute(statement):
+        items.append(
+            ExtractionRunListItem(
+                extraction_run_id=extraction_run_record.extraction_run_id,
+                document_id=document_version_record.document_id,
+                document_version_id=extraction_run_record.document_version_id,
+                prompt_template_id=extraction_run_record.prompt_template_id,
+                prompt_template_version=extraction_run_record.prompt_template_version,
+                model_configuration_id=extraction_run_record.model_configuration_id,
+                model_configuration_version=(
+                    extraction_run_record.model_configuration_version
+                ),
+                candidate_rule_count=candidate_rule_counts.get(
+                    extraction_run_record.extraction_run_id,
+                    0,
+                ),
+            )
+        )
+    return items
 
 
 def extraction_run_from_record(record: ExtractionRunRecord) -> ExtractionRun:
