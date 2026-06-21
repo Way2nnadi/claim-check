@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { apiRequest, downloadDocumentVersion } from "./api";
+import { apiRequest, downloadDocumentVersion, downloadPolicyVersionSnapshot } from "./api";
 
 describe("apiRequest", () => {
   beforeEach(() => {
@@ -79,6 +79,50 @@ describe("apiRequest", () => {
     expect(headers.get("Authorization")).toBe("Bearer viewer-token");
     expect(clickMock).toHaveBeenCalled();
     expect(link.download).toBe("expense.pdf");
+  });
+
+  it("downloads a Policy Version snapshot as a JSON attachment", async () => {
+    window.sessionStorage.setItem("policy-pipeline.auth.token", "viewer-token");
+    const blob = new Blob(['{"policy_version_id":"policy-v2"}'], {
+      type: "application/json",
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => blob,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const clickMock = vi.fn();
+    const link = {
+      href: "",
+      download: "",
+      rel: "",
+      click: clickMock,
+      remove: vi.fn(),
+    } as unknown as HTMLAnchorElement;
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName, options) => {
+      if (tagName === "a") {
+        return link as HTMLAnchorElement;
+      }
+      return originalCreateElement(tagName, options);
+    });
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn().mockReturnValue("blob:policy-version"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    await downloadPolicyVersionSnapshot("policy-v2");
+
+    const [, request] = fetchMock.mock.calls[0] ?? [];
+    const headers = new Headers(request?.headers);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/policy-versions/policy-v2/snapshot",
+      expect.any(Object),
+    );
+    expect(headers.get("Authorization")).toBe("Bearer viewer-token");
+    expect(clickMock).toHaveBeenCalled();
+    expect(link.download).toBe("policy-v2.json");
   });
 
   it("builds extraction run query parameters", async () => {

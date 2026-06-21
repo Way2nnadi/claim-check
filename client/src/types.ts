@@ -120,6 +120,18 @@ export interface ReingestionResult {
   diff: PolicyVersionDiff;
 }
 
+export interface PolicyVersionSummary {
+  policy_version_id: string;
+  published_by: string;
+  change_summary: string;
+  rule_count: number;
+  created_at: string;
+}
+
+export interface PolicyVersionListResponse {
+  items: PolicyVersionSummary[];
+}
+
 export type LifecycleState =
   | "extracted"
   | "in_review"
@@ -209,6 +221,15 @@ export interface CandidateRuleValue {
   condition: RuleCondition | null;
   applicability: Applicability | null;
   exceptions: RuleException[];
+}
+
+export interface Rule extends CandidateRuleValue {}
+
+export interface PolicyVersionSnapshot {
+  policy_version_id: string;
+  change_summary: string;
+  published_by: string;
+  rules: Rule[];
 }
 
 export interface CandidateRuleReview {
