@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
+from pydantic import ValidationError
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base, DocumentVersionRecord
+from policy_pipeline.database import (
+    Base,
+    DocumentVersionRecord,
+    ExtractionRunRecord,
+    ModelConfigurationRecord,
+    PromptTemplateRecord,
+)
 from policy_pipeline.extraction_registry import (
     RegistryRecordInUseError,
     create_extraction_run,
@@ -207,3 +214,79 @@ def test_model_configuration_version_becomes_immutable_after_extraction_run_pin(
         "temperature": 0,
         "max_output_tokens": 2000,
     }
+
+
+def test_invalid_prompt_template_is_rejected_before_persistence() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        with pytest.raises(ValidationError, match="String should have at least 1 character"):
+            save_prompt_template(
+                session,
+                prompt_template_id="rule-extraction",
+                version="v1",
+                template="",
+            )
+
+        prompt_templates = session.scalars(select(PromptTemplateRecord)).all()
+
+    assert prompt_templates == []
+
+
+def test_invalid_model_configuration_is_rejected_before_persistence() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        with pytest.raises(ValidationError, match="String should have at least 1 character"):
+            save_model_configuration(
+                session,
+                model_configuration_id="openai-primary",
+                version="v1",
+                model="",
+                endpoint="https://llm.internal/v1/chat/completions",
+                settings={"temperature": 0},
+            )
+
+        model_configurations = session.scalars(select(ModelConfigurationRecord)).all()
+
+    assert model_configurations == []
+
+
+def test_invalid_extraction_run_is_rejected_before_persistence() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        _seed_document_version(session)
+        save_prompt_template(
+            session,
+            prompt_template_id="rule-extraction",
+            version="v1",
+            template="Extract candidate Rules from the Policy Document.",
+            description="Initial extraction prompt.",
+        )
+        save_model_configuration(
+            session,
+            model_configuration_id="openai-primary",
+            version="v1",
+            model="gpt-5-mini",
+            endpoint="https://llm.internal/v1/chat/completions",
+            settings={"temperature": 0},
+        )
+
+        with pytest.raises(ValidationError, match="String should have at least 1 character"):
+            create_extraction_run(
+                session,
+                extraction_run_id="",
+                document_version_id="docv-expense-policy-v1",
+                prompt_template_id="rule-extraction",
+                prompt_template_version="v1",
+                model_configuration_id="openai-primary",
+                model_configuration_version="v1",
+            )
+
+        extraction_runs = session.scalars(select(ExtractionRunRecord)).all()
+
+    assert extraction_runs == []
