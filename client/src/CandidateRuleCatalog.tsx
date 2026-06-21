@@ -77,6 +77,7 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
   const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
   const [reviews, setReviews] = useState<CandidateRuleReview[]>([]);
   const [selectedCandidateRuleId, setSelectedCandidateRuleId] = useState<string | null>(null);
+  const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [lifecycleTab, setLifecycleTab] = useState<LifecycleTabId>("queue");
   const [customLifecycleSelection, setCustomLifecycleSelection] = useState<Set<LifecycleState>>(
     () => new Set(REVIEW_QUEUE_LIFECYCLE_STATES),
@@ -192,15 +193,23 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
       if (selectedCandidateRuleId !== null) {
         setSelectedCandidateRuleId(null);
       }
+      if (selectionDismissed) {
+        setSelectionDismissed(false);
+      }
       return;
     }
     if (
-      selectedCandidateRuleId === null ||
+      selectedCandidateRuleId !== null &&
       !displayedReviews.some((review) => review.candidate_rule_id === selectedCandidateRuleId)
     ) {
+      setSelectionDismissed(false);
+      setSelectedCandidateRuleId(displayedReviews[0].candidate_rule_id);
+      return;
+    }
+    if (selectedCandidateRuleId === null && !selectionDismissed) {
       setSelectedCandidateRuleId(displayedReviews[0].candidate_rule_id);
     }
-  }, [displayedReviews, selectedCandidateRuleId, status]);
+  }, [displayedReviews, selectedCandidateRuleId, selectionDismissed, status]);
 
   return (
     <div className="review-catalog content-enter">
@@ -358,7 +367,10 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
               <CandidateRuleLedger
                 reviews={displayedReviews}
                 selectedCandidateRuleId={selectedCandidateRuleId}
-                onOpenReview={setSelectedCandidateRuleId}
+                onOpenReview={(candidateRuleId) => {
+                  setSelectionDismissed(false);
+                  setSelectedCandidateRuleId(candidateRuleId);
+                }}
                 emptyMessage={
                   lifecycleTab === "flagged"
                     ? "No flagged Candidate Rules in the current scope."
@@ -376,7 +388,10 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
                 <CandidateRuleDetail
                   candidateRuleId={selectedCandidateRuleId}
                   principal={principal}
-                  onBack={() => setSelectedCandidateRuleId(null)}
+                  onBack={() => {
+                    setSelectionDismissed(true);
+                    setSelectedCandidateRuleId(null);
+                  }}
                   onReviewChange={(updatedReview) => {
                     setReviews((current) =>
                       current.map((review) =>

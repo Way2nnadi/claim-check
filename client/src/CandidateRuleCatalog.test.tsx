@@ -260,4 +260,43 @@ describe("CandidateRuleCatalog", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Candidate Rule" })).toBeInTheDocument();
   });
+
+  it("lets the approver clear the current selection without immediately reopening the first Candidate Rule", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/policy-documents") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        if (url === "/api/candidate-rules?lifecycle_state=extracted&lifecycle_state=in_review") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => sampleReviews,
+          });
+        }
+        if (url === "/api/candidate-rules/rule-meals-cap") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => sampleReviews.items[0],
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<CandidateRuleCatalog principal={principal} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /rule-meals-cap/i }));
+    await userEvent.click(await screen.findByRole("button", { name: "Clear selection" }));
+
+    expect(
+      await screen.findByText(
+        "Select a Candidate Rule from the queue to compare extracted values, make edits, and save a reviewed Rule.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("QA Flags")).not.toBeInTheDocument();
+  });
 });
