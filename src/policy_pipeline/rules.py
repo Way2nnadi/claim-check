@@ -114,3 +114,10 @@ class Rule(BaseModel):
                 "Guidance and subjective Rules must not include a machine-checkable condition."
             )
         return self
+
+
+class PolicyVersionSnapshot(BaseModel):
+    policy_version_id: str = Field(min_length=1)
+    change_summary: str = Field(min_length=1)
+    published_by: str = Field(min_length=1)
+    rules: list[Rule] = Field(default_factory=list)
