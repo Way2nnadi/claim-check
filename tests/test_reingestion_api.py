@@ -503,3 +503,79 @@ async def test_admin_reingestion_diffs_candidate_rules_against_current_policy_ve
             },
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_reingestion_cleans_up_uploaded_document_when_client_setup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+    monkeypatch.setenv("POLICY_PIPELINE_LLM_HOSTED_ENDPOINTS_ENABLED", "false")
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        save_prompt_template(
+            session,
+            prompt_template_id="rule-extraction",
+            version="v1",
+            template="Extract candidate Rules from the Policy Document.",
+        )
+        save_model_configuration(
+            session,
+            model_configuration_id="hosted-openai",
+            version="v1",
+            model="gpt-5-mini",
+            endpoint="https://api.openai.com/v1/responses",
+            settings={},
+        )
+    engine.dispose()
+
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/policy-documents/expense-policy/reingestions",
+            headers={"Authorization": "Bearer admin-token"},
+            data={
+                "extraction_run_id": "extract-expense-policy-v4",
+                "prompt_template_id": "rule-extraction",
+                "prompt_template_version": "v1",
+                "model_configuration_id": "hosted-openai",
+                "model_configuration_version": "v1",
+            },
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Hosted OpenAI-compatible endpoints are disabled by runtime configuration."
+    }
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        stored_versions = session.scalars(select(DocumentVersionRecord)).all()
+        extraction_runs = session.scalars(select(ExtractionRunRecord)).all()
+    engine.dispose()
+
+    assert stored_versions == []
+    assert extraction_runs == []
+    assert not any(path.is_file() for path in object_storage_root.rglob("*"))

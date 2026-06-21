@@ -6,8 +6,13 @@ from collections import defaultdict, deque
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from policy_pipeline.documents import DocumentVersion, create_document_version
+from policy_pipeline.documents import (
+    DocumentVersion,
+    create_document_version,
+    get_document_version,
+)
 from policy_pipeline.extraction_runs import ExtractionExecutionResult, execute_extraction_run
+from policy_pipeline.object_storage import get_object_storage
 from policy_pipeline.rules import CandidateRule, LifecycleState, Rule, RuleOriginType
 from policy_pipeline.structured_policy_store import get_latest_policy_version_snapshot
 
@@ -65,22 +70,36 @@ def reingest_document(
         document_bytes=document_bytes,
         commit=False,
     )
-    extraction_run = execute_extraction_run(
+    document_version_record = get_document_version(
         session,
-        extraction_run_id=extraction_run_id,
         document_id=document_id,
         document_version_id=document_version.document_version_id,
-        prompt_template_id=prompt_template_id,
-        prompt_template_version=prompt_template_version,
-        model_configuration_id=model_configuration_id,
-        model_configuration_version=model_configuration_version,
     )
-    current_policy_version = get_latest_policy_version_snapshot(session)
-    diff = diff_candidate_rules_against_current_policy_version(
-        document_id=document_id,
-        candidate_rules=extraction_run.candidate_rules,
-        current_policy_version=current_policy_version,
+    storage_key = (
+        document_version_record.storage_key if document_version_record is not None else None
     )
+    try:
+        extraction_run = execute_extraction_run(
+            session,
+            extraction_run_id=extraction_run_id,
+            document_id=document_id,
+            document_version_id=document_version.document_version_id,
+            prompt_template_id=prompt_template_id,
+            prompt_template_version=prompt_template_version,
+            model_configuration_id=model_configuration_id,
+            model_configuration_version=model_configuration_version,
+        )
+        current_policy_version = get_latest_policy_version_snapshot(session)
+        diff = diff_candidate_rules_against_current_policy_version(
+            document_id=document_id,
+            candidate_rules=extraction_run.candidate_rules,
+            current_policy_version=current_policy_version,
+        )
+    except Exception:
+        session.rollback()
+        if storage_key is not None:
+            get_object_storage().delete_bytes(key=storage_key)
+        raise
     return ReingestionResult(
         document_version=document_version,
         extraction_run=extraction_run,
