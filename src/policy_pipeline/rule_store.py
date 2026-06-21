@@ -33,6 +33,12 @@ class InvalidCandidateRuleApprovalError(Exception):
         self.detail = detail
 
 
+class InvalidCandidateRuleReviewError(Exception):
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
 _CANDIDATE_RULE_METADATA_FIELDS = {"qa_flags", "extracted_rule", "committed_rule"}
 _EDITABLE_REVIEW_STATES = {LifecycleState.EXTRACTED, LifecycleState.IN_REVIEW}
 
@@ -77,13 +83,16 @@ def update_candidate_rule_review(
         current_state=current_rule.lifecycle_state,
         target_state=LifecycleState.IN_REVIEW,
     )
-    next_rule = CandidateRuleValue.model_validate(
-        {
-            **current_rule.model_dump(mode="json"),
-            **updates,
-            "lifecycle_state": LifecycleState.IN_REVIEW.value,
-        }
-    )
+    try:
+        next_rule = CandidateRuleValue.model_validate(
+            {
+                **current_rule.model_dump(mode="json"),
+                **updates,
+                "lifecycle_state": LifecycleState.IN_REVIEW.value,
+            }
+        )
+    except ValidationError as exc:
+        raise InvalidCandidateRuleReviewError(_first_validation_message(exc)) from exc
     _persist_candidate_rule_review(
         record,
         current_rule=next_rule,

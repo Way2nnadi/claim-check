@@ -279,6 +279,42 @@ async def test_approver_edits_candidate_rule_without_overwriting_extracted_value
 
 
 @pytest.mark.anyio
+async def test_invalid_candidate_rule_review_edit_returns_422_and_does_not_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+    _seed_candidate_rule(database_url)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        update_response = await client.patch(
+            "/candidate-rules/rule-123",
+            headers={"Authorization": "Bearer approver-token"},
+            json={"enforceability_class": "guidance"},
+        )
+        audit_response = await client.get(
+            "/audit-events",
+            headers={"Authorization": "Bearer viewer-token"},
+            params={"entity_type": "candidate_rule", "entity_id": "rule-123"},
+        )
+
+    assert update_response.status_code == 422
+    assert update_response.json() == {
+        "detail": (
+            "Value error, Guidance and subjective Candidate Rules must not include "
+            "a machine-checkable condition."
+        ),
+    }
+    assert audit_response.status_code == 200
+    assert audit_response.json() == {"items": []}
+
+
+@pytest.mark.anyio
 async def test_approver_rejects_candidate_rule_and_invalid_transition_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

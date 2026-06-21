@@ -47,6 +47,7 @@ from policy_pipeline.object_storage import get_object_storage
 from policy_pipeline.rule_store import (
     CandidateRuleNotFoundError,
     InvalidCandidateRuleApprovalError,
+    InvalidCandidateRuleReviewError,
     InvalidCandidateRuleTransitionError,
     approve_candidate_rule_review,
     create_rule,
@@ -560,6 +561,11 @@ def create_app() -> FastAPI:
                     "Candidate Rule cannot transition from "
                     f"{exc.current_state.value} to {exc.target_state.value}."
                 ),
+            ) from exc
+        except InvalidCandidateRuleReviewError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=exc.detail,
             ) from exc
         record_audit_event(
             session,
