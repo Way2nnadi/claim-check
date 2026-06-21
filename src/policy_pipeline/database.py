@@ -60,6 +60,8 @@ class DocumentVersionRecord(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     deleted_by: Mapped[str | None] = mapped_column(sa.String(length=120))
     deletion_reason: Mapped[str | None] = mapped_column(sa.String(length=500))
+    quality_gate: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON())
+    table_extraction: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON())
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
         nullable=False,

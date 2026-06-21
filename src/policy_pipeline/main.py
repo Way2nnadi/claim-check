@@ -22,6 +22,7 @@ from policy_pipeline.auth import require_roles
 from policy_pipeline.config import get_settings
 from policy_pipeline.database import get_session
 from policy_pipeline.documents import (
+    DocumentQualityGateRejectedError,
     DocumentVersion,
     create_document_version,
     document_version_from_record,
@@ -161,16 +162,22 @@ def create_app() -> FastAPI:
     ) -> DocumentVersion:
         filename, content_type = validate_upload_file(file)
         document_bytes = await file.read()
-        document_version = create_document_version(
-            session,
-            document_id=document_id,
-            filename=filename,
-            content_type=content_type,
-            document_bytes=document_bytes,
-            retention_until=retention_until,
-            retention_reason=retention_reason,
-            commit=False,
-        )
+        try:
+            document_version = create_document_version(
+                session,
+                document_id=document_id,
+                filename=filename,
+                content_type=content_type,
+                document_bytes=document_bytes,
+                retention_until=retention_until,
+                retention_reason=retention_reason,
+                commit=False,
+            )
+        except DocumentQualityGateRejectedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
         record_audit_event(
             session,
             action="document_version.uploaded",

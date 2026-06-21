@@ -6,8 +6,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base
+from policy_pipeline.database import Base, DocumentVersionRecord
 from policy_pipeline.documents import (
+    DocumentQualityGateRejectedError,
     create_document_version,
     list_document_sections,
     resolve_citation_anchor,
@@ -76,7 +77,12 @@ def _make_pdf_bytes(lines: list[tuple[str, int]]) -> bytes:
     return buffer.getvalue()
 
 
-def _make_docx_bytes(paragraphs: list[tuple[str, str]]) -> bytes:
+def _make_docx_bytes(
+    paragraphs: list[tuple[str, str]],
+    *,
+    tables: list[list[list[str]]] | None = None,
+    include_media: bool = False,
+) -> bytes:
     content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default
@@ -131,6 +137,24 @@ def _make_docx_bytes(paragraphs: list[tuple[str, str]]) -> bytes:
     <w:r><w:t>{escaped}</w:t></w:r>
   </w:p>"""
         )
+    for table in tables or []:
+        rows = []
+        for row in table:
+            cells = []
+            for cell in row:
+                escaped = (
+                    cell.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                )
+                cells.append(
+                    f"""
+      <w:tc>
+        <w:p><w:r><w:t>{escaped}</w:t></w:r></w:p>
+      </w:tc>"""
+                )
+            rows.append(f"\n    <w:tr>{''.join(cells)}\n    </w:tr>")
+        body.append(f"\n  <w:tbl>{''.join(rows)}\n  </w:tbl>")
     document = (
         """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -149,6 +173,8 @@ def _make_docx_bytes(paragraphs: list[tuple[str, str]]) -> bytes:
         archive.writestr("_rels/.rels", rels)
         archive.writestr("word/document.xml", document)
         archive.writestr("word/styles.xml", styles)
+        if include_media:
+            archive.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\n")
     return buffer.getvalue()
 
 
@@ -352,3 +378,120 @@ def test_quote_anchor_lookup_resolves_quote_back_to_section_and_offsets() -> Non
     assert anchor.section_id == sections[1].section_id
     assert anchor.start_char == sections[1].start_char + sections[1].content.index(anchor.quote)
     assert anchor.end_char == anchor.start_char + len(anchor.quote)
+
+
+def test_docx_document_version_persists_quality_gate_results_and_table_metadata() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    document_bytes = _make_docx_bytes(
+        [
+            ("Travel Policy", "Heading1"),
+            ("Meals", "Heading2"),
+            ("Domestic meals are capped at $75 per day.", "Normal"),
+        ],
+        tables=[
+            [
+                ["Category", "Cap"],
+                ["Domestic meals", "$75"],
+                ["International meals", "$100"],
+            ]
+        ],
+        include_media=True,
+    )
+
+    with Session(engine) as session:
+        document_version = create_document_version(
+            session,
+            document_id="expense-policy",
+            filename="expense-policy.docx",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            document_bytes=document_bytes,
+        )
+
+        persisted = session.get(DocumentVersionRecord, document_version.document_version_id)
+
+    assert document_version.quality_gate.status == "passed"
+    assert document_version.quality_gate.ingestion_confidence == 1.0
+    assert document_version.quality_gate.table_extraction_confidence == 1.0
+    assert document_version.quality_gate.unsupported_content_warnings == [
+        "Embedded images are not supported and may contain uncaptured policy content."
+    ]
+    assert document_version.quality_gate.rejection_reason is None
+    assert document_version.table_extraction.table_count == 1
+    assert document_version.table_extraction.model_dump(mode="json") == {
+        "table_count": 1,
+        "tables": [
+            {
+                "table_id": "table-1",
+                "row_count": 3,
+                "column_count": 2,
+            }
+        ],
+    }
+    assert persisted is not None
+    assert persisted.quality_gate == {
+        "status": "passed",
+        "ingestion_confidence": 1.0,
+        "table_extraction_confidence": 1.0,
+        "unsupported_content_warnings": [
+            "Embedded images are not supported and may contain uncaptured policy content."
+        ],
+        "rejection_reason": None,
+    }
+    assert persisted.table_extraction == {
+        "table_count": 1,
+        "tables": [
+            {
+                "table_id": "table-1",
+                "row_count": 3,
+                "column_count": 2,
+            }
+        ],
+    }
+
+
+def test_malformed_pdf_document_version_is_rejected_by_quality_gate() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        try:
+            create_document_version(
+                session,
+                document_id="expense-policy",
+                filename="expense-policy.pdf",
+                content_type="application/pdf",
+                document_bytes=b"not a pdf",
+            )
+        except DocumentQualityGateRejectedError as exc:
+            assert str(exc) == (
+                "Malformed PDF files are not supported because the file could not be parsed."
+            )
+        else:
+            raise AssertionError("Expected malformed PDF upload to be rejected.")
+
+
+def test_malformed_docx_document_version_is_rejected_by_quality_gate() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        try:
+            create_document_version(
+                session,
+                document_id="expense-policy",
+                filename="expense-policy.docx",
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
+                document_bytes=b"not a docx archive",
+            )
+        except DocumentQualityGateRejectedError as exc:
+            assert str(exc) == (
+                "Malformed DOCX files are not supported because the file could not be parsed."
+            )
+        else:
+            raise AssertionError("Expected malformed DOCX upload to be rejected.")

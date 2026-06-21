@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from io import BytesIO
 from pathlib import PurePosixPath
+from typing import Literal
 from uuid import uuid4
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
@@ -32,6 +33,20 @@ _HEADING_STYLE_RE = re.compile(r"heading\s*(\d+)", re.IGNORECASE)
 _SECTION_GAP = "\n\n"
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _MAX_SECTION_ID_LENGTH = 255
+_IMAGE_WARNING = "Embedded images are not supported and may contain uncaptured policy content."
+_CHART_WARNING = "Embedded charts are not supported and may contain uncaptured policy content."
+_EMBEDDING_WARNING = (
+    "Embedded files are not supported and may contain uncaptured policy content."
+)
+_IMAGE_ONLY_PDF_REASON = (
+    "Image-only PDFs are not supported because no extractable text was found."
+)
+_MALFORMED_PDF_REASON = (
+    "Malformed PDF files are not supported because the file could not be parsed."
+)
+_MALFORMED_DOCX_REASON = (
+    "Malformed DOCX files are not supported because the file could not be parsed."
+)
 
 
 @dataclass(frozen=True)
@@ -56,6 +71,25 @@ class DocumentSection(BaseModel):
     end_char: int
 
 
+class DocumentQualityGate(BaseModel):
+    status: Literal["passed", "rejected"]
+    ingestion_confidence: float = Field(ge=0.0, le=1.0)
+    table_extraction_confidence: float = Field(ge=0.0, le=1.0)
+    unsupported_content_warnings: list[str] = Field(default_factory=list)
+    rejection_reason: str | None = None
+
+
+class ExtractedTableMetadata(BaseModel):
+    table_id: str
+    row_count: int
+    column_count: int
+
+
+class DocumentTableExtraction(BaseModel):
+    table_count: int
+    tables: list[ExtractedTableMetadata] = Field(default_factory=list)
+
+
 class DocumentVersion(BaseModel):
     document_id: str
     document_version_id: str
@@ -68,6 +102,21 @@ class DocumentVersion(BaseModel):
     deleted_at: datetime | None = None
     deleted_by: str | None = None
     deletion_reason: str | None = None
+    quality_gate: DocumentQualityGate = Field(default_factory=lambda: _quality_gate_result())
+    table_extraction: DocumentTableExtraction = Field(
+        default_factory=lambda: _table_extraction_result()
+    )
+
+
+class DocumentQualityGateRejectedError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class _DocumentAnalysis:
+    sections: list[_ParsedSection]
+    quality_gate: DocumentQualityGate
+    table_extraction: DocumentTableExtraction
 
 
 def _normalize_datetime(value: datetime | None) -> datetime | None:
@@ -160,8 +209,34 @@ def _build_sections(lines: list[_DocumentLine]) -> list[_ParsedSection]:
     return sections
 
 
-def _parse_pdf_sections(document_bytes: bytes) -> list[_ParsedSection]:
-    reader = PdfReader(BytesIO(document_bytes))
+def _quality_gate_result(
+    *,
+    status: Literal["passed", "rejected"] = "passed",
+    ingestion_confidence: float = 0.0,
+    table_extraction_confidence: float = 0.0,
+    unsupported_content_warnings: list[str] | None = None,
+    rejection_reason: str | None = None,
+) -> DocumentQualityGate:
+    return DocumentQualityGate(
+        status=status,
+        ingestion_confidence=ingestion_confidence,
+        table_extraction_confidence=table_extraction_confidence,
+        unsupported_content_warnings=list(unsupported_content_warnings or []),
+        rejection_reason=rejection_reason,
+    )
+
+
+def _table_extraction_result(
+    tables: list[ExtractedTableMetadata] | None = None,
+) -> DocumentTableExtraction:
+    extracted_tables = list(tables or [])
+    return DocumentTableExtraction(
+        table_count=len(extracted_tables),
+        tables=extracted_tables,
+    )
+
+
+def _extract_pdf_lines(reader: PdfReader) -> list[tuple[str, float]]:
     pdf_lines: list[tuple[str, float]] = []
 
     def visitor(
@@ -179,6 +254,10 @@ def _parse_pdf_sections(document_bytes: bytes) -> list[_ParsedSection]:
     for page in reader.pages:
         page.extract_text(visitor_text=visitor)
 
+    return pdf_lines
+
+
+def _build_pdf_sections(pdf_lines: list[tuple[str, float]]) -> list[_ParsedSection]:
     if not pdf_lines:
         return []
 
@@ -197,6 +276,66 @@ def _parse_pdf_sections(document_bytes: bytes) -> list[_ParsedSection]:
         for text, font_size in pdf_lines
     ]
     return _build_sections(lines)
+
+
+def _count_pdf_images(reader: PdfReader) -> int:
+    image_count = 0
+    for page in reader.pages:
+        resources = page.get("/Resources")
+        if resources is None:
+            continue
+        if hasattr(resources, "get_object"):
+            resources = resources.get_object()
+        xobjects = resources.get("/XObject")
+        if xobjects is None:
+            continue
+        if hasattr(xobjects, "get_object"):
+            xobjects = xobjects.get_object()
+        for obj in xobjects.values():
+            resolved = obj.get_object() if hasattr(obj, "get_object") else obj
+            if resolved.get("/Subtype") == "/Image":
+                image_count += 1
+    return image_count
+
+
+def _analyze_pdf_document(document_bytes: bytes) -> _DocumentAnalysis:
+    try:
+        reader = PdfReader(BytesIO(document_bytes))
+    except (PdfReadError, PdfStreamError):
+        return _DocumentAnalysis(
+            sections=[],
+            quality_gate=_quality_gate_result(
+                status="rejected",
+                rejection_reason=_MALFORMED_PDF_REASON,
+            ),
+            table_extraction=_table_extraction_result(),
+        )
+
+    pdf_lines = _extract_pdf_lines(reader)
+    image_count = _count_pdf_images(reader)
+    warnings = [_IMAGE_WARNING] if image_count > 0 else []
+    if not pdf_lines and image_count > 0:
+        return _DocumentAnalysis(
+            sections=[],
+            quality_gate=_quality_gate_result(
+                status="rejected",
+                ingestion_confidence=0.0,
+                table_extraction_confidence=0.0,
+                unsupported_content_warnings=warnings,
+                rejection_reason=_IMAGE_ONLY_PDF_REASON,
+            ),
+            table_extraction=_table_extraction_result(),
+        )
+
+    return _DocumentAnalysis(
+        sections=_build_pdf_sections(pdf_lines),
+        quality_gate=_quality_gate_result(
+            ingestion_confidence=1.0 if pdf_lines else 0.0,
+            table_extraction_confidence=0.0,
+            unsupported_content_warnings=warnings,
+        ),
+        table_extraction=_table_extraction_result(),
+    )
 
 
 def _docx_heading_levels(archive: ZipFile) -> dict[str, int]:
@@ -226,12 +365,7 @@ def _docx_heading_levels(archive: ZipFile) -> dict[str, int]:
     return levels
 
 
-def _parse_docx_sections(document_bytes: bytes) -> list[_ParsedSection]:
-    with ZipFile(BytesIO(document_bytes)) as archive:
-        document_xml = archive.read("word/document.xml")
-        heading_levels = _docx_heading_levels(archive)
-
-    root = ElementTree.fromstring(document_xml)
+def _docx_lines(root: ElementTree.Element, heading_levels: dict[str, int]) -> list[_DocumentLine]:
     lines: list[_DocumentLine] = []
     for paragraph in root.findall(".//w:body/w:p", _WORDPROCESSINGML_NS):
         text = "".join(
@@ -251,18 +385,83 @@ def _parse_docx_sections(document_bytes: bytes) -> list[_ParsedSection]:
             )
         )
 
-    return _build_sections(lines)
+    return lines
 
 
-def _parse_document_sections(*, content_type: str, document_bytes: bytes) -> list[_ParsedSection]:
+def _docx_table_metadata(root: ElementTree.Element) -> list[ExtractedTableMetadata]:
+    tables: list[ExtractedTableMetadata] = []
+    for index, table in enumerate(root.findall(".//w:body/w:tbl", _WORDPROCESSINGML_NS), start=1):
+        rows = table.findall("w:tr", _WORDPROCESSINGML_NS)
+        row_count = len(rows)
+        column_count = max(
+            (
+                len(row.findall("w:tc", _WORDPROCESSINGML_NS))
+                for row in rows
+            ),
+            default=0,
+        )
+        tables.append(
+            ExtractedTableMetadata(
+                table_id=f"table-{index}",
+                row_count=row_count,
+                column_count=column_count,
+            )
+        )
+    return tables
+
+
+def _docx_unsupported_content_warnings(archive: ZipFile) -> list[str]:
+    names = set(archive.namelist())
+    warnings: list[str] = []
+    if any(name.startswith("word/media/") for name in names):
+        warnings.append(_IMAGE_WARNING)
+    if any(name.startswith("word/charts/") for name in names):
+        warnings.append(_CHART_WARNING)
+    if any(name.startswith("word/embeddings/") for name in names):
+        warnings.append(_EMBEDDING_WARNING)
+    return warnings
+
+
+def _analyze_docx_document(document_bytes: bytes) -> _DocumentAnalysis:
     try:
-        if content_type == PDF_CONTENT_TYPE:
-            return _parse_pdf_sections(document_bytes)
-        if content_type == DOCX_CONTENT_TYPE:
-            return _parse_docx_sections(document_bytes)
-    except (BadZipFile, ElementTree.ParseError, KeyError, PdfReadError, PdfStreamError):
-        return []
-    return []
+        with ZipFile(BytesIO(document_bytes)) as archive:
+            document_xml = archive.read("word/document.xml")
+            heading_levels = _docx_heading_levels(archive)
+            warnings = _docx_unsupported_content_warnings(archive)
+        root = ElementTree.fromstring(document_xml)
+    except (BadZipFile, ElementTree.ParseError, KeyError):
+        return _DocumentAnalysis(
+            sections=[],
+            quality_gate=_quality_gate_result(
+                status="rejected",
+                rejection_reason=_MALFORMED_DOCX_REASON,
+            ),
+            table_extraction=_table_extraction_result(),
+        )
+
+    lines = _docx_lines(root, heading_levels)
+    tables = _docx_table_metadata(root)
+    return _DocumentAnalysis(
+        sections=_build_sections(lines),
+        quality_gate=_quality_gate_result(
+            ingestion_confidence=1.0 if lines else 0.0,
+            table_extraction_confidence=1.0,
+            unsupported_content_warnings=warnings,
+        ),
+        table_extraction=_table_extraction_result(tables),
+    )
+
+
+def _analyze_document(*, content_type: str, document_bytes: bytes) -> _DocumentAnalysis:
+    if content_type == PDF_CONTENT_TYPE:
+        return _analyze_pdf_document(document_bytes)
+    if content_type == DOCX_CONTENT_TYPE:
+        return _analyze_docx_document(document_bytes)
+    return _DocumentAnalysis(
+        sections=[],
+        quality_gate=_quality_gate_result(),
+        table_extraction=_table_extraction_result(),
+    )
 
 
 def create_document_version(
@@ -278,10 +477,15 @@ def create_document_version(
 ) -> DocumentVersion:
     document_version_id = f"docv-{uuid4().hex}"
     content_hash = sha256(document_bytes).hexdigest()
-    parsed_sections = _parse_document_sections(
+    analysis = _analyze_document(
         content_type=content_type,
         document_bytes=document_bytes,
     )
+    if analysis.quality_gate.status == "rejected":
+        raise DocumentQualityGateRejectedError(
+            analysis.quality_gate.rejection_reason or "Document Quality Gate rejected upload."
+        )
+
     storage_key = (
         PurePosixPath("policy-documents")
         / document_id
@@ -305,12 +509,14 @@ def create_document_version(
         sha256=content_hash,
         retention_until=retention_until,
         retention_reason=retention_reason,
+        quality_gate=analysis.quality_gate.model_dump(mode="json"),
+        table_extraction=analysis.table_extraction.model_dump(mode="json"),
     )
     session.add(record)
     session.flush()
 
     section_start_char = 0
-    for index, parsed_section in enumerate(parsed_sections):
+    for index, parsed_section in enumerate(analysis.sections):
         section_end_char = section_start_char + len(parsed_section.content)
         session.add(
             DocumentSectionRecord(
@@ -324,7 +530,7 @@ def create_document_version(
             )
         )
         section_start_char = section_end_char
-        if index < len(parsed_sections) - 1:
+        if index < len(analysis.sections) - 1:
             section_start_char += len(_SECTION_GAP)
 
     if commit:
@@ -359,6 +565,12 @@ def document_version_from_record(record: DocumentVersionRecord) -> DocumentVersi
         deleted_at=_normalize_datetime(record.deleted_at),
         deleted_by=record.deleted_by,
         deletion_reason=record.deletion_reason,
+        quality_gate=DocumentQualityGate.model_validate(
+            record.quality_gate or _quality_gate_result().model_dump(mode="json")
+        ),
+        table_extraction=DocumentTableExtraction.model_validate(
+            record.table_extraction or _table_extraction_result().model_dump(mode="json")
+        ),
     )
 
 

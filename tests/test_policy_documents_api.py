@@ -1,6 +1,8 @@
 import json
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 import pytest
@@ -42,6 +44,192 @@ def _configure_local_auth(
     )
 
 
+def _make_image_only_pdf_bytes() -> bytes:
+    objects: list[bytes] = []
+
+    def add_object(payload: bytes) -> int:
+        objects.append(payload)
+        return len(objects)
+
+    image_id = add_object(
+        b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 "
+        b"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length 3 >>\nstream\n"
+        b"\xff\xff\xff"
+        b"\nendstream"
+    )
+    content_stream = b"q\n100 0 0 100 0 0 cm\n/Im0 Do\nQ"
+    content_id = add_object(
+        f"<< /Length {len(content_stream)} >>\nstream\n".encode()
+        + content_stream
+        + b"\nendstream"
+    )
+    page_id = add_object(
+        f"<< /Type /Page /Parent 4 0 R /MediaBox [0 0 100 100] "
+        f"/Resources << /ProcSet [/PDF /ImageC] /XObject << /Im0 {image_id} 0 R >> >> "
+        f"/Contents {content_id} 0 R >>".encode()
+    )
+    pages_id = add_object(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+    catalog_id = add_object(b"<< /Type /Catalog /Pages 4 0 R >>")
+
+    assert (image_id, content_id, page_id, pages_id, catalog_id) == (1, 2, 3, 4, 5)
+
+    buffer = BytesIO()
+    buffer.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_number, payload in enumerate(objects, start=1):
+        offsets.append(buffer.tell())
+        buffer.write(f"{object_number} 0 obj\n".encode())
+        buffer.write(payload)
+        buffer.write(b"\nendobj\n")
+
+    xref_offset = buffer.tell()
+    buffer.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    buffer.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        buffer.write(f"{offset:010} 00000 n \n".encode())
+    buffer.write(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_id} 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode()
+    )
+    return buffer.getvalue()
+
+
+def _make_pdf_bytes(lines: list[tuple[str, int]]) -> bytes:
+    objects: list[bytes] = []
+
+    def add_object(payload: bytes) -> int:
+        objects.append(payload)
+        return len(objects)
+
+    catalog_id = add_object(b"<< /Type /Catalog /Pages 2 0 R >>")
+    pages_id = add_object(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+
+    content_lines = ["BT", "/F1 18 Tf", "72 720 Td"]
+    first_line = True
+    for text, font_size in lines:
+        escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        if first_line:
+            content_lines.append(f"/F1 {font_size} Tf")
+            content_lines.append(f"({escaped}) Tj")
+            first_line = False
+            continue
+
+        content_lines.append("0 -24 Td")
+        content_lines.append(f"/F1 {font_size} Tf")
+        content_lines.append(f"({escaped}) Tj")
+    content_lines.append("ET")
+    content_stream = "\n".join(content_lines).encode("utf-8")
+
+    page_id = add_object(
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+    )
+    font_id = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    content_id = add_object(
+        f"<< /Length {len(content_stream)} >>\nstream\n".encode()
+        + content_stream
+        + b"\nendstream"
+    )
+
+    assert (catalog_id, pages_id, page_id, font_id, content_id) == (1, 2, 3, 4, 5)
+
+    buffer = BytesIO()
+    buffer.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_number, payload in enumerate(objects, start=1):
+        offsets.append(buffer.tell())
+        buffer.write(f"{object_number} 0 obj\n".encode())
+        buffer.write(payload)
+        buffer.write(b"\nendobj\n")
+
+    xref_offset = buffer.tell()
+    buffer.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    buffer.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        buffer.write(f"{offset:010} 00000 n \n".encode())
+    buffer.write(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode()
+    )
+    return buffer.getvalue()
+
+
+def _make_docx_bytes(paragraphs: list[tuple[str, str]]) -> bytes:
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default
+    Extension="rels"
+    ContentType="application/vnd.openxmlformats-package.relationships+xml"
+  />
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override
+    PartName="/word/document.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+  />
+  <Override
+    PartName="/word/styles.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"
+  />
+</Types>
+"""
+    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship
+    Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    Target="word/document.xml"
+  />
+</Relationships>
+"""
+    styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:pPr><w:outlineLvl w:val="0"/></w:pPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+  </w:style>
+</w:styles>
+"""
+
+    body = []
+    for text, style_id in paragraphs:
+        escaped = (
+            text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
+        body.append(
+            f"""
+  <w:p>
+    <w:pPr><w:pStyle w:val="{style_id}"/></w:pPr>
+    <w:r><w:t>{escaped}</w:t></w:r>
+  </w:p>"""
+        )
+    document = (
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>"""
+        + "".join(body)
+        + """
+    <w:sectPr />
+  </w:body>
+</w:document>
+"""
+    )
+
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", rels)
+        archive.writestr("word/document.xml", document)
+        archive.writestr("word/styles.xml", styles)
+    return buffer.getvalue()
+
+
 @pytest.mark.anyio
 async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
     monkeypatch: pytest.MonkeyPatch,
@@ -56,7 +244,12 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    document_bytes = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
     expected_sha256 = sha256(document_bytes).hexdigest()
 
     async with httpx.AsyncClient(
@@ -103,6 +296,17 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
         "deleted_at": None,
         "deleted_by": None,
         "deletion_reason": None,
+        "quality_gate": {
+            "status": "passed",
+            "ingestion_confidence": 1.0,
+            "table_extraction_confidence": 0.0,
+            "unsupported_content_warnings": [],
+            "rejection_reason": None,
+        },
+        "table_extraction": {
+            "table_count": 0,
+            "tables": [],
+        },
     }
 
     assert access_response.status_code == 200
@@ -148,6 +352,78 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
 
 
 @pytest.mark.anyio
+async def test_upload_rejects_image_only_pdf_with_clear_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    _make_image_only_pdf_bytes(),
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 422
+    assert upload_response.json() == {
+        "detail": "Image-only PDFs are not supported because no extractable text was found.",
+    }
+
+
+@pytest.mark.anyio
+async def test_upload_rejects_malformed_pdf_with_clear_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    b"not a pdf",
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 422
+    assert upload_response.json() == {
+        "detail": "Malformed PDF files are not supported because the file could not be parsed.",
+    }
+
+
+@pytest.mark.anyio
 async def test_reuploading_docx_policy_document_creates_new_immutable_document_versions(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -161,8 +437,18 @@ async def test_reuploading_docx_policy_document_creates_new_immutable_document_v
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    first_document_bytes = b"PK\x03\x04first-docx-version"
-    second_document_bytes = b"PK\x03\x04second-docx-version"
+    first_document_bytes = _make_docx_bytes(
+        [
+            ("Travel Policy", "Heading1"),
+            ("Meals are capped at $75 per day.", "Normal"),
+        ]
+    )
+    second_document_bytes = _make_docx_bytes(
+        [
+            ("Travel Policy", "Heading1"),
+            ("Meals are capped at $90 per day.", "Normal"),
+        ]
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app()),
@@ -250,7 +536,12 @@ async def test_uploading_duplicate_pdf_bytes_still_creates_distinct_document_ver
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    document_bytes = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
     expected_sha256 = sha256(document_bytes).hexdigest()
 
     async with httpx.AsyncClient(
@@ -326,7 +617,12 @@ async def test_uploading_document_version_with_retention_metadata_blocks_early_d
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    document_bytes = b"%PDF-1.7\nretained-document\n"
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Retained document.", 12),
+        ]
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app()),
@@ -380,7 +676,12 @@ async def test_admin_deletes_document_version_after_retention_and_audit_trail_is
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    document_bytes = b"%PDF-1.7\ndelete-me\n"
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Delete me.", 12),
+        ]
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app()),
@@ -499,7 +800,12 @@ async def test_delete_commit_failure_keeps_document_bytes_available(
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    document_bytes = b"%PDF-1.7\ncommit-failure\n"
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Commit failure.", 12),
+        ]
+    )
     commit_count = 0
 
     async with httpx.AsyncClient(
@@ -578,7 +884,12 @@ async def test_reason_fields_enforce_database_length_limits(
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    document_bytes = b"%PDF-1.7\nvalidated-reasons\n"
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Validated reasons.", 12),
+        ]
+    )
     oversized_reason = "x" * 501
 
     async with httpx.AsyncClient(
