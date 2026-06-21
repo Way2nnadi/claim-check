@@ -1,5 +1,6 @@
 import json
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 
 import httpx
@@ -40,6 +41,58 @@ def _configure_local_auth(
             ]
         ),
     )
+
+
+def _make_image_only_pdf_bytes() -> bytes:
+    objects: list[bytes] = []
+
+    def add_object(payload: bytes) -> int:
+        objects.append(payload)
+        return len(objects)
+
+    image_id = add_object(
+        b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 "
+        b"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length 3 >>\nstream\n"
+        b"\xff\xff\xff"
+        b"\nendstream"
+    )
+    content_stream = b"q\n100 0 0 100 0 0 cm\n/Im0 Do\nQ"
+    content_id = add_object(
+        f"<< /Length {len(content_stream)} >>\nstream\n".encode()
+        + content_stream
+        + b"\nendstream"
+    )
+    page_id = add_object(
+        f"<< /Type /Page /Parent 4 0 R /MediaBox [0 0 100 100] "
+        f"/Resources << /ProcSet [/PDF /ImageC] /XObject << /Im0 {image_id} 0 R >> >> "
+        f"/Contents {content_id} 0 R >>".encode()
+    )
+    pages_id = add_object(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+    catalog_id = add_object(b"<< /Type /Catalog /Pages 4 0 R >>")
+
+    assert (image_id, content_id, page_id, pages_id, catalog_id) == (1, 2, 3, 4, 5)
+
+    buffer = BytesIO()
+    buffer.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_number, payload in enumerate(objects, start=1):
+        offsets.append(buffer.tell())
+        buffer.write(f"{object_number} 0 obj\n".encode())
+        buffer.write(payload)
+        buffer.write(b"\nendobj\n")
+
+    xref_offset = buffer.tell()
+    buffer.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    buffer.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        buffer.write(f"{offset:010} 00000 n \n".encode())
+    buffer.write(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_id} 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode()
+    )
+    return buffer.getvalue()
 
 
 @pytest.mark.anyio
@@ -103,6 +156,17 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
         "deleted_at": None,
         "deleted_by": None,
         "deletion_reason": None,
+        "quality_gate": {
+            "status": "passed",
+            "ingestion_confidence": 0.0,
+            "table_extraction_confidence": 0.0,
+            "unsupported_content_warnings": [],
+            "rejection_reason": None,
+        },
+        "table_extraction": {
+            "table_count": 0,
+            "tables": [],
+        },
     }
 
     assert access_response.status_code == 200
@@ -144,6 +208,42 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
                 },
             },
         ]
+    }
+
+
+@pytest.mark.anyio
+async def test_upload_rejects_image_only_pdf_with_clear_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    _make_image_only_pdf_bytes(),
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 422
+    assert upload_response.json() == {
+        "detail": "Image-only PDFs are not supported because no extractable text was found.",
     }
 
 
