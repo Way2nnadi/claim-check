@@ -30,8 +30,7 @@ def publish_policy_version(
     rule_records = session.scalars(select(RuleRecord).order_by(RuleRecord.rule_id)).all()
     published_rules: list[Rule] = []
     for record in rule_records:
-        rule = Rule.model_validate(record.payload)
-        if rule.lifecycle_state is not LifecycleState.APPROVED:
+        if record.payload.get("lifecycle_state") != LifecycleState.APPROVED.value:
             continue
 
         published_payload = deepcopy(record.payload)

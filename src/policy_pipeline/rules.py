@@ -32,6 +32,14 @@ class AggregationPeriod(StrEnum):
     PER_ATTENDEE = "per_attendee"
 
 
+class QAFlagCode(StrEnum):
+    MISSING_THRESHOLD = "missing_threshold"
+    INVALID_ENUM = "invalid_enum"
+    MISSING_APPLICABILITY = "missing_applicability"
+    UNRESOLVABLE_CITATION = "unresolvable_citation"
+    LOW_EXTRACTION_CONFIDENCE = "low_extraction_confidence"
+
+
 class RuleOrigin(BaseModel):
     source_type: RuleOriginType
     extraction_run_id: str | None = None
@@ -88,7 +96,12 @@ class RuleCondition(BaseModel):
     value: str = Field(min_length=1)
 
 
-class Rule(BaseModel):
+class QAFlag(BaseModel):
+    code: QAFlagCode
+    detail: str = Field(min_length=1)
+
+
+class _RulePayload(BaseModel):
     rule_id: str = Field(min_length=1)
     statement: str = Field(min_length=1)
     enforceability_class: EnforceabilityClass
@@ -99,6 +112,27 @@ class Rule(BaseModel):
     condition: RuleCondition | None = None
     applicability: Applicability | None = None
     exceptions: list[RuleException] = Field(default_factory=list)
+
+
+class CandidateRule(_RulePayload):
+    qa_flags: list[QAFlag] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_candidate_rule(self) -> "CandidateRule":
+        if self.lifecycle_state not in {LifecycleState.EXTRACTED, LifecycleState.IN_REVIEW}:
+            raise ValueError("Candidate Rule lifecycle_state must be extracted or in_review.")
+        if (
+            self.enforceability_class is not EnforceabilityClass.ENFORCEABLE
+            and self.condition is not None
+        ):
+            raise ValueError(
+                "Guidance and subjective Candidate Rules must not include "
+                "a machine-checkable condition."
+            )
+        return self
+
+
+class Rule(_RulePayload):
 
     @model_validator(mode="after")
     def validate_rule(self) -> "Rule":
