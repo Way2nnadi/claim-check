@@ -254,6 +254,7 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
                 "limit_basis": "per employee",
             },
             "exceptions": [],
+            "qa_flags": [],
         },
         {
             "rule_id": "extract-expense-policy-v1:2",
@@ -284,6 +285,7 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
             "condition": None,
             "applicability": None,
             "exceptions": [],
+            "qa_flags": [],
         },
     ]
     first_citation = response_body["candidate_rules"][0]["citation"]
@@ -447,7 +449,112 @@ async def test_extraction_run_retries_invalid_structured_output_before_persistin
 
 
 @pytest.mark.anyio
-async def test_extraction_run_rejects_unresolvable_citations_after_attempt_limit(
+async def test_extraction_run_rejects_malformed_partial_conditions_instead_of_flagging_them(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        save_prompt_template(
+            session,
+            prompt_template_id="rule-extraction",
+            version="v1",
+            template="Extract candidate Rules from the Policy Document.",
+        )
+        save_model_configuration(
+            session,
+            model_configuration_id="fake-openai",
+            version="v1",
+            model="gpt-5-mini",
+            endpoint="https://fake-openai.local/v1/chat/completions",
+            settings={
+                "max_validation_attempts": 1,
+                "fake_structured_outputs": [
+                    {
+                        "candidate_rules": [
+                            {
+                                "statement": "Meals are capped at $75 per day.",
+                                "enforceability_class": "enforceable",
+                                "scope": {
+                                    "expense_category": "meals",
+                                },
+                                "condition": {
+                                    "operator": "<=",
+                                    "value": "75",
+                                },
+                                "applicability": {
+                                    "aggregation_period": "per_day",
+                                    "unit": "money",
+                                    "currency": "USD",
+                                },
+                                "citation_quote": "Meals are capped at $75 per day.",
+                            }
+                        ]
+                    }
+                ],
+            },
+        )
+    engine.dispose()
+
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Travel Policy", 18),
+            ("Meals are capped at $75 per day.", 12),
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": (
+                    "expense-policy.pdf",
+                    document_bytes,
+                    "application/pdf",
+                )
+            },
+        )
+        document_version_id = upload_response.json()["document_version_id"]
+        extraction_response = await client.post(
+            f"/policy-documents/expense-policy/versions/{document_version_id}/extraction-runs",
+            headers={"Authorization": "Bearer admin-token"},
+            json={
+                "extraction_run_id": "extract-expense-policy-v2b",
+                "prompt_template_id": "rule-extraction",
+                "prompt_template_version": "v1",
+                "model_configuration_id": "fake-openai",
+                "model_configuration_version": "v1",
+            },
+        )
+
+    assert upload_response.status_code == 201
+    assert extraction_response.status_code == 422
+    assert extraction_response.json() == {
+        "detail": "Structured extraction output could not be validated after 1 attempts."
+    }
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        extraction_run = session.get(ExtractionRunRecord, "extract-expense-policy-v2b")
+        stored_rules = session.scalars(select(RuleRecord).order_by(RuleRecord.rule_id)).all()
+    engine.dispose()
+
+    assert extraction_run is not None
+    assert stored_rules == []
+
+
+@pytest.mark.anyio
+async def test_extraction_run_attaches_deterministic_qa_flags_to_candidate_rules(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -485,9 +592,83 @@ async def test_extraction_run_rejects_unresolvable_citations_after_attempt_limit
                                 "condition": {
                                     "field": "meal.amount",
                                     "operator": "<=",
-                                    "value": "75",
                                 },
-                                "citation_quote": "International meals are capped at $100 per day.",
+                                "applicability": {
+                                    "aggregation_period": "per_day",
+                                    "unit": "money",
+                                    "currency": "USD",
+                                },
+                                "citation_quote": "Meals are capped at $75 per day.",
+                            },
+                            {
+                                "statement": "Lodging is capped at $250 per night.",
+                                "enforceability_class": "enforceable",
+                                "scope": {
+                                    "expense_category": "lodging",
+                                },
+                                "condition": {
+                                    "field": "lodging.amount",
+                                    "operator": "<=",
+                                    "value": "250",
+                                },
+                                "applicability": {
+                                    "aggregation_period": "per_quarter",
+                                    "unit": "money",
+                                    "currency": "USD",
+                                },
+                                "citation_quote": "Lodging is capped at $250 per night.",
+                            },
+                            {
+                                "statement": "Ground transportation is capped at $50 per day.",
+                                "enforceability_class": "enforceable",
+                                "scope": {
+                                    "expense_category": "transportation",
+                                },
+                                "condition": {
+                                    "field": "ground_transport.amount",
+                                    "operator": "<=",
+                                    "value": "50",
+                                },
+                                "citation_quote": "Ground transportation is capped at $50 per day.",
+                            },
+                            {
+                                "statement": "Client dinners are capped at $150 per event.",
+                                "enforceability_class": "enforceable",
+                                "scope": {
+                                    "expense_category": "meals",
+                                },
+                                "condition": {
+                                    "field": "meal.amount",
+                                    "operator": "<=",
+                                    "value": "150",
+                                },
+                                "applicability": {
+                                    "aggregation_period": "per_transaction",
+                                    "unit": "money",
+                                    "currency": "USD",
+                                },
+                                "citation_quote": "Client dinners are capped at $150 per event.",
+                                "extraction_confidence": 0.41,
+                            },
+                            {
+                                "statement": "Breakfast is capped at $25 per day.",
+                                "enforceability_class": "enforceable",
+                                "scope": {
+                                    "expense_category": "meals",
+                                },
+                                "condition": {
+                                    "field": "meal.amount",
+                                    "operator": "<=",
+                                    "value": "25",
+                                },
+                                "applicability": {
+                                    "aggregation_period": "per_day",
+                                    "unit": "money",
+                                    "currency": "USD",
+                                },
+                                "citation_quote": (
+                                    "International breakfasts are capped at $40 per day."
+                                ),
                             }
                         ]
                     }
@@ -500,6 +681,9 @@ async def test_extraction_run_rejects_unresolvable_citations_after_attempt_limit
         [
             ("Travel Policy", 18),
             ("Meals are capped at $75 per day.", 12),
+            ("Lodging is capped at $250 per night.", 12),
+            ("Ground transportation is capped at $50 per day.", 12),
+            ("Client dinners are capped at $150 per event.", 12),
         ]
     )
 
@@ -532,10 +716,60 @@ async def test_extraction_run_rejects_unresolvable_citations_after_attempt_limit
         )
 
     assert upload_response.status_code == 201
-    assert extraction_response.status_code == 422
-    assert extraction_response.json() == {
-        "detail": "Structured extraction output could not be validated after 1 attempts."
-    }
+    assert extraction_response.status_code == 201
+    response_body = extraction_response.json()
+    assert response_body["attempt_count"] == 1
+    assert [candidate_rule["rule_id"] for candidate_rule in response_body["candidate_rules"]] == [
+        "extract-expense-policy-v3:1",
+        "extract-expense-policy-v3:2",
+        "extract-expense-policy-v3:3",
+        "extract-expense-policy-v3:4",
+        "extract-expense-policy-v3:5",
+    ]
+    assert response_body["candidate_rules"][0]["lifecycle_state"] == "extracted"
+    assert response_body["candidate_rules"][0]["citation"]["quote"] == (
+        "Meals are capped at $75 per day."
+    )
+    assert response_body["candidate_rules"][0]["condition"] is None
+    assert response_body["candidate_rules"][0]["qa_flags"] == [
+        {
+            "code": "missing_threshold",
+            "detail": "Quantitative Candidate Rule is missing a threshold value.",
+        }
+    ]
+    assert response_body["candidate_rules"][1]["applicability"] is None
+    assert response_body["candidate_rules"][1]["qa_flags"] == [
+        {
+            "code": "invalid_enum",
+            "detail": (
+                "Candidate Rule contains an invalid enum value for "
+                "applicability.aggregation_period: 'per_quarter'."
+            ),
+        }
+    ]
+    assert response_body["candidate_rules"][2]["applicability"] is None
+    assert response_body["candidate_rules"][2]["qa_flags"] == [
+        {
+            "code": "missing_applicability",
+            "detail": "Quantitative Candidate Rule is missing Applicability.",
+        }
+    ]
+    assert response_body["candidate_rules"][3]["qa_flags"] == [
+        {
+            "code": "low_extraction_confidence",
+            "detail": "Candidate Rule extraction confidence 0.41 is below 0.75.",
+        }
+    ]
+    assert response_body["candidate_rules"][4]["citation"] is None
+    assert response_body["candidate_rules"][4]["qa_flags"] == [
+        {
+            "code": "unresolvable_citation",
+            "detail": (
+                "Candidate Rule Citation quote could not be resolved: "
+                "'International breakfasts are capped at $40 per day.'."
+            ),
+        }
+    ]
 
     engine = create_engine(database_url)
     with Session(engine) as session:
@@ -545,7 +779,29 @@ async def test_extraction_run_rejects_unresolvable_citations_after_attempt_limit
 
     assert extraction_run is not None
     assert extraction_run.document_version_id == document_version_id
-    assert stored_rules == []
+    assert [record.rule_id for record in stored_rules] == [
+        "extract-expense-policy-v3:1",
+        "extract-expense-policy-v3:2",
+        "extract-expense-policy-v3:3",
+        "extract-expense-policy-v3:4",
+        "extract-expense-policy-v3:5",
+    ]
+    assert stored_rules[0].payload["qa_flags"] == [
+        {
+            "code": "missing_threshold",
+            "detail": "Quantitative Candidate Rule is missing a threshold value.",
+        }
+    ]
+    assert stored_rules[4].payload["citation"] is None
+    assert stored_rules[4].payload["qa_flags"] == [
+        {
+            "code": "unresolvable_citation",
+            "detail": (
+                "Candidate Rule Citation quote could not be resolved: "
+                "'International breakfasts are capped at $40 per day.'."
+            ),
+        }
+    ]
 
 
 @pytest.mark.anyio

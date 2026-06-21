@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -28,16 +29,22 @@ from policy_pipeline.llm_clients import (
 from policy_pipeline.rule_store import create_rule
 from policy_pipeline.rules import (
     Applicability,
+    CandidateRule,
     Citation,
     EnforceabilityClass,
     LifecycleState,
-    Rule,
+    QAFlag,
+    QAFlagCode,
     RuleCondition,
     RuleException,
     RuleOrigin,
     RuleOriginType,
     Scope,
 )
+
+_LOW_EXTRACTION_CONFIDENCE_THRESHOLD = 0.75
+_QUANTITATIVE_STATEMENT_PATTERN = re.compile(r"[$€£]|\b\d+(?:\.\d+)?\b")
+_QUANTITATIVE_OPERATORS = {"<", "<=", ">", ">=", "=", "=="}
 
 
 class StructuredOutputRejectedError(Exception):
@@ -61,7 +68,20 @@ class ExtractionExecutionResult(BaseModel):
     model_configuration_id: str
     model_configuration_version: str
     attempt_count: int
-    candidate_rules: list[Rule] = Field(default_factory=list)
+    candidate_rules: list[CandidateRule] = Field(default_factory=list)
+
+
+class _CandidateRuleConditionDraft(BaseModel):
+    field: str | None = None
+    operator: str | None = None
+    value: str | None = None
+
+
+class _CandidateRuleApplicabilityDraft(BaseModel):
+    aggregation_period: str | None = None
+    unit: str | None = None
+    currency: str | None = None
+    limit_basis: str | None = None
 
 
 class _CandidateRuleDraft(BaseModel):
@@ -69,14 +89,28 @@ class _CandidateRuleDraft(BaseModel):
     enforceability_class: EnforceabilityClass
     scope: Scope
     citation_quote: str = Field(min_length=1)
-    condition: RuleCondition | None = None
-    applicability: Applicability | None = None
+    condition: _CandidateRuleConditionDraft | None = None
+    applicability: _CandidateRuleApplicabilityDraft | None = None
     exceptions: list[RuleException] = Field(default_factory=list)
+    extraction_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_candidate_rule(self) -> _CandidateRuleDraft:
-        if self.enforceability_class is EnforceabilityClass.ENFORCEABLE and self.condition is None:
-            raise ValueError("Enforceable Candidate Rule requires a machine-checkable condition.")
+        if self.condition is not None:
+            has_field = bool(self.condition.field)
+            has_operator = bool(self.condition.operator)
+            has_value = bool(self.condition.value)
+
+            if has_value and (not has_field or not has_operator):
+                raise ValueError(
+                    "Candidate Rule condition with a threshold value must include field "
+                    "and operator."
+                )
+            if (has_field or has_operator) and not (has_field and has_operator):
+                raise ValueError(
+                    "Candidate Rule condition must include both field and operator when "
+                    "partially specified."
+                )
         if (
             self.enforceability_class is not EnforceabilityClass.ENFORCEABLE
             and self.condition is not None
@@ -206,23 +240,56 @@ def _materialize_candidate_rules(
     document_id: str,
     document_version_id: str,
     session: Session,
-) -> list[Rule]:
+) -> list[CandidateRule]:
     payload = _StructuredCandidateRules.model_validate(structured_output)
-    candidate_rules: list[Rule] = []
+    candidate_rules: list[CandidateRule] = []
     for index, draft in enumerate(payload.candidate_rules, start=1):
-        anchor = resolve_citation_anchor(
-            session,
+        qa_flags: list[QAFlag] = []
+        citation = _resolve_citation(
+            session=session,
             document_id=document_id,
             document_version_id=document_version_id,
-            quote=draft.citation_quote,
+            citation_quote=draft.citation_quote,
+            qa_flags=qa_flags,
         )
-        if anchor is None:
-            raise ValueError(
-                "Extracted Candidate Rule requires a resolvable Citation quote: "
-                f"{draft.citation_quote!r}."
+        condition = _normalize_condition(draft=draft)
+        applicability, invalid_enum_flagged = _normalize_applicability(
+            draft=draft,
+            qa_flags=qa_flags,
+        )
+        if _is_quantitative_candidate_rule(draft=draft):
+            if condition is None:
+                qa_flags.append(
+                    QAFlag(
+                        code=QAFlagCode.MISSING_THRESHOLD,
+                        detail="Quantitative Candidate Rule is missing a threshold value.",
+                    )
+                )
+            if draft.applicability is None or (
+                applicability is None and not invalid_enum_flagged
+            ):
+                qa_flags.append(
+                    QAFlag(
+                        code=QAFlagCode.MISSING_APPLICABILITY,
+                        detail="Quantitative Candidate Rule is missing Applicability.",
+                    )
+                )
+        if (
+            draft.extraction_confidence is not None
+            and draft.extraction_confidence < _LOW_EXTRACTION_CONFIDENCE_THRESHOLD
+        ):
+            qa_flags.append(
+                QAFlag(
+                    code=QAFlagCode.LOW_EXTRACTION_CONFIDENCE,
+                    detail=(
+                        "Candidate Rule extraction confidence "
+                        f"{draft.extraction_confidence:.2f} is below "
+                        f"{_LOW_EXTRACTION_CONFIDENCE_THRESHOLD:.2f}."
+                    ),
+                )
             )
         candidate_rules.append(
-            Rule(
+            CandidateRule(
                 rule_id=f"{extraction_run.extraction_run_id}:{index}",
                 statement=draft.statement,
                 enforceability_class=draft.enforceability_class,
@@ -232,17 +299,102 @@ def _materialize_candidate_rules(
                     extraction_run_id=extraction_run.extraction_run_id,
                 ),
                 scope=draft.scope,
-                citation=Citation(
-                    document_id=anchor.document_id,
-                    document_version_id=anchor.document_version_id,
-                    section_id=anchor.section_id,
-                    quote=anchor.quote,
-                    start_char=anchor.start_char,
-                    end_char=anchor.end_char,
-                ),
-                condition=draft.condition,
-                applicability=draft.applicability,
+                citation=citation,
+                condition=condition,
+                applicability=applicability,
                 exceptions=draft.exceptions,
+                qa_flags=qa_flags,
             )
         )
     return candidate_rules
+
+
+def _normalize_condition(*, draft: _CandidateRuleDraft) -> RuleCondition | None:
+    if draft.condition is None:
+        return None
+    if not draft.condition.field or not draft.condition.operator or not draft.condition.value:
+        return None
+    return RuleCondition.model_validate(draft.condition.model_dump())
+
+
+def _normalize_applicability(
+    *,
+    draft: _CandidateRuleDraft,
+    qa_flags: list[QAFlag],
+) -> tuple[Applicability | None, bool]:
+    if draft.applicability is None:
+        return None, False
+
+    try:
+        return Applicability.model_validate(draft.applicability.model_dump()), False
+    except ValidationError as exc:
+        invalid_enum_error = next(
+            (
+                error
+                for error in exc.errors()
+                if tuple(error["loc"]) == ("aggregation_period",) and error["type"] == "enum"
+            ),
+            None,
+        )
+        if invalid_enum_error is None:
+            if not draft.applicability.aggregation_period or not draft.applicability.unit:
+                return None, False
+            raise
+
+        qa_flags.append(
+            QAFlag(
+                code=QAFlagCode.INVALID_ENUM,
+                detail=(
+                    "Candidate Rule contains an invalid enum value for "
+                    "applicability.aggregation_period: "
+                    f"{draft.applicability.aggregation_period!r}."
+                ),
+            )
+        )
+        return None, True
+
+
+def _resolve_citation(
+    *,
+    session: Session,
+    document_id: str,
+    document_version_id: str,
+    citation_quote: str,
+    qa_flags: list[QAFlag],
+) -> Citation | None:
+    anchor = resolve_citation_anchor(
+        session,
+        document_id=document_id,
+        document_version_id=document_version_id,
+        quote=citation_quote,
+    )
+    if anchor is None:
+        qa_flags.append(
+            QAFlag(
+                code=QAFlagCode.UNRESOLVABLE_CITATION,
+                detail=(
+                    "Candidate Rule Citation quote could not be resolved: "
+                    f"{citation_quote!r}."
+                ),
+            )
+        )
+        return None
+
+    return Citation(
+        document_id=anchor.document_id,
+        document_version_id=anchor.document_version_id,
+        section_id=anchor.section_id,
+        quote=anchor.quote,
+        start_char=anchor.start_char,
+        end_char=anchor.end_char,
+    )
+
+
+def _is_quantitative_candidate_rule(*, draft: _CandidateRuleDraft) -> bool:
+    if draft.enforceability_class is not EnforceabilityClass.ENFORCEABLE:
+        return False
+    if _QUANTITATIVE_STATEMENT_PATTERN.search(draft.statement) is not None:
+        return True
+    if draft.condition is None:
+        return False
+    return draft.condition.operator in _QUANTITATIVE_OPERATORS
