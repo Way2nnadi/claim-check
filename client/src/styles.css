@@ -1,0 +1,427 @@
+:root {
+  color-scheme: light;
+  --paper: #f6f0e3;
+  --paper-shadow: rgba(37, 31, 28, 0.16);
+  --ink: #1f1a17;
+  --muted-ink: rgba(31, 26, 23, 0.72);
+  --accent: #9f2f22;
+  --accent-soft: rgba(159, 47, 34, 0.14);
+  --line: rgba(31, 26, 23, 0.12);
+  --panel: rgba(255, 250, 241, 0.82);
+  --button-ink: #fdf7ee;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top, rgba(159, 47, 34, 0.08), transparent 32%),
+    linear-gradient(180deg, #efe6d5 0%, #f9f5ec 52%, #ede5d5 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.eyebrow {
+  margin: 0 0 0.6rem;
+  font-family: "Avenir Next Condensed", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  font-size: 0.84rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.loading-stage,
+.signin-page,
+.shell-page {
+  min-height: 100vh;
+}
+
+.loading-stage {
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.loading-card {
+  max-width: 34rem;
+  padding: 2.5rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 1.2rem 3rem var(--paper-shadow);
+}
+
+.loading-card h1,
+.signin-hero h1,
+.sidebar-header h1,
+.shell-header h2 {
+  margin: 0;
+  font-size: clamp(2.4rem, 5vw, 4.8rem);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+}
+
+.loading-card p:last-child,
+.hero-copy,
+.panel-copy,
+.sidebar-copy,
+.section-summary,
+.lede-block p,
+.ledger-card p,
+.persona-card p {
+  margin: 0;
+  color: var(--muted-ink);
+}
+
+.signin-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.9fr);
+  gap: 1.5rem;
+  padding: 1.5rem;
+}
+
+.signin-hero,
+.signin-panel,
+.shell-sidebar,
+.shell-main {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 1.2rem 3rem var(--paper-shadow);
+}
+
+.signin-hero,
+.shell-main {
+  padding: 2rem;
+}
+
+.signin-panel,
+.shell-sidebar {
+  padding: 1.6rem;
+}
+
+.signin-hero::before,
+.signin-panel::before,
+.shell-sidebar::before,
+.shell-main::before,
+.loading-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(31, 26, 23, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 26, 23, 0.02) 1px, transparent 1px);
+  background-size: 100% 2.2rem, 2.2rem 100%;
+  pointer-events: none;
+}
+
+.hero-copy {
+  max-width: 44rem;
+  margin-top: 1.2rem;
+  font-size: 1.1rem;
+}
+
+.masthead-rule {
+  width: min(12rem, 45%);
+  height: 0.4rem;
+  margin: 2rem 0;
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+.persona-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.persona-card,
+.section-card,
+.ledger-card {
+  position: relative;
+  border: 1px solid var(--line);
+  background: rgba(255, 252, 247, 0.84);
+}
+
+.persona-card {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 1rem;
+  min-height: 18rem;
+  padding: 1.2rem;
+}
+
+.persona-role,
+.principal-meta,
+.nav-link small {
+  font-family: "Avenir Next Condensed", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.persona-role {
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.persona-card h2 {
+  margin: 0 0 0.8rem;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.persona-footer {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.persona-footer code,
+.principal-subject {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.persona-footer code {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.35rem 0.5rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.token-form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1.6rem;
+}
+
+.token-form label {
+  font-family: "Avenir Next Condensed", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.token-form textarea {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  resize: vertical;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--ink);
+}
+
+.persona-footer button,
+.token-form button,
+.signout-button,
+.action-chip,
+.nav-link {
+  border: 1px solid transparent;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.persona-footer button,
+.token-form button,
+.signout-button {
+  justify-self: start;
+  padding: 0.8rem 1rem;
+  background: var(--ink);
+  color: var(--button-ink);
+}
+
+.persona-footer button:hover,
+.token-form button:hover,
+.signout-button:hover,
+.action-chip:hover:not(:disabled),
+.nav-link:hover {
+  transform: translateY(-1px);
+}
+
+.error-banner {
+  margin: 1rem 0 0;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid var(--accent);
+  background: rgba(159, 47, 34, 0.08);
+  color: var(--accent);
+}
+
+.shell-page {
+  display: grid;
+  grid-template-columns: minmax(270px, 0.8fr) minmax(0, 1.6fr);
+  gap: 1.5rem;
+  padding: 1.5rem;
+}
+
+.shell-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 2rem;
+}
+
+.nav-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-link {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.95rem 1rem;
+  border-color: var(--line);
+  text-align: left;
+  background: rgba(255, 255, 255, 0.35);
+  color: var(--ink);
+}
+
+.nav-link.active {
+  background: var(--ink);
+  color: var(--button-ink);
+}
+
+.nav-link small {
+  opacity: 0.76;
+}
+
+.shell-main {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.shell-header,
+.principal-panel,
+.action-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.principal-panel {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.principal-subject {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.principal-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.74rem;
+  color: var(--muted-ink);
+}
+
+.section-card {
+  padding: 1.4rem;
+}
+
+.lede-block {
+  max-width: 44rem;
+  margin-bottom: 1.5rem;
+  font-size: 1.15rem;
+}
+
+.action-row {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.action-chip {
+  padding: 0.8rem 1rem;
+  border-color: var(--line);
+  background: rgba(159, 47, 34, 0.08);
+  color: var(--accent);
+}
+
+.action-chip:disabled {
+  background: rgba(31, 26, 23, 0.05);
+  color: rgba(31, 26, 23, 0.45);
+}
+
+.ledger-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.ledger-card {
+  padding: 1rem;
+}
+
+.read-only-note {
+  margin: 0;
+  color: var(--muted-ink);
+}
+
+@media (max-width: 1024px) {
+  .signin-page,
+  .shell-page {
+    grid-template-columns: 1fr;
+  }
+
+  .persona-grid,
+  .ledger-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .signin-page,
+  .shell-page {
+    padding: 1rem;
+  }
+
+  .signin-hero,
+  .signin-panel,
+  .shell-sidebar,
+  .shell-main {
+    padding: 1.25rem;
+  }
+
+  .shell-header,
+  .principal-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

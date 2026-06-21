@@ -7,3 +7,4 @@ __pycache__/
 uv.lock
 .env*
 .policy-pipeline/
+client/dist/

@@ -13,12 +13,13 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from policy_pipeline.audit import AuditEventListResponse, list_audit_events, record_audit_event
-from policy_pipeline.auth import require_roles
+from policy_pipeline.auth import get_current_principal, require_roles
 from policy_pipeline.config import get_settings
 from policy_pipeline.database import get_session
 from policy_pipeline.documents import (
@@ -110,6 +111,14 @@ def _serialize_datetime(value: datetime | None) -> str | None:
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.service_name)
+    if settings.cors_allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.cors_allowed_origins),
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -137,6 +146,12 @@ def create_app() -> FastAPI:
                 "kms_key_id": settings.object_storage_kms_key_id,
             },
         }
+
+    @app.get("/me", response_model=AuthenticatedPrincipal)
+    def read_authenticated_principal(
+        principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+    ) -> AuthenticatedPrincipal:
+        return principal
 
     class CandidateRuleApprovalRequest(BaseModel):
         rationale: str

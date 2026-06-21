@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_hosted_endpoints_enabled: bool = True
     llm_request_timeout_seconds: float = 30.0
+    cors_allowed_origins: tuple[str, ...] = ()
     local_auth_enabled: bool | None = None
     local_auth_identities: tuple[LocalIdentitySettings, ...] = (
         LocalIdentitySettings(

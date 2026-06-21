@@ -5,7 +5,10 @@
 	"scripts": {
 		"agent:build": "sandcastle docker build-image --image-name sandcastle:claim-check",
 		"preagent:run": "npm run agent:build",
-		"agent:run": "tsx .sandcastle/main.mts"
+		"agent:run": "tsx .sandcastle/main.mts",
+		"client:dev": "npm --prefix client run dev",
+		"client:build": "npm --prefix client run build",
+		"client:test": "npm --prefix client run test"
 	},
 	"devDependencies": {
 		"@ai-hero/sandcastle": "latest",
