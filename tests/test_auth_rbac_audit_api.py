@@ -45,6 +45,10 @@ def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) ->
             ]
         ),
     )
+    monkeypatch.setenv(
+        "POLICY_PIPELINE_CORS_ALLOWED_ORIGINS",
+        json.dumps(["http://127.0.0.1:5173"]),
+    )
 
 
 def _seed_candidate_rule(database_url: str) -> None:
@@ -84,6 +88,104 @@ def _seed_candidate_rule(database_url: str) -> None:
             ),
         )
     engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("token", "expected_subject", "expected_roles"),
+    [
+        ("admin-token", "admin-user", ["admin"]),
+        ("approver-token", "approver-user", ["approver"]),
+        ("viewer-token", "viewer-user", ["viewer"]),
+    ],
+)
+async def test_me_returns_authenticated_principal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    token: str,
+    expected_subject: str,
+    expected_roles: list[str],
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "subject": expected_subject,
+        "roles": expected_roles,
+        "auth_backend": "local",
+    }
+
+
+@pytest.mark.anyio
+async def test_me_requires_authenticated_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/me")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Authentication credentials were not provided.",
+    }
+
+
+@pytest.mark.anyio
+async def test_cors_preflight_allows_vite_dev_origin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.options(
+            "/me",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "Authorization",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+    assert "Authorization" in response.headers["access-control-allow-headers"]
+    assert "GET" in response.headers["access-control-allow-methods"]
 
 
 @pytest.mark.anyio
