@@ -211,14 +211,18 @@ describe("CandidateRuleCatalog", () => {
     render(<CandidateRuleCatalog principal={principal} />);
 
     await screen.findByText("rule-meals-cap");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const listFetchCountAfterInitialLoad = fetchMock.mock.calls.filter(
+      ([url]) => url === "/api/candidate-rules",
+    ).length;
 
     await userEvent.click(screen.getByRole("tab", { name: /Custom/i }));
     await userEvent.click(screen.getByLabelText("Extracted"));
     await userEvent.click(screen.getByLabelText("In review"));
     await userEvent.click(screen.getByLabelText("Published"));
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/candidate-rules")).toHaveLength(
+      listFetchCountAfterInitialLoad,
+    );
     expect(screen.queryByText("rule-meals-cap")).not.toBeInTheDocument();
   });
 
@@ -275,20 +279,65 @@ describe("CandidateRuleCatalog", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /rule-meals-cap/i }));
 
-    expect(await screen.findByRole("heading", { level: 1, name: /Meals are capped at \$75 per day/ })).toBeInTheDocument();
+    expect(await screen.findByText("Candidate Rule edit desk")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Candidate Rules" })).toBeInTheDocument();
+    expect(screen.getByText("QA Flags")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Candidate Rule extraction confidence 0.62 is below 0.75."),
+    ).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Save Candidate Rule" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: /Meals are capped at \$75 per day/ }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Source document" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Extracted rule" })).toBeInTheDocument();
     expect(screen.getByText("Extracted rule")).toBeInTheDocument();
     expect(screen.getByText(/Enforceable · per day · money · USD/)).toBeInTheDocument();
     expect(screen.getByText("Extraction confidence")).toBeInTheDocument();
-    expect(screen.getByText("Low Extraction Confidence")).toBeInTheDocument();
-    expect(
-      screen.getByText("Candidate Rule extraction confidence 0.62 is below 0.75."),
-    ).toBeInTheDocument();
+    expect(screen.getAllByText("Low Extraction Confidence")).toHaveLength(2);
     expect(document.querySelector(".review-source-passage")).toHaveTextContent(
       "Meals are capped at $75 per day.",
     );
     expect(screen.getByRole("button", { name: "Browse sections (1)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "More context" })).toBeInTheDocument();
+  });
+
+  it("lets the approver clear the current selection without immediately reopening the first Candidate Rule", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/policy-documents") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        if (url === "/api/candidate-rules") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => sampleReviews,
+          });
+        }
+        if (url === "/api/candidate-rules/rule-meals-cap") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => sampleReviews.items[0],
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<CandidateRuleCatalog principal={principal} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /rule-meals-cap/i }));
+    await userEvent.click(await screen.findByRole("button", { name: "Clear selection" }));
+
+    expect(
+      await screen.findByText(
+        "Select a Candidate Rule from the queue to compare extracted values, make edits, and save a reviewed Rule.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("QA Flags")).not.toBeInTheDocument();
   });
 });

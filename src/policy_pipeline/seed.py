@@ -69,19 +69,19 @@ Return a single JSON object with this shape:
 }
 
 Rules:
-- Emit one candidate rule per distinct policy requirement. Prefer atomic rules
-  over compound sentences.
+- Emit one candidate rule per distinct policy requirement. Prefer atomic rules over
+  compound sentences.
 - Use enforceability_class "enforceable" only when the rule can be checked automatically.
 - Use "guidance" or "subjective" for recommendations, best practices, or judgment-based rules.
 - Do not include condition on guidance or subjective rules.
-- For quantitative enforceable rules (amounts, counts, limits), include condition
-  and applicability when present in the source text.
-- citation_quote must be copied exactly from the supplied document text so it can
-  be anchored back to the source.
-- scope must always be a JSON object. Use {} when no scope dimensions apply.
-  Never set scope to null.
-- Use null or omit optional scalar fields (including individual scope fields)
-  when the document does not specify them.
+- For quantitative enforceable rules (amounts, counts, limits), include condition and
+  applicability when present in the source text.
+- citation_quote must be copied exactly from the supplied document text so it can be
+  anchored back to the source.
+- scope must always be a JSON object. Use {} when no scope dimensions apply. Never set
+  scope to null.
+- Use null or omit optional scalar fields (including individual scope fields) when the
+  document does not specify them.
 - Return only valid JSON. Do not wrap the JSON in markdown fences."""
 
 

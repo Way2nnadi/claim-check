@@ -69,6 +69,7 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
   const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
   const [reviews, setReviews] = useState<CandidateRuleReview[]>([]);
   const [selectedCandidateRuleId, setSelectedCandidateRuleId] = useState<string | null>(null);
+  const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [lifecycleTab, setLifecycleTab] = useState<LifecycleTabId>("queue");
   const [customLifecycleSelection, setCustomLifecycleSelection] = useState<Set<LifecycleState>>(
     () => new Set(REVIEW_QUEUE_LIFECYCLE_STATES),
@@ -175,18 +176,43 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
     scopeFilterCount > 0 ||
     (lifecycleTab === "custom" && !isDefaultCustomSelection(customSelection));
 
-  if (selectedCandidateRuleId) {
-    return (
-      <CandidateRuleDetail
-        candidateRuleId={selectedCandidateRuleId}
-        principal={principal}
-        onBack={() => setSelectedCandidateRuleId(null)}
-      />
-    );
-  }
+  useEffect(() => {
+    if (status !== "ready") {
+      return;
+    }
+    if (displayedReviews.length === 0) {
+      if (selectedCandidateRuleId !== null) {
+        setSelectedCandidateRuleId(null);
+      }
+      if (selectionDismissed) {
+        setSelectionDismissed(false);
+      }
+      return;
+    }
+    if (
+      selectedCandidateRuleId !== null &&
+      !displayedReviews.some((review) => review.candidate_rule_id === selectedCandidateRuleId)
+    ) {
+      setSelectionDismissed(false);
+      setSelectedCandidateRuleId(displayedReviews[0].candidate_rule_id);
+      return;
+    }
+    if (selectedCandidateRuleId === null && !selectionDismissed) {
+      setSelectedCandidateRuleId(displayedReviews[0].candidate_rule_id);
+    }
+  }, [displayedReviews, selectedCandidateRuleId, selectionDismissed, status]);
 
   return (
     <div className="catalog-page review-catalog content-enter">
+      <header className="review-catalog-head reveal">
+        <span className="folio">Approval desk · triage</span>
+        <h2>Candidate Rules</h2>
+        <p className="review-catalog-lede">
+          Extracted Candidate Rules await review before publication. QA flags and lifecycle
+          state guide triage.
+        </p>
+      </header>
+
       <div className="review-toolbar reveal">
         <div
           className="catalog-tabs"
@@ -322,13 +348,51 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
               {appliedScopeFilters.extractionRunId ? appliedScopeFilters.extractionRunId : null}
             </p>
           ) : null}
-          <div id="review-rule-panel" role="tabpanel" aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}>
-            <CandidateRuleLedger
-              reviews={displayedReviews}
-              onOpenReview={setSelectedCandidateRuleId}
-              emptyMessage={emptyMessageForLifecycleTab(lifecycleTab, hasNonDefaultFilters)}
-              showEmptyHint={showEmptyStateHint(lifecycleTab)}
-            />
+          <div
+            id="review-rule-panel"
+            className="review-workbench"
+            role="tabpanel"
+            aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
+          >
+            <section className="review-workbench-ledger">
+              <CandidateRuleLedger
+                reviews={displayedReviews}
+                selectedCandidateRuleId={selectedCandidateRuleId}
+                onOpenReview={(candidateRuleId) => {
+                  setSelectionDismissed(false);
+                  setSelectedCandidateRuleId(candidateRuleId);
+                }}
+                emptyMessage={emptyMessageForLifecycleTab(lifecycleTab, hasNonDefaultFilters)}
+                showEmptyHint={showEmptyStateHint(lifecycleTab)}
+              />
+            </section>
+
+            <section className="review-workbench-detail">
+              {selectedCandidateRuleId ? (
+                <CandidateRuleDetail
+                  candidateRuleId={selectedCandidateRuleId}
+                  principal={principal}
+                  onBack={() => {
+                    setSelectionDismissed(true);
+                    setSelectedCandidateRuleId(null);
+                  }}
+                  onReviewChange={(updatedReview) => {
+                    setReviews((current) =>
+                      current.map((review) =>
+                        review.candidate_rule_id === updatedReview.candidate_rule_id
+                          ? updatedReview
+                          : review,
+                      ),
+                    );
+                  }}
+                />
+              ) : (
+                <div className="review-selection-empty reveal">
+                  <span className="folio">Candidate Rule edit desk</span>
+                  <p>Select a Candidate Rule from the queue to compare extracted values, make edits, and save a reviewed Rule.</p>
+                </div>
+              )}
+            </section>
           </div>
         </>
       ) : null}

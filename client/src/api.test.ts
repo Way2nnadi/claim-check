@@ -165,6 +165,39 @@ describe("apiRequest", () => {
     );
   });
 
+  it("patches candidate rule review updates with JSON bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidate_rule_id: "rule-123" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { updateCandidateRule } = await import("./api");
+    await updateCandidateRule("rule-123", {
+      statement: "Meals are capped at $80 per day.",
+      condition: {
+        field: "meal.amount",
+        operator: "<=",
+        value: "80",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/candidate-rules/rule-123",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          statement: "Meals are capped at $80 per day.",
+          condition: {
+            field: "meal.amount",
+            operator: "<=",
+            value: "80",
+          },
+        }),
+      }),
+    );
+  });
+
   it("posts extraction run create requests with JSON bodies", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
