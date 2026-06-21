@@ -29,6 +29,17 @@ from policy_pipeline.documents import (
     get_document_version,
     validate_upload_file,
 )
+from policy_pipeline.extraction_registry import (
+    ExtractionRunConflictError,
+    UnknownDocumentVersionError,
+    UnknownModelConfigurationVersionError,
+    UnknownPromptTemplateVersionError,
+)
+from policy_pipeline.extraction_runs import (
+    ExtractionExecutionResult,
+    StructuredOutputRejectedError,
+    execute_extraction_run,
+)
 from policy_pipeline.identity import AuthenticatedPrincipal, Role
 from policy_pipeline.object_storage import get_object_storage
 from policy_pipeline.rule_store import create_rule
@@ -130,6 +141,13 @@ def create_app() -> FastAPI:
         condition: RuleCondition | None = None
         applicability: Applicability | None = None
         exceptions: list[RuleException] = Field(default_factory=list)
+
+    class ExtractionRunCreateRequest(BaseModel):
+        extraction_run_id: str = Field(min_length=1)
+        prompt_template_id: str = Field(min_length=1)
+        prompt_template_version: str = Field(min_length=1)
+        model_configuration_id: str = Field(min_length=1)
+        model_configuration_version: str = Field(min_length=1)
 
     class PolicyVersionPublishRequest(BaseModel):
         policy_version_id: str = Field(min_length=1)
@@ -304,6 +322,62 @@ def create_app() -> FastAPI:
         # Persist the tombstone and audit trail before removing the source bytes.
         get_object_storage().delete_bytes(key=record.storage_key)
         return document_version_from_record(record)
+
+    @app.post(
+        "/policy-documents/{document_id}/versions/{document_version_id}/extraction-runs",
+        response_model=ExtractionExecutionResult,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_document_extraction_run(
+        document_id: str,
+        document_version_id: str,
+        request: ExtractionRunCreateRequest,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> ExtractionExecutionResult:
+        del principal
+        try:
+            return execute_extraction_run(
+                session,
+                extraction_run_id=request.extraction_run_id,
+                document_id=document_id,
+                document_version_id=document_version_id,
+                prompt_template_id=request.prompt_template_id,
+                prompt_template_version=request.prompt_template_version,
+                model_configuration_id=request.model_configuration_id,
+                model_configuration_version=request.model_configuration_version,
+            )
+        except ExtractionRunConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Extraction Run already exists and cannot be overwritten.",
+            ) from exc
+        except UnknownDocumentVersionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document Version was not found.",
+            ) from exc
+        except UnknownPromptTemplateVersionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Prompt Template version was not found.",
+            ) from exc
+        except UnknownModelConfigurationVersionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Model Configuration version was not found.",
+            ) from exc
+        except StructuredOutputRejectedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Structured extraction output could not be validated after "
+                    f"{exc.attempts} attempts."
+                ),
+            ) from exc
 
     @app.post(
         "/candidate-rules/{candidate_rule_id}/approvals",
