@@ -141,7 +141,7 @@ def create_app() -> FastAPI:
         published_by: str
 
     class DocumentVersionDeletionRequest(BaseModel):
-        reason: str = Field(min_length=1)
+        reason: str = Field(min_length=1, max_length=500)
 
     @app.post(
         "/policy-documents/{document_id}/versions",
@@ -157,7 +157,7 @@ def create_app() -> FastAPI:
         ],
         session: Annotated[Session, Depends(get_session)],
         retention_until: Annotated[datetime | None, Form()] = None,
-        retention_reason: Annotated[str | None, Form()] = None,
+        retention_reason: Annotated[str | None, Form(max_length=500)] = None,
     ) -> DocumentVersion:
         filename, content_type = validate_upload_file(file)
         document_bytes = await file.read()
@@ -273,7 +273,6 @@ def create_app() -> FastAPI:
                 ),
             )
 
-        get_object_storage().delete_bytes(key=record.storage_key)
         record.deleted_at = _utc_now()
         record.deleted_by = principal.subject
         record.deletion_reason = deletion.reason
@@ -295,6 +294,8 @@ def create_app() -> FastAPI:
             commit=False,
         )
         session.commit()
+        # Persist the tombstone and audit trail before removing the source bytes.
+        get_object_storage().delete_bytes(key=record.storage_key)
         return document_version_from_record(record)
 
     @app.post(
