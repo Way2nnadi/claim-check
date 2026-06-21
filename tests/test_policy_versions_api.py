@@ -224,3 +224,49 @@ async def test_policy_version_snapshot_exports_as_json_and_rejects_mutation(
 
     assert stored_rule is not None
     assert stored_rule.payload["lifecycle_state"] == "approved"
+
+
+@pytest.mark.anyio
+async def test_policy_version_snapshot_export_sanitizes_attachment_filename(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    payload = build_manual_rule_payload()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        create_response = await client.post(
+            "/rules/manual",
+            headers={"Authorization": "Bearer approver-token"},
+            json=payload,
+        )
+        publish_response = await client.post(
+            "/policy-versions",
+            headers={"Authorization": "Bearer approver-token"},
+            json={
+                "policy_version_id": 'policy-v1"quarterly',
+                "change_summary": "Initial immutable snapshot of approved Manual Rules.",
+            },
+        )
+        export_response = await client.get(
+            "/policy-versions/policy-v1%22quarterly/snapshot",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert create_response.status_code == 201
+    assert publish_response.status_code == 201
+    assert export_response.status_code == 200
+    assert export_response.headers["content-disposition"] == (
+        'attachment; filename="policy-v1_quarterly.json"'
+    )
+    assert export_response.json()["policy_version_id"] == 'policy-v1"quarterly'

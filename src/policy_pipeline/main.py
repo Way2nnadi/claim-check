@@ -1,3 +1,4 @@
+import re
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -30,6 +31,15 @@ from policy_pipeline.structured_policy_store import (
     get_policy_version_snapshot,
     publish_policy_version,
 )
+
+_SNAPSHOT_FILENAME_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _snapshot_filename(policy_version_id: str) -> str:
+    safe_stem = _SNAPSHOT_FILENAME_UNSAFE_CHARS.sub("_", policy_version_id).strip("._-")
+    if not safe_stem:
+        safe_stem = "policy-version"
+    return f"{safe_stem}.json"
 
 
 def create_app() -> FastAPI:
@@ -253,7 +263,9 @@ def create_app() -> FastAPI:
         return JSONResponse(
             content=snapshot.model_dump(mode="json"),
             headers={
-                "Content-Disposition": f'attachment; filename="{policy_version_id}.json"'
+                "Content-Disposition": (
+                    f'attachment; filename="{_snapshot_filename(policy_version_id)}"'
+                )
             },
         )
 
