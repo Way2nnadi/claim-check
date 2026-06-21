@@ -67,6 +67,23 @@ class DocumentVersionRecord(Base):
     )
 
 
+class DocumentSectionRecord(Base):
+    __tablename__ = "document_sections"
+
+    document_version_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
+    section_id: Mapped[str] = mapped_column(sa.String(length=255), primary_key=True)
+    document_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False, index=True)
+    heading_path: Mapped[list[str]] = mapped_column(sa.JSON(), nullable=False)
+    content: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    start_char: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
+    end_char: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.text("CURRENT_TIMESTAMP"),
+    )
+
+
 class PolicyVersionRecord(Base):
     __tablename__ = "policy_versions"
 

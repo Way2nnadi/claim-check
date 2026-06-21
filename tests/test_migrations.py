@@ -26,4 +26,5 @@ def test_head_migration_bootstraps_postgres_and_pgvector() -> None:
     assert "deleted_at" in sql
     assert "deleted_by" in sql
     assert "deletion_reason" in sql
+    assert "CREATE TABLE document_sections" in sql
     assert "CREATE TABLE policy_versions" in sql
