@@ -9,6 +9,7 @@ import {
 import DocumentCatalog from "./DocumentCatalog";
 import CandidateRuleCatalog from "./CandidateRuleCatalog";
 import ExtractionRunCatalog from "./ExtractionRunCatalog";
+import PolicyVersionCatalog from "./PolicyVersionCatalog";
 import ThemeToggle from "./ThemeToggle";
 import { hasAnyRole } from "./permissions";
 import type { AuthenticatedPrincipal, Role } from "./types";
@@ -454,6 +455,8 @@ export default function App() {
 						<ExtractionRunCatalog />
 					) : activeSection === "review" ? (
 						<CandidateRuleCatalog principal={principal} />
+					) : activeSection === "policy-versions" ? (
+						<PolicyVersionCatalog principal={principal} />
 					) : (
 						<div className="ledger-grid">
 							{currentSection.ledger.map((item) => (

@@ -253,7 +253,11 @@ def test_postgres_related_section_distance_is_cast_to_float() -> None:
     import sqlalchemy as sa
     from sqlalchemy.dialects import postgresql
 
-    from policy_pipeline.database import DocumentSectionEmbeddingRecord, DocumentSectionRecord, VectorType
+    from policy_pipeline.database import (
+        DocumentSectionEmbeddingRecord,
+        DocumentSectionRecord,
+        VectorType,
+    )
     from policy_pipeline.qa_retrieval import SECTION_EMBEDDING_DIMENSION
 
     query_literal = sa.literal(
