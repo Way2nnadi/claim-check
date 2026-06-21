@@ -30,12 +30,15 @@ def publish_policy_version(
     rule_records = session.scalars(select(RuleRecord).order_by(RuleRecord.rule_id)).all()
     published_rules: list[Rule] = []
     for record in rule_records:
-        if record.payload.get("lifecycle_state") != LifecycleState.APPROVED.value:
+        if record.payload.get("lifecycle_state") not in {
+            LifecycleState.APPROVED.value,
+            LifecycleState.PUBLISHED.value,
+        }:
             continue
 
-        published_payload = deepcopy(record.payload)
-        published_payload["lifecycle_state"] = LifecycleState.PUBLISHED.value
+        published_payload = _published_rule_payload(record)
         published_rules.append(Rule.model_validate(published_payload))
+        record.payload = published_payload
 
     if not published_rules:
         raise NoApprovedRulesError
@@ -67,3 +70,14 @@ def get_policy_version_snapshot(
     if record is None:
         return None
     return PolicyVersionSnapshot.model_validate(record.snapshot)
+
+
+def _published_rule_payload(record: RuleRecord) -> dict[str, object]:
+    payload = deepcopy(record.payload)
+    payload["lifecycle_state"] = LifecycleState.PUBLISHED.value
+
+    committed_rule = payload.get("committed_rule")
+    if isinstance(committed_rule, dict):
+        committed_rule["lifecycle_state"] = LifecycleState.PUBLISHED.value
+
+    return payload

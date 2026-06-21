@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from policy_pipeline.database import RuleRecord
@@ -112,31 +113,45 @@ def approve_candidate_rule_review(
     commit: bool = True,
 ) -> CandidateRuleReview:
     record = _get_candidate_rule_record(session, candidate_rule_id=candidate_rule_id)
-    current_rule = _current_candidate_rule_value(record)
-    _ensure_transition_allowed(
-        current_state=current_rule.lifecycle_state,
-        target_state=LifecycleState.APPROVED,
-    )
-    approved_payload = {
-        **current_rule.model_dump(mode="json"),
-        "lifecycle_state": LifecycleState.APPROVED.value,
-    }
-    try:
-        approved_rule = Rule.model_validate(approved_payload)
-    except ValidationError as exc:
-        raise InvalidCandidateRuleApprovalError(_first_validation_message(exc)) from exc
-
-    approved_value = CandidateRuleValue.model_validate(approved_rule.model_dump(mode="json"))
-    _persist_candidate_rule_review(
-        record,
-        current_rule=approved_value,
-        committed_rule=approved_value,
-    )
+    _approve_candidate_rule_record(record)
     session.flush()
     if commit:
         session.commit()
         session.refresh(record)
     return _build_candidate_rule_review(record)
+
+
+def bulk_approve_candidate_rule_reviews(
+    session: Session,
+    *,
+    candidate_rule_ids: list[str],
+    commit: bool = True,
+) -> list[CandidateRuleReview]:
+    unique_candidate_rule_ids = list(dict.fromkeys(candidate_rule_ids))
+    records = session.scalars(
+        select(RuleRecord)
+        .where(RuleRecord.rule_id.in_(unique_candidate_rule_ids))
+        .order_by(RuleRecord.rule_id)
+    ).all()
+    record_by_id = {record.rule_id: record for record in records}
+
+    for candidate_rule_id in unique_candidate_rule_ids:
+        record = record_by_id.get(candidate_rule_id)
+        if record is None or record.origin_source_type != "extracted":
+            raise CandidateRuleNotFoundError(candidate_rule_id)
+
+    for candidate_rule_id in unique_candidate_rule_ids:
+        _approve_candidate_rule_record(record_by_id[candidate_rule_id])
+
+    session.flush()
+    if commit:
+        session.commit()
+        for record in records:
+            session.refresh(record)
+    return [
+        _build_candidate_rule_review(record_by_id[candidate_rule_id])
+        for candidate_rule_id in unique_candidate_rule_ids
+    ]
 
 
 def reject_candidate_rule_review(
@@ -174,6 +189,29 @@ def _get_candidate_rule_record(session: Session, *, candidate_rule_id: str) -> R
     if record is None or record.origin_source_type != "extracted":
         raise CandidateRuleNotFoundError(candidate_rule_id)
     return record
+
+
+def _approve_candidate_rule_record(record: RuleRecord) -> None:
+    current_rule = _current_candidate_rule_value(record)
+    _ensure_transition_allowed(
+        current_state=current_rule.lifecycle_state,
+        target_state=LifecycleState.APPROVED,
+    )
+    approved_payload = {
+        **current_rule.model_dump(mode="json"),
+        "lifecycle_state": LifecycleState.APPROVED.value,
+    }
+    try:
+        approved_rule = Rule.model_validate(approved_payload)
+    except ValidationError as exc:
+        raise InvalidCandidateRuleApprovalError(_first_validation_message(exc)) from exc
+
+    approved_value = CandidateRuleValue.model_validate(approved_rule.model_dump(mode="json"))
+    _persist_candidate_rule_review(
+        record,
+        current_rule=approved_value,
+        committed_rule=approved_value,
+    )
 
 
 def _build_candidate_rule_review(record: RuleRecord) -> CandidateRuleReview:

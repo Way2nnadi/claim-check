@@ -50,6 +50,7 @@ from policy_pipeline.rule_store import (
     InvalidCandidateRuleReviewError,
     InvalidCandidateRuleTransitionError,
     approve_candidate_rule_review,
+    bulk_approve_candidate_rule_reviews,
     create_rule,
     get_candidate_rule_review,
     reject_candidate_rule_review,
@@ -141,6 +142,21 @@ def create_app() -> FastAPI:
 
     class CandidateRuleApprovalResponse(BaseModel):
         candidate_rule_id: str
+        status: str
+        recorded_by: str
+
+    class BulkCandidateRuleApprovalRequest(BaseModel):
+        candidate_rule_ids: list[str] = Field(min_length=1)
+        rationale: str = Field(min_length=1)
+
+        @model_validator(mode="after")
+        def validate_candidate_rule_ids(self) -> "BulkCandidateRuleApprovalRequest":
+            if any(not candidate_rule_id for candidate_rule_id in self.candidate_rule_ids):
+                raise ValueError("Bulk approval requires non-empty Candidate Rule ids.")
+            return self
+
+    class BulkCandidateRuleApprovalResponse(BaseModel):
+        approved_candidate_rule_ids: list[str]
         status: str
         recorded_by: str
 
@@ -500,6 +516,62 @@ def create_app() -> FastAPI:
         session.commit()
         return CandidateRuleApprovalResponse(
             candidate_rule_id=candidate_rule_id,
+            status="approved",
+            recorded_by=principal.subject,
+        )
+
+    @app.post(
+        "/candidate-rules/approvals/bulk",
+        response_model=BulkCandidateRuleApprovalResponse,
+    )
+    def bulk_approve_candidate_rules_endpoint(
+        approval: BulkCandidateRuleApprovalRequest,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> BulkCandidateRuleApprovalResponse:
+        try:
+            reviews = bulk_approve_candidate_rule_reviews(
+                session,
+                candidate_rule_ids=approval.candidate_rule_ids,
+                commit=False,
+            )
+        except CandidateRuleNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate Rule was not found.",
+            ) from exc
+        except InvalidCandidateRuleTransitionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Candidate Rule cannot transition from "
+                    f"{exc.current_state.value} to {exc.target_state.value}."
+                ),
+            ) from exc
+        except InvalidCandidateRuleApprovalError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=exc.detail,
+            ) from exc
+
+        approved_candidate_rule_ids = [review.candidate_rule_id for review in reviews]
+        for candidate_rule_id in approved_candidate_rule_ids:
+            record_audit_event(
+                session,
+                action="candidate_rule.approved",
+                actor_subject=principal.subject,
+                actor_roles=[role.value for role in principal.roles],
+                entity_type="candidate_rule",
+                entity_id=candidate_rule_id,
+                payload={"rationale": approval.rationale},
+                commit=False,
+            )
+        session.commit()
+        return BulkCandidateRuleApprovalResponse(
+            approved_candidate_rule_ids=approved_candidate_rule_ids,
             status="approved",
             recorded_by=principal.subject,
         )
