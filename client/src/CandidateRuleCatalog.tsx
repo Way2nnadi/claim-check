@@ -184,20 +184,29 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
     scopeFilterCount > 0 ||
     (lifecycleTab === "custom" && !isDefaultCustomSelection([...customLifecycleSelection]));
 
-  if (selectedCandidateRuleId) {
-    return (
-      <CandidateRuleDetail
-        candidateRuleId={selectedCandidateRuleId}
-        principal={principal}
-        onBack={() => setSelectedCandidateRuleId(null)}
-      />
-    );
-  }
+  useEffect(() => {
+    if (status !== "ready") {
+      return;
+    }
+    if (displayedReviews.length === 0) {
+      if (selectedCandidateRuleId !== null) {
+        setSelectedCandidateRuleId(null);
+      }
+      return;
+    }
+    if (
+      selectedCandidateRuleId === null ||
+      !displayedReviews.some((review) => review.candidate_rule_id === selectedCandidateRuleId)
+    ) {
+      setSelectedCandidateRuleId(displayedReviews[0].candidate_rule_id);
+    }
+  }, [displayedReviews, selectedCandidateRuleId, status]);
 
   return (
     <div className="review-catalog content-enter">
       <header className="review-catalog-head reveal">
         <span className="folio">Approval desk · triage</span>
+        <h2>Candidate Rules</h2>
         <p className="review-catalog-lede">
           Extracted Candidate Rules await review before publication. QA flags and lifecycle
           state guide triage.
@@ -339,20 +348,52 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
               {appliedFilters.extractionRunId ? appliedFilters.extractionRunId : null}
             </p>
           ) : null}
-          <div id="review-rule-panel" role="tabpanel" aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}>
-            <CandidateRuleLedger
-              reviews={displayedReviews}
-              onOpenReview={setSelectedCandidateRuleId}
-              emptyMessage={
-                lifecycleTab === "flagged"
-                  ? "No flagged Candidate Rules in the current scope."
-                  : hasNonDefaultFilters
-                    ? "No Candidate Rules match the current filters."
-                    : lifecycleTab === "queue"
-                      ? "The review queue is empty — no extracted Rules are waiting for triage."
-                      : "No Candidate Rules match this lifecycle view."
-              }
-            />
+          <div
+            id="review-rule-panel"
+            className="review-workbench"
+            role="tabpanel"
+            aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
+          >
+            <section className="review-workbench-ledger">
+              <CandidateRuleLedger
+                reviews={displayedReviews}
+                selectedCandidateRuleId={selectedCandidateRuleId}
+                onOpenReview={setSelectedCandidateRuleId}
+                emptyMessage={
+                  lifecycleTab === "flagged"
+                    ? "No flagged Candidate Rules in the current scope."
+                    : hasNonDefaultFilters
+                      ? "No Candidate Rules match the current filters."
+                      : lifecycleTab === "queue"
+                        ? "The review queue is empty — no extracted Rules are waiting for triage."
+                        : "No Candidate Rules match this lifecycle view."
+                }
+              />
+            </section>
+
+            <section className="review-workbench-detail">
+              {selectedCandidateRuleId ? (
+                <CandidateRuleDetail
+                  candidateRuleId={selectedCandidateRuleId}
+                  principal={principal}
+                  onBack={() => setSelectedCandidateRuleId(null)}
+                  onReviewChange={(updatedReview) => {
+                    setReviews((current) =>
+                      current.map((review) =>
+                        review.candidate_rule_id === updatedReview.candidate_rule_id
+                          ? updatedReview
+                          : review,
+                      ),
+                    );
+                  }}
+                />
+              ) : (
+                <div className="review-selection-empty reveal">
+                  <span className="folio">Candidate Rule edit desk</span>
+                  <p>Select a Candidate Rule from the queue to compare extracted values, make edits, and save a reviewed Rule.</p>
+                </div>
+              )}
+            </section>
           </div>
         </>
       ) : null}

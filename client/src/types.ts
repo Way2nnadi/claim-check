@@ -230,3 +230,12 @@ export interface CandidateRuleFilters {
   documentVersionId?: string;
   extractionRunId?: string;
 }
+
+export interface CandidateRuleReviewUpdateRequest {
+  statement?: string;
+  enforceability_class?: EnforceabilityClass;
+  scope?: Scope;
+  condition?: RuleCondition | null;
+  applicability?: Applicability | null;
+  exceptions?: RuleException[];
+}

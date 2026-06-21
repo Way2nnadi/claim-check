@@ -252,13 +252,12 @@ describe("CandidateRuleCatalog", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /rule-meals-cap/i }));
 
-    expect(await screen.findByText("Candidate Rule dossier · read-only")).toBeInTheDocument();
+    expect(await screen.findByText("Candidate Rule edit desk")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Candidate Rules" })).toBeInTheDocument();
     expect(screen.getByText("QA Flags")).toBeInTheDocument();
     expect(
       screen.getByText("Candidate Rule extraction confidence 0.62 is below 0.75."),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Read-only dossier — approve, reject, and edit actions ship in the next review slice/),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Candidate Rule" })).toBeInTheDocument();
   });
 });

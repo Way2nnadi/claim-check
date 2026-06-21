@@ -3,6 +3,7 @@ import type {
   CandidateRuleFilters,
   CandidateRuleReview,
   CandidateRuleReviewListResponse,
+  CandidateRuleReviewUpdateRequest,
   DocumentVersion,
   DocumentVersionListResponse,
   ExtractionExecutionResult,
@@ -247,6 +248,19 @@ export function fetchCandidateRules(
 export function fetchCandidateRule(candidateRuleId: string): Promise<CandidateRuleReview> {
   return apiRequest<CandidateRuleReview>(
     `/api/candidate-rules/${encodeURIComponent(candidateRuleId)}`,
+  );
+}
+
+export function updateCandidateRule(
+  candidateRuleId: string,
+  request: CandidateRuleReviewUpdateRequest,
+): Promise<CandidateRuleReview> {
+  return apiRequest<CandidateRuleReview>(
+    `/api/candidate-rules/${encodeURIComponent(candidateRuleId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(request),
+    },
   );
 }
 

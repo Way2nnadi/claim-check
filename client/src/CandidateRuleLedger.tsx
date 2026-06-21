@@ -12,12 +12,14 @@ interface CandidateRuleLedgerProps {
   reviews: CandidateRuleReview[];
   onOpenReview: (candidateRuleId: string) => void;
   emptyMessage?: string;
+  selectedCandidateRuleId?: string | null;
 }
 
 export default function CandidateRuleLedger({
   reviews,
   onOpenReview,
   emptyMessage = "No Candidate Rules are waiting in this queue.",
+  selectedCandidateRuleId = null,
 }: CandidateRuleLedgerProps) {
   if (reviews.length === 0) {
     return (
@@ -40,14 +42,16 @@ export default function CandidateRuleLedger({
         const qaCount = review.qa_flags.length;
         const lifecycleClass = lifecycleStateClassName(review.lifecycle_state);
         const enforceabilityClass = enforceabilityClassName(rule.enforceability_class);
+        const isSelected = selectedCandidateRuleId === review.candidate_rule_id;
 
         return (
           <li key={review.candidate_rule_id}>
             <button
               type="button"
-              className={`review-row reveal lifecycle-${lifecycleClass}`}
+              className={`review-row reveal lifecycle-${lifecycleClass}${isSelected ? " selected" : ""}`}
               style={{ "--reveal-delay": `${40 + index * 50}ms` } as CSSProperties}
               onClick={() => onOpenReview(review.candidate_rule_id)}
+              aria-pressed={isSelected}
             >
               <header className="review-row-head">
                 <div className="review-row-idline">
