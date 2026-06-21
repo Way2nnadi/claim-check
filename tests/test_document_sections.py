@@ -263,6 +263,56 @@ def test_docx_document_version_is_parsed_into_nested_sections_with_stable_ids() 
     assert first_sections[2].content == "Lodging\nHotel stays require itemized receipts."
 
 
+def test_long_heading_paths_produce_bounded_stable_section_ids() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    long_heading = "Travel " + "and lodging " * 20
+    document_bytes = _make_docx_bytes(
+        [
+            (long_heading, "Heading1"),
+            ("Meals " + "international " * 20, "Heading2"),
+            ("Domestic meals are capped at $75 per day.", "Normal"),
+        ]
+    )
+
+    with Session(engine) as session:
+        first_version = create_document_version(
+            session,
+            document_id="expense-policy",
+            filename="expense-policy.docx",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            document_bytes=document_bytes,
+        )
+        second_version = create_document_version(
+            session,
+            document_id="expense-policy",
+            filename="expense-policy.docx",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            document_bytes=document_bytes,
+        )
+
+        first_sections = list_document_sections(
+            session,
+            document_id="expense-policy",
+            document_version_id=first_version.document_version_id,
+        )
+        second_sections = list_document_sections(
+            session,
+            document_id="expense-policy",
+            document_version_id=second_version.document_version_id,
+        )
+
+    assert all(len(section.section_id) <= 255 for section in first_sections)
+    assert [section.section_id for section in first_sections] == [
+        section.section_id for section in second_sections
+    ]
+
+
 def test_quote_anchor_lookup_resolves_quote_back_to_section_and_offsets() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)

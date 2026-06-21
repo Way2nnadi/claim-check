@@ -30,6 +30,7 @@ _WORDPROCESSINGML_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml
 _HEADING_STYLE_RE = re.compile(r"heading\s*(\d+)", re.IGNORECASE)
 _SECTION_GAP = "\n\n"
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+_MAX_SECTION_ID_LENGTH = 255
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,14 @@ def _slugify_heading(value: str) -> str:
 def _stable_section_id(heading_path: list[str], content: str) -> str:
     slug = "--".join(_slugify_heading(part) for part in heading_path) or "section"
     content_hash = sha256(content.encode("utf-8")).hexdigest()[:12]
-    return f"{slug}-{content_hash}"
+    section_id = f"{slug}-{content_hash}"
+    if len(section_id) <= _MAX_SECTION_ID_LENGTH:
+        return section_id
+
+    heading_hash = sha256("\x1f".join(heading_path).encode("utf-8")).hexdigest()[:12]
+    max_slug_length = _MAX_SECTION_ID_LENGTH - len(heading_hash) - len(content_hash) - 2
+    truncated_slug = slug[:max_slug_length].rstrip("-") or "section"
+    return f"{truncated_slug}-{heading_hash}-{content_hash}"
 
 
 def _build_sections(lines: list[_DocumentLine]) -> list[_ParsedSection]:
