@@ -10,14 +10,12 @@ import {
   describeRuleOrigin,
   formatEffectiveWindow,
   formatEnforceabilityClass,
-  formatLifecycleState,
   formatPolicyVersionDate,
   formatRuleCount,
   latestPolicyVersionId,
   summarizeApplicability,
   summarizeRuleScope,
 } from "./policyVersionFormat";
-import { lifecycleStateClassName } from "./candidateRuleFormat";
 import type {
   AuthenticatedPrincipal,
   PolicyVersionSnapshot,
@@ -37,62 +35,110 @@ interface PolicyVersionDetailProps {
   onBack: () => void;
 }
 
-function renderRuleMetadata(rule: Rule) {
+function shortenId(value: string, visible = 8): string {
+  if (value.length <= visible * 2 + 1) {
+    return value;
+  }
+  return `${value.slice(0, visible)}…${value.slice(-visible)}`;
+}
+
+function hasEffectiveWindow(scope: Rule["scope"]): boolean {
+  return Boolean(scope.effective_start_date || scope.effective_end_date);
+}
+
+function ruleDetailsEntries(rule: Rule): Array<{ label: string; value: string }> {
+  const entries: Array<{ label: string; value: string }> = [
+    { label: "ID", value: rule.rule_id },
+  ];
+
+  if (hasEffectiveWindow(rule.scope)) {
+    entries.push({ label: "Effective", value: formatEffectiveWindow(rule.scope) });
+  }
+
+  const applicability = summarizeApplicability(rule.applicability);
+  if (applicability !== "Not machine-checkable") {
+    entries.push({ label: "Applicability", value: applicability });
+  }
+
+  if (rule.origin.rationale) {
+    entries.push({ label: "Rationale", value: rule.origin.rationale });
+  }
+
+  if (rule.origin.extraction_run_id) {
+    entries.push({ label: "Extraction run", value: rule.origin.extraction_run_id });
+  }
+
+  if (rule.citation) {
+    entries.push({
+      label: "Source",
+      value: `${rule.citation.document_id} · ${shortenId(rule.citation.document_version_id)} · ${rule.citation.section_id}`,
+    });
+    entries.push({
+      label: "Span",
+      value: `${rule.citation.start_char}–${rule.citation.end_char}`,
+    });
+  }
+
+  return entries;
+}
+
+function PolicyRuleCard({ rule }: { rule: Rule }) {
+  const details = ruleDetailsEntries(rule);
+
   return (
-    <dl className="policy-rule-grid">
-      <div>
-        <dt>Scope</dt>
-        <dd>{summarizeRuleScope(rule.scope)}</dd>
-      </div>
-      <div>
-        <dt>Effective window</dt>
-        <dd>{formatEffectiveWindow(rule.scope)}</dd>
-      </div>
-      <div>
-        <dt>Origin</dt>
-        <dd>{describeRuleOrigin(rule)}</dd>
-      </div>
-      <div>
-        <dt>Applicability</dt>
-        <dd>{summarizeApplicability(rule.applicability)}</dd>
-      </div>
-      <div className="policy-rule-grid-span">
-        <dt>Condition</dt>
-        <dd>
-          {rule.condition ? (
-            <code>
-              {rule.condition.field} {rule.condition.operator} {rule.condition.value}
-            </code>
-          ) : (
-            "No machine condition"
-          )}
-        </dd>
-      </div>
-      {rule.origin.rationale ? (
-        <div className="policy-rule-grid-span">
-          <dt>Manual rationale</dt>
-          <dd>{rule.origin.rationale}</dd>
-        </div>
+    <article className="policy-rule-card">
+      <header className="policy-rule-head">
+        <h4 className="policy-rule-statement">{rule.statement}</h4>
+        <span className={`review-enforceability ${rule.enforceability_class}`}>
+          {formatEnforceabilityClass(rule.enforceability_class)}
+        </span>
+      </header>
+
+      <p className="policy-rule-meta-line">
+        {summarizeRuleScope(rule.scope)} · {describeRuleOrigin(rule)}
+      </p>
+
+      {rule.condition ? (
+        <p className="policy-rule-condition">
+          <code>
+            {rule.condition.field} {rule.condition.operator} {rule.condition.value}
+          </code>
+        </p>
       ) : null}
+
       {rule.citation ? (
-        <div className="policy-rule-grid-span">
-          <dt>Citation</dt>
-          <dd>
-            <blockquote className="policy-rule-quote">{rule.citation.quote}</blockquote>
-            <p className="policy-rule-citation-meta">
-              {rule.citation.document_id} · {rule.citation.document_version_id} ·{" "}
-              {rule.citation.section_id} · chars {rule.citation.start_char}–
-              {rule.citation.end_char}
-            </p>
-          </dd>
-        </div>
-      ) : (
-        <div className="policy-rule-grid-span">
-          <dt>Citation</dt>
-          <dd>No Citation attached</dd>
-        </div>
-      )}
-    </dl>
+        <p className="policy-rule-source" title={rule.citation.quote}>
+          {rule.citation.document_id} · {shortenId(rule.citation.section_id, 16)}
+        </p>
+      ) : null}
+
+      {details.length > 1 ? (
+        <details className="policy-rule-details">
+          <summary>Details</summary>
+          <dl className="policy-rule-details-grid">
+            {details.map((entry) => (
+              <div key={entry.label}>
+                <dt>{entry.label}</dt>
+                <dd>{entry.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
+
+      {rule.exceptions.length > 0 ? (
+        <ul className="policy-rule-exceptions">
+          {rule.exceptions.map((exception) => (
+            <li key={`${rule.rule_id}-${exception.description}`}>
+              <p>{exception.description}</p>
+              {exception.required_evidence.length > 0 ? (
+                <span>{exception.required_evidence.join(", ")}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </article>
   );
 }
 
@@ -200,6 +246,9 @@ function PolicyVersionDetail({
           <div className="policy-version-detail-intro">
             <h3>{snapshot.policy_version_id}</h3>
             <p className="policy-version-detail-lede">{snapshot.change_summary}</p>
+            <p className="catalog-scope policy-version-detail-meta">
+              {formatRuleCount(snapshot.rules.length)} · {snapshot.published_by}
+            </p>
           </div>
           <div className="policy-version-detail-actions">
             <button
@@ -212,72 +261,24 @@ function PolicyVersionDetail({
             </button>
           </div>
         </div>
-        <div className="policy-version-detail-badges">
-          <span className="version-badge">{formatRuleCount(snapshot.rules.length)}</span>
-          <span className="version-badge muted">{snapshot.published_by}</span>
-        </div>
         {downloadError ? <p className="error-banner">{downloadError}</p> : null}
       </header>
 
       <section className="policy-version-rule-stage reveal">
-        <h4 className="policy-version-rule-stage-head">Rules</h4>
-
         {snapshot.rules.length === 0 ? (
           <p className="review-detail-empty">No rules in this version.</p>
         ) : (
-          <ul className="policy-rule-stack" aria-label="Published Rule snapshot">
-            {snapshot.rules.map((rule, index) => {
-              const lifecycleClass = lifecycleStateClassName(rule.lifecycle_state);
-
-              return (
-                <li key={rule.rule_id}>
-                  <article
-                    className="policy-rule-card reveal"
-                    style={{ "--reveal-delay": `${50 + index * 55}ms` } as CSSProperties}
-                  >
-                    <div className="policy-rule-head">
-                      <div>
-                        <p className="policy-rule-id">{rule.rule_id}</p>
-                        <h4>{rule.statement}</h4>
-                      </div>
-                      <div className="review-detail-badges">
-                        <span className={`review-lifecycle ${lifecycleClass}`}>
-                          {formatLifecycleState(rule.lifecycle_state)}
-                        </span>
-                        <span className={`review-enforceability ${rule.enforceability_class}`}>
-                          {formatEnforceabilityClass(rule.enforceability_class)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {renderRuleMetadata(rule)}
-
-                    <section className="policy-rule-exceptions">
-                      <h5>Exceptions</h5>
-                      {rule.exceptions.length === 0 ? (
-                        <p className="review-detail-note">
-                          No Exceptions recorded in this published snapshot.
-                        </p>
-                      ) : (
-                        <ul>
-                          {rule.exceptions.map((exception) => (
-                            <li key={`${rule.rule_id}-${exception.description}`}>
-                              <p>{exception.description}</p>
-                              <span>
-                                Evidence:{" "}
-                                {exception.required_evidence.length > 0
-                                  ? exception.required_evidence.join(", ")
-                                  : "None specified"}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </section>
-                  </article>
-                </li>
-              );
-            })}
+          <ul className="policy-rule-stack" aria-label="Published rules">
+            {snapshot.rules.map((rule, index) => (
+              <li key={rule.rule_id}>
+                <div
+                  className="reveal"
+                  style={{ "--reveal-delay": `${50 + index * 55}ms` } as CSSProperties}
+                >
+                  <PolicyRuleCard rule={rule} />
+                </div>
+              </li>
+            ))}
           </ul>
         )}
       </section>
