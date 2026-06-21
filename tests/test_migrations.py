@@ -21,4 +21,9 @@ def test_head_migration_bootstraps_postgres_and_pgvector() -> None:
     assert "CREATE TABLE audit_events" in sql
     assert "CREATE TABLE rules" in sql
     assert "CREATE TABLE document_versions" in sql
+    assert "retention_until" in sql
+    assert "retention_reason" in sql
+    assert "deleted_at" in sql
+    assert "deleted_by" in sql
+    assert "deletion_reason" in sql
     assert "CREATE TABLE policy_versions" in sql

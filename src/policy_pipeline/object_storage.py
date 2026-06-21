@@ -14,6 +14,9 @@ class ObjectStorageAdapter(Protocol):
     def get_bytes(self, *, key: str) -> bytes:
         ...
 
+    def delete_bytes(self, *, key: str) -> None:
+        ...
+
 
 class FilesystemObjectStorageAdapter:
     def __init__(self, root: Path) -> None:
@@ -28,6 +31,11 @@ class FilesystemObjectStorageAdapter:
     def get_bytes(self, *, key: str) -> bytes:
         object_path = self._root / key
         return object_path.read_bytes()
+
+    def delete_bytes(self, *, key: str) -> None:
+        object_path = self._root / key
+        if object_path.exists():
+            object_path.unlink()
 
 
 @lru_cache
