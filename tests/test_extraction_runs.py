@@ -12,6 +12,7 @@ from policy_pipeline.documents import PDF_CONTENT_TYPE, create_document_version
 from policy_pipeline.extraction_registry import save_model_configuration, save_prompt_template
 from policy_pipeline.extraction_runs import execute_extraction_run
 from policy_pipeline.llm_clients import HostedEndpointDisabledError
+from policy_pipeline.qa_retrieval import SECTION_EMBEDDING_DIMENSION
 from tests.test_document_sections import _make_pdf_bytes
 
 
@@ -21,6 +22,12 @@ class FakeEmbeddingClient:
 
     def embed_texts(self, *, texts: Sequence[str]) -> list[list[float]]:
         return [self._embeddings_by_text[text] for text in texts]
+
+
+def _embedding(*components: float) -> list[float]:
+    if len(components) > SECTION_EMBEDDING_DIMENSION:
+        raise ValueError("Test embedding fixture exceeds section embedding dimensions.")
+    return [*components, *([0.0] * (SECTION_EMBEDDING_DIMENSION - len(components)))]
 
 
 def test_execute_extraction_run_does_not_persist_when_hosted_endpoint_is_disabled(
@@ -235,23 +242,19 @@ def test_execute_extraction_run_attaches_retrieval_assisted_qa_flags(
             model_configuration_version="v1",
             embedding_client=FakeEmbeddingClient(
                 embeddings_by_text={
-                    "Meals\nDomestic meals are capped at $75 per day.": [1.0, 0.0, 0.0],
-                    "International Meals\nInternational meals are capped at $100 per day.": [
-                        0.96,
-                        0.04,
-                        0.0,
-                    ],
-                    "Domestic Override\nDomestic meals are capped at $90 per day.": [
-                        0.98,
-                        0.02,
-                        0.0,
-                    ],
-                    "Approvals\nVIP dinners require CFO approval.": [0.0, 1.0, 0.0],
-                    "Meals are capped at $75 per day.": [1.0, 0.0, 0.0],
-                    "Domestic meals are capped at $75 per day.": [1.0, 0.0, 0.0],
-                    "International meals are capped at $100 per day.": [0.96, 0.04, 0.0],
-                    "Domestic meals are capped at $90 per day.": [0.98, 0.02, 0.0],
-                    "VIP dinners require CFO approval.": [0.0, 1.0, 0.0],
+                    "Meals\nDomestic meals are capped at $75 per day.": _embedding(1.0, 0.0),
+                    "International Meals\nInternational meals are capped at $100 per day.": (
+                        _embedding(0.96, 0.04)
+                    ),
+                    "Domestic Override\nDomestic meals are capped at $90 per day.": (
+                        _embedding(0.98, 0.02)
+                    ),
+                    "Approvals\nVIP dinners require CFO approval.": _embedding(0.0, 1.0),
+                    "Meals are capped at $75 per day.": _embedding(1.0, 0.0),
+                    "Domestic meals are capped at $75 per day.": _embedding(1.0, 0.0),
+                    "International meals are capped at $100 per day.": _embedding(0.96, 0.04),
+                    "Domestic meals are capped at $90 per day.": _embedding(0.98, 0.02),
+                    "VIP dinners require CFO approval.": _embedding(0.0, 1.0),
                 }
             ),
         )

@@ -65,6 +65,16 @@ class CandidateRuleQARetrievalContext:
     related_rules: list[RuleMatch]
 
 
+def _validate_embedding_dimensions(embedding: Sequence[float]) -> list[float]:
+    normalized = [float(component) for component in embedding]
+    if len(normalized) != SECTION_EMBEDDING_DIMENSION:
+        raise ValueError(
+            "Expected "
+            f"{SECTION_EMBEDDING_DIMENSION}-dimensional vector, got {len(normalized)}."
+        )
+    return normalized
+
+
 def store_section_embeddings(
     session: Session,
     *,
@@ -110,7 +120,7 @@ def store_section_embeddings(
                 document_version_id=section.document_version_id,
                 section_id=section.section_id,
                 document_id=section.document_id,
-                embedding=embedding,
+                embedding=_validate_embedding_dimensions(embedding),
             )
             session.add(record)
             existing_records[(record.document_version_id, record.section_id)] = record
@@ -151,9 +161,11 @@ def retrieve_candidate_rule_context(
         embedding_client=embedding_client,
     )
     client = embedding_client or DeterministicHashEmbeddingClient()
-    query_embedding = client.embed_texts(
+    query_embedding = _validate_embedding_dimensions(
+        client.embed_texts(
         texts=[query_text or _candidate_rule_query_text(candidate_rule)]
-    )[0]
+        )[0]
+    )
     related_sections = _retrieve_related_sections(
         session,
         document_id=document_id,
@@ -409,8 +421,8 @@ def _hash_text_to_embedding(text: str) -> list[float]:
 
 
 def _cosine_distance(left: Sequence[float], right: Sequence[float]) -> float:
-    left_values = [float(component) for component in left]
-    right_values = [float(component) for component in right]
+    left_values = _validate_embedding_dimensions(left)
+    right_values = _validate_embedding_dimensions(right)
     left_magnitude = math.sqrt(sum(component * component for component in left_values))
     right_magnitude = math.sqrt(sum(component * component for component in right_values))
     if left_magnitude == 0 or right_magnitude == 0:

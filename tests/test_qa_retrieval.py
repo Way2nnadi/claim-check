@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -11,7 +12,11 @@ from policy_pipeline.documents import (
     create_document_version,
     list_document_sections,
 )
-from policy_pipeline.qa_retrieval import retrieve_candidate_rule_context, store_section_embeddings
+from policy_pipeline.qa_retrieval import (
+    SECTION_EMBEDDING_DIMENSION,
+    retrieve_candidate_rule_context,
+    store_section_embeddings,
+)
 from policy_pipeline.rules import (
     CandidateRule,
     Citation,
@@ -31,6 +36,12 @@ class FakeEmbeddingClient:
 
     def embed_texts(self, *, texts: Sequence[str]) -> list[list[float]]:
         return [self._embeddings_by_text[text] for text in texts]
+
+
+def _embedding(*components: float) -> list[float]:
+    if len(components) > SECTION_EMBEDDING_DIMENSION:
+        raise ValueError("Test embedding fixture exceeds section embedding dimensions.")
+    return [*components, *([0.0] * (SECTION_EMBEDDING_DIMENSION - len(components)))]
 
 
 def _make_candidate_rule(
@@ -115,18 +126,14 @@ def test_retrieve_candidate_rule_context_returns_related_sections_and_rules(
 
         embedding_client = FakeEmbeddingClient(
             embeddings_by_text={
-                "Meals\nDomestic meals are capped at $75 per day.": [1.0, 0.0, 0.0],
-                "International Meals\nInternational meals are capped at $100 per day.": [
-                    0.96,
-                    0.04,
-                    0.0,
-                ],
-                "Glossary\nVIP means vice president approved attendees only.": [
-                    0.0,
-                    1.0,
-                    0.0,
-                ],
-                "Meals are capped at $75 per day.": [1.0, 0.0, 0.0],
+                "Meals\nDomestic meals are capped at $75 per day.": _embedding(1.0, 0.0),
+                "International Meals\nInternational meals are capped at $100 per day.": (
+                    _embedding(0.96, 0.04)
+                ),
+                "Glossary\nVIP means vice president approved attendees only.": (
+                    _embedding(0.0, 1.0)
+                ),
+                "Meals are capped at $75 per day.": _embedding(1.0, 0.0),
             }
         )
 
@@ -196,3 +203,47 @@ def test_retrieve_candidate_rule_context_returns_related_sections_and_rules(
         match.section.section_id != glossary_section.section_id
         for match in context.related_sections
     )
+
+
+def test_store_section_embeddings_rejects_wrong_dimension_vectors(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    object_storage_root = tmp_path / "object-storage"
+    monkeypatch.setenv("POLICY_PIPELINE_OBJECT_STORAGE_ROOT", str(object_storage_root))
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    document_bytes = _make_pdf_bytes(
+        [
+            ("Meals", 18),
+            ("Domestic meals are capped at $75 per day.", 12),
+        ]
+    )
+
+    with Session(engine) as session:
+        document_version = create_document_version(
+            session,
+            document_id="expense-policy",
+            filename="expense-policy.pdf",
+            content_type=PDF_CONTENT_TYPE,
+            document_bytes=document_bytes,
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            store_section_embeddings(
+                session,
+                document_id="expense-policy",
+                document_version_id=document_version.document_version_id,
+                embedding_client=FakeEmbeddingClient(
+                    embeddings_by_text={
+                        "Meals\nDomestic meals are capped at $75 per day.": [1.0, 0.0, 0.0],
+                    }
+                ),
+            )
+        assert str(exc_info.value) == (
+            f"Expected {SECTION_EMBEDDING_DIMENSION}-dimensional vector, got 3."
+        )
+
+    engine.dispose()

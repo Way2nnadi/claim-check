@@ -47,6 +47,10 @@ class VectorType(sa.types.TypeDecorator):
             return None
 
         normalized = [float(component) for component in value]
+        if len(normalized) != self.dimensions:
+            raise ValueError(
+                f"Expected {self.dimensions}-dimensional vector, got {len(normalized)}."
+            )
         if dialect.name == "postgresql":
             return "[" + ",".join(f"{component:.12g}" for component in normalized) + "]"
         return normalized
@@ -61,9 +65,16 @@ class VectorType(sa.types.TypeDecorator):
         if isinstance(value, str):
             stripped = value.strip()[1:-1].strip()
             if not stripped:
-                return []
-            return [float(component) for component in stripped.split(",")]
-        return [float(component) for component in value]
+                components: list[float] = []
+            else:
+                components = [float(component) for component in stripped.split(",")]
+        else:
+            components = [float(component) for component in value]
+        if len(components) != self.dimensions:
+            raise ValueError(
+                f"Expected {self.dimensions}-dimensional vector, got {len(components)}."
+            )
+        return components
 
 
 class AuditEventRecord(Base):
