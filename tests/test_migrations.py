@@ -20,3 +20,4 @@ def test_head_migration_bootstraps_postgres_and_pgvector() -> None:
     assert "CREATE TABLE service_metadata" in sql
     assert "CREATE TABLE audit_events" in sql
     assert "CREATE TABLE rules" in sql
+    assert "CREATE TABLE document_versions" in sql

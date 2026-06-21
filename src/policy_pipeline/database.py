@@ -45,6 +45,23 @@ class RuleRecord(Base):
     )
 
 
+class DocumentVersionRecord(Base):
+    __tablename__ = "document_versions"
+
+    document_version_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
+    document_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(sa.String(length=255), nullable=False)
+    content_type: Mapped[str] = mapped_column(sa.String(length=150), nullable=False)
+    storage_key: Mapped[str] = mapped_column(sa.String(length=500), nullable=False, unique=True)
+    size_bytes: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
+    sha256: Mapped[str] = mapped_column(sa.String(length=64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.text("CURRENT_TIMESTAMP"),
+    )
+
+
 @lru_cache
 def _engine_for_url(database_url: str) -> Engine:
     return sa.create_engine(database_url)

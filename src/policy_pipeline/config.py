@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     service_name: str = "policy-pipeline"
     environment: str = "local"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/policy_pipeline"
+    object_storage_root: str = ".policy-pipeline/object-storage"
     local_auth_enabled: bool | None = None
     local_auth_identities: tuple[LocalIdentitySettings, ...] = (
         LocalIdentitySettings(
