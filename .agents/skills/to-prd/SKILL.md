@@ -17,7 +17,7 @@ A deep module (as opposed to a shallow module) is one which encapsulates a lot o
 
 Check with the user that these modules match their expectations. Check with the user which modules they want tests written for.
 
-3. Write the PRD using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Write the PRD using the template below, then publish it to the project issue tracker. Title it `PRD: <feature name>` and apply the `prd` label — never `ready-for-agent`. PRDs are planning documents; break them into implementation issues with `to-issues` before agents can work on them.
 
 <prd-template>
 

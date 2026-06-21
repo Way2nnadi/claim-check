@@ -21,18 +21,12 @@ Extract from the first `agent:` commit on this branch:
 3. Open PR:
    - Title: `agent: #<N> <issue title>`
    - Body: reference the issue, list acceptance criteria met, note reviewer pass
-4. Update issue labels to reflect the open PR:
-
-   ```bash
-   gh issue edit <N> --remove-label agent-in-progress --add-label agent-pr-open
-   ```
-
-5. Comment on the issue with the PR link. Do **not** close the issue.
+4. Comment on the issue with the PR link. Do **not** close the issue or edit issue labels — Sandcastle updates labels after this phase.
 
 # Rules
 
 - Do not make code changes unless tests fail — if tests fail, fix minimally, commit, re-run tests, then publish.
-- Do not close the issue.
+- Do not close the issue or change issue labels.
 
 When the PR is open and the issue is commented, output:
 

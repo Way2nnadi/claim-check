@@ -4,6 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"agent:build": "sandcastle docker build-image --image-name sandcastle:claim-check",
+		"preagent:run": "npm run agent:build",
 		"agent:run": "tsx .sandcastle/main.mts"
 	},
 	"devDependencies": {
