@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 from alembic import context
 from policy_pipeline.config import get_settings
@@ -16,6 +16,33 @@ settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
 target_metadata = None
+
+
+def _ensure_alembic_version_table(connection) -> None:
+    # Alembic defaults to version_num VARCHAR(32); our revision ids are descriptive
+    # and longer than that, so ensure the version table can store them.
+    connection.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_name = 'alembic_version'
+                ) THEN
+                    CREATE TABLE alembic_version (
+                        version_num VARCHAR(200) NOT NULL,
+                        CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+                    );
+                ELSE
+                    ALTER TABLE alembic_version
+                    ALTER COLUMN version_num TYPE VARCHAR(200);
+                END IF;
+            END $$;
+            """
+        )
+    )
 
 
 def run_migrations_offline() -> None:
@@ -37,6 +64,9 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        _ensure_alembic_version_table(connection)
+        connection.commit()
+
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():

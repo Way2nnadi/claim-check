@@ -14,10 +14,15 @@ dependencies = [
     "sqlalchemy>=2.0.0",
 ]
 
+[project.scripts]
+dev = "policy_pipeline.dev:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
     "ruff>=0.12.0",
+    "uvicorn[standard]>=0.49.0",
+    "watchfiles>=1.0.0",
 ]
 
 [build-system]

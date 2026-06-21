@@ -2,7 +2,7 @@ from policy_pipeline.config import Settings, get_settings
 
 
 def test_settings_use_local_defaults() -> None:
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.environment == "local"
     assert settings.service_name == "policy-pipeline"
@@ -28,6 +28,7 @@ def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("POLICY_PIPELINE_LLM_HOSTED_ENDPOINTS_ENABLED", "false")
     monkeypatch.setenv("POLICY_PIPELINE_LLM_REQUEST_TIMEOUT_SECONDS", "12.5")
 
+    get_settings.cache_clear()
     settings = get_settings()
 
     assert settings.environment == "test"
@@ -45,6 +46,42 @@ def test_settings_can_be_overridden_from_environment(monkeypatch) -> None:
 def test_local_auth_is_disabled_outside_local_and_test_by_default(monkeypatch) -> None:
     monkeypatch.setenv("POLICY_PIPELINE_ENVIRONMENT", "production")
 
+    get_settings.cache_clear()
     settings = get_settings()
 
     assert settings.is_local_auth_enabled is False
+
+
+def test_settings_load_from_env_file(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                'POLICY_PIPELINE_DATABASE_URL="postgresql+psycopg://testuser@localhost:5432/testdb"',
+                'POLICY_PIPELINE_OBJECT_STORAGE_ROOT="/tmp/object-storage"',
+                "POLICY_PIPELINE_ENVIRONMENT=test",
+            ]
+        )
+    )
+
+    settings = Settings(_env_file=str(env_file))
+
+    assert settings.environment == "test"
+    assert settings.database_url == "postgresql+psycopg://testuser@localhost:5432/testdb"
+    assert settings.object_storage_root == "/tmp/object-storage"
+    assert settings.is_local_auth_enabled is True
+
+
+def test_environment_variables_override_env_file(tmp_path, monkeypatch) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        'POLICY_PIPELINE_DATABASE_URL="postgresql+psycopg://from-file@localhost:5432/filedb"\n'
+    )
+    monkeypatch.setenv(
+        "POLICY_PIPELINE_DATABASE_URL",
+        "postgresql+psycopg://from-env@localhost:5432/envdb",
+    )
+
+    settings = Settings(_env_file=str(env_file))
+
+    assert settings.database_url == "postgresql+psycopg://from-env@localhost:5432/envdb"

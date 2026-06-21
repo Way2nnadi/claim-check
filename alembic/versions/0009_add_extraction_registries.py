@@ -6,8 +6,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0008_add_extraction_registries"
-down_revision = "0007_add_document_sections_table"
+revision = "0009_add_extraction_registries"
+down_revision = "0008_add_document_quality_gate_and_table_metadata"
 branch_labels = None
 depends_on = None
 
