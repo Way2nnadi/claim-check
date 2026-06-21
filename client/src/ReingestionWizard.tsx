@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
+import MissionDrawerHead from "./MissionDrawerHead";
 import {
   fetchModelConfigurations,
   fetchPromptTemplates,
@@ -228,25 +229,16 @@ export default function ReingestionWizard({
       aria-labelledby="reingestion-wizard-heading"
       aria-live="polite"
     >
-      <header className="reingestion-wizard-head">
-        <div className="reingestion-wizard-intro">
-          <span className="folio">Re-ingestion module</span>
-          <h4 id="reingestion-wizard-heading">Re-ingestion wizard</h4>
-          <p>
-            Upload a revised source, extract Candidate Rules, and diff against the current Policy
-            Version — all in one atomic pass.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="reingestion-wizard-close"
-          disabled={phase === "running"}
-          onClick={onClose}
-        >
-          Close
-        </button>
-      </header>
+      <MissionDrawerHead
+        folio="Re-ingestion module"
+        title="Re-ingestion wizard"
+        titleId="reingestion-wizard-heading"
+        lede="Upload a revised source, extract Candidate Rules, and diff against the current Policy Version — all in one atomic pass."
+        onClose={onClose}
+        closeDisabled={phase === "running"}
+      />
 
+      <div className="mission-drawer-body">
       <ol className="reingestion-steps" aria-label="Re-ingestion progress">
         {(["Configure", "Process", "Diff summary"] as const).map((label, index) => {
           const stepPhase =
@@ -501,6 +493,7 @@ export default function ReingestionWizard({
           </div>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

@@ -260,7 +260,7 @@ export default function DocumentDetail({
       <header className="document-detail-head">
         <div className="document-detail-head-row">
           <button type="button" className="detail-back" onClick={onBack}>
-            ← Return to catalog
+            ← Catalog
           </button>
           {showAdminActions ? (
             <div className="document-detail-commands">
@@ -286,9 +286,7 @@ export default function DocumentDetail({
           ) : null}
         </div>
         <div className="document-detail-intro">
-          <p className="eyebrow">Document Detail</p>
           <h3>{formatDocumentTitle(documentId)}</h3>
-          <p className="catalog-detail-slug">{documentId}</p>
         </div>
       </header>
 
@@ -393,18 +391,13 @@ export default function DocumentDetail({
               : " Confirm the document id with an administrator."}
           </p>
           <button type="button" className="detail-back inline" onClick={onBack}>
-            Back to catalog
+            ← Catalog
           </button>
         </div>
       ) : null}
 
       {status === "ready" ? (
         <>
-          <p className="document-detail-lede">
-            {versions.length} version{versions.length === 1 ? "" : "s"} on file — including archived
-            uploads retained for audit.
-          </p>
-
           <ol className="version-ledger" aria-label={`Document Versions for ${documentId}`}>
             {versions.map((version, index) => {
               const isArchived = Boolean(version.deleted_at);

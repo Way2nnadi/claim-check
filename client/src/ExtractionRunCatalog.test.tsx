@@ -141,9 +141,10 @@ describe("ExtractionRunCatalog", () => {
     render(<ExtractionRunCatalog />);
 
     await screen.findByText("No Extraction Runs have been recorded yet.");
+    await userEvent.click(screen.getByText("Scope filters"));
     await userEvent.type(screen.getByLabelText("Document"), "expense-policy");
     await userEvent.type(screen.getByLabelText("Document version id"), "docv-expense-v1");
-    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply scope" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

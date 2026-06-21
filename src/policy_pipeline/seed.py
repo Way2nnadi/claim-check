@@ -51,13 +51,8 @@ Return a single JSON object with this shape:
         "value": "<threshold as string>"
       },
       "applicability": {
-        "aggregation_period": (
-          "per_transaction"
-          | "per_day"
-          | "per_trip"
-          | "per_night"
-          | "per_attendee"
-        ),
+        "aggregation_period":
+          "per_transaction" | "per_day" | "per_trip" | "per_night" | "per_attendee",
         "unit": "<e.g. money, count, miles>",
         "currency": "<optional 3-letter ISO code>",
         "limit_basis": "<optional, e.g. per employee>"

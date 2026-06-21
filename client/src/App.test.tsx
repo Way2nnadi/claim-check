@@ -353,7 +353,7 @@ describe("App", () => {
             json: async () => ({ items: [] }),
           });
         }
-        if (url === "/api/candidate-rules?lifecycle_state=extracted&lifecycle_state=in_review") {
+        if (url === "/api/candidate-rules") {
           return Promise.resolve({
             ok: true,
             json: async () => ({ items: [] }),
@@ -369,7 +369,6 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("button", { name: "ReviewApproval Desk" }));
 
     expect(await screen.findByRole("heading", { name: "Review" })).toBeInTheDocument();
-    expect(screen.getByText("Approval desk · triage")).toBeInTheDocument();
     expect(
       screen.getByText(/The review queue is empty — no extracted Rules are waiting for triage/),
     ).toBeInTheDocument();

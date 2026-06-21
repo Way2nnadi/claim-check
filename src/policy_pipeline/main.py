@@ -25,12 +25,14 @@ from policy_pipeline.config import get_settings
 from policy_pipeline.database import get_session
 from policy_pipeline.documents import (
     DocumentQualityGateRejectedError,
+    DocumentSectionListResponse,
     DocumentVersion,
     DocumentVersionListResponse,
     PolicyDocumentListResponse,
     create_document_version,
     document_version_from_record,
     get_document_version,
+    list_document_sections,
     list_document_versions,
     list_policy_document_summaries,
     validate_upload_file,
@@ -603,6 +605,38 @@ def create_app() -> FastAPI:
     ) -> ModelConfigurationListResponse:
         del principal
         return ModelConfigurationListResponse(items=list_model_configurations(session))
+
+    @app.get(
+        "/policy-documents/{document_id}/versions/{document_version_id}/sections",
+        response_model=DocumentSectionListResponse,
+    )
+    def list_document_version_sections(
+        document_id: str,
+        document_version_id: str,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> DocumentSectionListResponse:
+        del principal
+        record = get_document_version(
+            session,
+            document_id=document_id,
+            document_version_id=document_version_id,
+        )
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document Version was not found.",
+            )
+        return DocumentSectionListResponse(
+            items=list_document_sections(
+                session,
+                document_id=document_id,
+                document_version_id=document_version_id,
+            )
+        )
 
     @app.get(
         "/policy-documents/{document_id}/versions/{document_version_id}/extraction-runs",

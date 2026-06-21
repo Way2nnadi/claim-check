@@ -8,9 +8,11 @@ import {
   LIFECYCLE_TABS,
   REVIEW_QUEUE_LIFECYCLE_STATES,
   describeCandidateRuleError,
+  emptyMessageForLifecycleTab,
+  filterReviewsForTab,
   formatLifecycleState,
   isDefaultCustomSelection,
-  lifecycleStatesForTab,
+  showEmptyStateHint,
   type LifecycleTabId,
 } from "./candidateRuleFormat";
 import DocumentFilterPicker from "./DocumentFilterPicker";
@@ -42,18 +44,8 @@ function countScopeFilters(filters: CandidateRuleFilters): number {
   );
 }
 
-function buildFilters(
-  lifecycleTab: LifecycleTabId,
-  customLifecycleSelection: Set<LifecycleState>,
-  scope: ScopeFilters,
-): CandidateRuleFilters {
+function buildScopeFilters(scope: ScopeFilters): CandidateRuleFilters {
   const filters: CandidateRuleFilters = {};
-  const lifecycleStates = lifecycleStatesForTab(lifecycleTab, [...customLifecycleSelection]);
-
-  if (lifecycleStates) {
-    filters.lifecycleStates = lifecycleStates;
-  }
-
   const trimmedDocumentId = scope.documentId.trim();
   const trimmedVersionId = scope.documentVersionId.trim();
   const trimmedExtractionRunId = scope.extractionRunId.trim();
@@ -87,8 +79,8 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
     documentVersionId: "",
     extractionRunId: "",
   });
-  const [appliedFilters, setAppliedFilters] = useState<CandidateRuleFilters>(() =>
-    buildFilters("queue", new Set(REVIEW_QUEUE_LIFECYCLE_STATES), {
+  const [appliedScopeFilters, setAppliedScopeFilters] = useState<CandidateRuleFilters>(() =>
+    buildScopeFilters({
       documentId: "",
       documentVersionId: "",
       extractionRunId: "",
@@ -116,15 +108,33 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
   }, []);
 
   useEffect(() => {
-    void loadReviews(appliedFilters);
-  }, [appliedFilters, loadReviews]);
+    void loadReviews(appliedScopeFilters);
+  }, [appliedScopeFilters, loadReviews]);
+
+  const customSelection = useMemo(
+    () => [...customLifecycleSelection],
+    [customLifecycleSelection],
+  );
+
+  const displayedReviews = useMemo(
+    () => filterReviewsForTab(reviews, lifecycleTab, customSelection),
+    [customSelection, lifecycleTab, reviews],
+  );
+
+  const tabCounts = useMemo(() => {
+    if (status !== "ready") {
+      return {} as Partial<Record<LifecycleTabId, number>>;
+    }
+
+    const counts: Partial<Record<LifecycleTabId, number>> = {};
+    for (const tab of LIFECYCLE_TABS) {
+      counts[tab.id] = filterReviewsForTab(reviews, tab.id, customSelection).length;
+    }
+    return counts;
+  }, [customSelection, reviews, status]);
 
   function applyLifecycleTab(tab: LifecycleTabId): void {
     setLifecycleTab(tab);
-    if (tab === "custom") {
-      return;
-    }
-    setAppliedFilters(buildFilters(tab, customLifecycleSelection, scopeDraft));
   }
 
   function handleCustomLifecycleToggle(state: LifecycleState): void {
@@ -135,17 +145,14 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
       } else {
         next.add(state);
       }
-      setLifecycleTab("custom");
-      setAppliedFilters(
-        buildFilters("custom", next, scopeDraft),
-      );
       return next;
     });
+    setLifecycleTab("custom");
   }
 
   function handleScopeSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    setAppliedFilters(buildFilters(lifecycleTab, customLifecycleSelection, scopeDraft));
+    setAppliedScopeFilters(buildScopeFilters(scopeDraft));
   }
 
   function handleClearScope(): void {
@@ -155,26 +162,10 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
       extractionRunId: "",
     };
     setScopeDraft(clearedScope);
-    setAppliedFilters(buildFilters(lifecycleTab, customLifecycleSelection, clearedScope));
+    setAppliedScopeFilters(buildScopeFilters(clearedScope));
   }
 
-  const scopeFilterCount = countScopeFilters(appliedFilters);
-  const flaggedCount = reviews.filter((review) => review.qa_flags.length > 0).length;
-  const displayedReviews = useMemo(() => {
-    if (lifecycleTab !== "flagged") {
-      return reviews;
-    }
-    return reviews.filter((review) => review.qa_flags.length > 0);
-  }, [lifecycleTab, reviews]);
-
-  const tabCounts: Partial<Record<LifecycleTabId, number>> = {};
-  if (status === "ready") {
-    tabCounts[lifecycleTab] =
-      lifecycleTab === "flagged" ? displayedReviews.length : reviews.length;
-    if (lifecycleTab !== "flagged" && flaggedCount > 0) {
-      tabCounts.flagged = flaggedCount;
-    }
-  }
+  const scopeFilterCount = countScopeFilters(appliedScopeFilters);
 
   const scopeActiveInDraft =
     Boolean(scopeDraft.documentId.trim()) ||
@@ -183,7 +174,7 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
 
   const hasNonDefaultFilters =
     scopeFilterCount > 0 ||
-    (lifecycleTab === "custom" && !isDefaultCustomSelection([...customLifecycleSelection]));
+    (lifecycleTab === "custom" && !isDefaultCustomSelection(customSelection));
 
   useEffect(() => {
     if (status !== "ready") {
@@ -212,7 +203,7 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
   }, [displayedReviews, selectedCandidateRuleId, selectionDismissed, status]);
 
   return (
-    <div className="review-catalog content-enter">
+    <div className="catalog-page review-catalog content-enter">
       <header className="review-catalog-head reveal">
         <span className="folio">Approval desk · triage</span>
         <h2>Candidate Rules</h2>
@@ -244,7 +235,7 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
                 onClick={() => applyLifecycleTab(tab.id)}
               >
                 <span>{tab.label}</span>
-                {count !== undefined ? (
+                {count !== undefined && (count > 0 || isSelected) ? (
                   <span className="catalog-tab-count">{count}</span>
                 ) : null}
               </button>
@@ -347,14 +338,14 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
         <>
           {scopeFilterCount > 0 ? (
             <p className="review-scope-chips">
-              {appliedFilters.documentId ? appliedFilters.documentId : null}
-              {appliedFilters.documentId && appliedFilters.documentVersionId ? " · " : null}
-              {appliedFilters.documentVersionId ? appliedFilters.documentVersionId : null}
-              {(appliedFilters.documentId || appliedFilters.documentVersionId) &&
-              appliedFilters.extractionRunId
+              {appliedScopeFilters.documentId ? appliedScopeFilters.documentId : null}
+              {appliedScopeFilters.documentId && appliedScopeFilters.documentVersionId ? " · " : null}
+              {appliedScopeFilters.documentVersionId ? appliedScopeFilters.documentVersionId : null}
+              {(appliedScopeFilters.documentId || appliedScopeFilters.documentVersionId) &&
+              appliedScopeFilters.extractionRunId
                 ? " · "
                 : null}
-              {appliedFilters.extractionRunId ? appliedFilters.extractionRunId : null}
+              {appliedScopeFilters.extractionRunId ? appliedScopeFilters.extractionRunId : null}
             </p>
           ) : null}
           <div
@@ -371,15 +362,8 @@ export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalog
                   setSelectionDismissed(false);
                   setSelectedCandidateRuleId(candidateRuleId);
                 }}
-                emptyMessage={
-                  lifecycleTab === "flagged"
-                    ? "No flagged Candidate Rules in the current scope."
-                    : hasNonDefaultFilters
-                      ? "No Candidate Rules match the current filters."
-                      : lifecycleTab === "queue"
-                        ? "The review queue is empty — no extracted Rules are waiting for triage."
-                        : "No Candidate Rules match this lifecycle view."
-                }
+                emptyMessage={emptyMessageForLifecycleTab(lifecycleTab, hasNonDefaultFilters)}
+                showEmptyHint={showEmptyStateHint(lifecycleTab)}
               />
             </section>
 

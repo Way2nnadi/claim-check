@@ -73,16 +73,12 @@ describe("DocumentDetail extraction trigger", () => {
     await screen.findByText("docv-expense-v2");
     await userEvent.click(screen.getByRole("button", { name: /Extraction dossier/i }));
 
-    expect(
-      await screen.findByRole("heading", { name: "Commission an Extraction Run" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Extract rules" })).toBeInTheDocument();
 
     rerender(
       <DocumentDetail documentId="expense-policy" canUpload={false} onBack={() => undefined} />,
     );
 
-    expect(
-      screen.queryByRole("heading", { name: "Commission an Extraction Run" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Extract rules" })).not.toBeInTheDocument();
   });
 });

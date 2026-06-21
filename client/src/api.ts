@@ -4,6 +4,7 @@ import type {
   CandidateRuleReview,
   CandidateRuleReviewListResponse,
   CandidateRuleReviewUpdateRequest,
+  DocumentSectionListResponse,
   DocumentVersion,
   DocumentVersionListResponse,
   ExtractionExecutionResult,
@@ -11,6 +12,8 @@ import type {
   ExtractionRunFilters,
   ExtractionRunListResponse,
   ModelConfigurationListResponse,
+  PolicyVersionListResponse,
+  PolicyVersionSnapshot,
   PolicyDocumentListResponse,
   PromptTemplateListResponse,
   ReingestionRequest,
@@ -88,6 +91,18 @@ export function fetchMe(token: string): Promise<AuthenticatedPrincipal> {
   return apiRequest<AuthenticatedPrincipal>("/api/me", { method: "GET" }, token);
 }
 
+export function fetchPolicyVersions(): Promise<PolicyVersionListResponse> {
+  return apiRequest<PolicyVersionListResponse>("/api/policy-versions");
+}
+
+export function fetchPolicyVersion(
+  policyVersionId: string,
+): Promise<PolicyVersionSnapshot> {
+  return apiRequest<PolicyVersionSnapshot>(
+    `/api/policy-versions/${encodeURIComponent(policyVersionId)}`,
+  );
+}
+
 export function fetchPolicyDocuments(
   includeDeleted = false,
 ): Promise<PolicyDocumentListResponse> {
@@ -139,16 +154,34 @@ export async function downloadDocumentVersion(
   documentVersionId: string,
   filename: string,
 ): Promise<void> {
+  await downloadAttachment(
+    `/api/policy-documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(documentVersionId)}`,
+    filename,
+  );
+}
+
+export async function downloadPolicyVersionSnapshot(
+  policyVersionId: string,
+): Promise<void> {
+  await downloadAttachment(
+    `/api/policy-versions/${encodeURIComponent(policyVersionId)}/snapshot`,
+    buildSnapshotFilename(policyVersionId),
+  );
+}
+
+function buildSnapshotFilename(policyVersionId: string): string {
+  const safeStem = policyVersionId.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._-]+|[._-]+$/g, "");
+  return `${safeStem || "policy-version"}.json`;
+}
+
+async function downloadAttachment(path: string, filename: string): Promise<void> {
   const token = getStoredToken();
   const headers = new Headers();
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(
-    `/api/policy-documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(documentVersionId)}`,
-    { headers },
-  );
+  const response = await fetch(path, { headers });
 
   if (!response.ok) {
     throw await apiErrorFromResponse(response);
@@ -192,6 +225,15 @@ export function fetchDocumentVersionExtractionRuns(
 ): Promise<ExtractionRunListResponse> {
   return apiRequest<ExtractionRunListResponse>(
     `/api/policy-documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(documentVersionId)}/extraction-runs`,
+  );
+}
+
+export function fetchDocumentSections(
+  documentId: string,
+  documentVersionId: string,
+): Promise<DocumentSectionListResponse> {
+  return apiRequest<DocumentSectionListResponse>(
+    `/api/policy-documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(documentVersionId)}/sections`,
   );
 }
 

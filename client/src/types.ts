@@ -34,6 +34,20 @@ export interface DocumentVersionListResponse {
   items: DocumentVersion[];
 }
 
+export interface DocumentSection {
+  document_id: string;
+  document_version_id: string;
+  section_id: string;
+  heading_path: string[];
+  content: string;
+  start_char: number;
+  end_char: number;
+}
+
+export interface DocumentSectionListResponse {
+  items: DocumentSection[];
+}
+
 export type ExtractionRunStatus = "completed" | "failed";
 
 export interface ExtractionRun {
@@ -118,6 +132,18 @@ export interface ReingestionResult {
   document_version: DocumentVersion;
   extraction_run: ExtractionExecutionResult;
   diff: PolicyVersionDiff;
+}
+
+export interface PolicyVersionSummary {
+  policy_version_id: string;
+  published_by: string;
+  change_summary: string;
+  rule_count: number;
+  created_at: string;
+}
+
+export interface PolicyVersionListResponse {
+  items: PolicyVersionSummary[];
 }
 
 export type LifecycleState =
@@ -209,6 +235,15 @@ export interface CandidateRuleValue {
   condition: RuleCondition | null;
   applicability: Applicability | null;
   exceptions: RuleException[];
+}
+
+export interface Rule extends CandidateRuleValue {}
+
+export interface PolicyVersionSnapshot {
+  policy_version_id: string;
+  change_summary: string;
+  published_by: string;
+  rules: Rule[];
 }
 
 export interface CandidateRuleReview {
