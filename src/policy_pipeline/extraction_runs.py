@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
 
+from policy_pipeline.config import Settings, get_settings
 from policy_pipeline.documents import (
     get_document_version,
     list_document_sections,
@@ -13,13 +14,16 @@ from policy_pipeline.documents import (
 from policy_pipeline.extraction_registry import (
     ExtractionRun,
     ModelConfiguration,
-    PromptTemplate,
     UnknownDocumentVersionError,
     UnknownModelConfigurationVersionError,
     UnknownPromptTemplateVersionError,
     create_extraction_run,
     get_model_configuration,
     get_prompt_template,
+)
+from policy_pipeline.llm_clients import (
+    CandidateRuleExtractionLLMClient,
+    build_llm_client,
 )
 from policy_pipeline.rule_store import create_rule
 from policy_pipeline.rules import (
@@ -88,28 +92,6 @@ class _StructuredCandidateRules(BaseModel):
     candidate_rules: list[_CandidateRuleDraft] = Field(default_factory=list)
 
 
-class FakeOpenAICompatibleAdapter:
-    def __init__(self, *, responses: list[Any]) -> None:
-        self._responses = list(responses)
-
-    def extract_candidate_rules(
-        self,
-        *,
-        prompt_template: PromptTemplate,
-        model_configuration: ModelConfiguration,
-        document_text: str,
-        attempt: int,
-    ) -> Any:
-        del prompt_template
-        del model_configuration
-        del document_text
-
-        if not self._responses:
-            return {"candidate_rules": []}
-        index = min(attempt - 1, len(self._responses) - 1)
-        return self._responses[index]
-
-
 def execute_extraction_run(
     session: Session,
     *,
@@ -120,6 +102,8 @@ def execute_extraction_run(
     prompt_template_version: str,
     model_configuration_id: str,
     model_configuration_version: str,
+    llm_client: CandidateRuleExtractionLLMClient | None = None,
+    settings: Settings | None = None,
 ) -> ExtractionExecutionResult:
     document_version = get_document_version(
         session,
@@ -165,14 +149,16 @@ def execute_extraction_run(
         document_version_id=document_version_id,
     )
     document_text = "\n\n".join(section.content for section in sections)
-    adapter = FakeOpenAICompatibleAdapter(
-        responses=_fake_structured_outputs(model_configuration=model_configuration)
+    runtime_settings = settings or get_settings()
+    client = llm_client or build_llm_client(
+        settings=runtime_settings,
+        model_configuration=model_configuration,
     )
     max_attempts = _max_validation_attempts(model_configuration=model_configuration)
     last_error = "Structured extraction output did not pass validation."
 
     for attempt in range(1, max_attempts + 1):
-        raw_output = adapter.extract_candidate_rules(
+        raw_output = client.extract_candidate_rules(
             prompt_template=prompt_template,
             model_configuration=model_configuration,
             document_text=document_text,
@@ -204,15 +190,6 @@ def execute_extraction_run(
         )
 
     raise StructuredOutputRejectedError(attempts=max_attempts, detail=last_error)
-
-
-def _fake_structured_outputs(*, model_configuration: ModelConfiguration) -> list[Any]:
-    responses = model_configuration.settings.get("fake_structured_outputs", [])
-    if isinstance(responses, list):
-        return responses
-    return [responses]
-
-
 def _max_validation_attempts(*, model_configuration: ModelConfiguration) -> int:
     raw_value = model_configuration.settings.get("max_validation_attempts", 2)
     if not isinstance(raw_value, int) or raw_value < 1:

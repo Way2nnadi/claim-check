@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     object_storage_encryption_at_rest_required: bool = True
     object_storage_server_side_encryption_algorithm: str = "AES256"
     object_storage_kms_key_id: str | None = None
+    llm_api_key: str | None = None
+    llm_hosted_endpoints_enabled: bool = True
+    llm_request_timeout_seconds: float = 30.0
     local_auth_enabled: bool | None = None
     local_auth_identities: tuple[LocalIdentitySettings, ...] = (
         LocalIdentitySettings(
