@@ -5,7 +5,7 @@ from __future__ import annotations
 from alembic import op
 
 revision = "0010_add_document_section_embeddings"
-down_revision = "0009_merge_0008_heads"
+down_revision = "0009_add_extraction_registries"
 branch_labels = None
 depends_on = None
 
