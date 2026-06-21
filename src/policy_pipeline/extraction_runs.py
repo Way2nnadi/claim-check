@@ -26,6 +26,12 @@ from policy_pipeline.llm_clients import (
     CandidateRuleExtractionLLMClient,
     build_llm_client,
 )
+from policy_pipeline.qa_retrieval import (
+    SectionEmbeddingClient,
+    attach_retrieval_assisted_qa_flags,
+    retrieve_candidate_rule_context,
+    store_section_embeddings,
+)
 from policy_pipeline.rule_store import create_rule
 from policy_pipeline.rules import (
     Applicability,
@@ -137,6 +143,7 @@ def execute_extraction_run(
     model_configuration_id: str,
     model_configuration_version: str,
     llm_client: CandidateRuleExtractionLLMClient | None = None,
+    embedding_client: SectionEmbeddingClient | None = None,
     settings: Settings | None = None,
 ) -> ExtractionExecutionResult:
     document_version = get_document_version(
@@ -187,6 +194,13 @@ def execute_extraction_run(
         document_id=document_id,
         document_version_id=document_version_id,
     )
+    store_section_embeddings(
+        session,
+        document_id=document_id,
+        document_version_id=document_version_id,
+        sections=sections,
+        embedding_client=embedding_client,
+    )
     document_text = "\n\n".join(section.content for section in sections)
     max_attempts = _max_validation_attempts(model_configuration=model_configuration)
     last_error = "Structured extraction output did not pass validation."
@@ -209,6 +223,24 @@ def execute_extraction_run(
         except (ValidationError, ValueError) as exc:
             last_error = str(exc)
             continue
+
+        for candidate_rule in candidate_rules:
+            context = retrieve_candidate_rule_context(
+                session,
+                candidate_rule=candidate_rule,
+                document_id=document_id,
+                document_version_id=document_version_id,
+                embedding_client=embedding_client,
+                related_rule_pool=[
+                    related_rule
+                    for related_rule in candidate_rules
+                    if related_rule.rule_id != candidate_rule.rule_id
+                ],
+            )
+            attach_retrieval_assisted_qa_flags(
+                candidate_rule=candidate_rule,
+                context=context,
+            )
 
         for rule in candidate_rules:
             create_rule(session, rule=rule, commit=False)
