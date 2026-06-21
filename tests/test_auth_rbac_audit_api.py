@@ -3,9 +3,22 @@ import json
 import httpx
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from policy_pipeline.database import Base
 from policy_pipeline.main import create_app
+from policy_pipeline.rule_store import create_rule
+from policy_pipeline.rules import (
+    Applicability,
+    CandidateRule,
+    Citation,
+    EnforceabilityClass,
+    LifecycleState,
+    RuleCondition,
+    RuleOrigin,
+    RuleOriginType,
+    Scope,
+)
 
 
 def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
@@ -34,6 +47,45 @@ def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) ->
     )
 
 
+def _seed_candidate_rule(database_url: str) -> None:
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        create_rule(
+            session,
+            rule=CandidateRule(
+                rule_id="rule-123",
+                statement="Meals are capped at $75 per day.",
+                enforceability_class=EnforceabilityClass.ENFORCEABLE,
+                lifecycle_state=LifecycleState.EXTRACTED,
+                origin=RuleOrigin(
+                    source_type=RuleOriginType.EXTRACTED,
+                    extraction_run_id="extract-2026-06-21",
+                ),
+                scope=Scope(expense_category="meals"),
+                citation=Citation(
+                    document_id="expense-policy",
+                    document_version_id="expense-policy-v1",
+                    section_id="meals#abc123",
+                    quote="Meals are capped at $75 per day.",
+                    start_char=10,
+                    end_char=42,
+                ),
+                condition=RuleCondition(
+                    field="meal.amount",
+                    operator="<=",
+                    value="75",
+                ),
+                applicability=Applicability(
+                    aggregation_period="per_day",
+                    unit="money",
+                    currency="USD",
+                    limit_basis="per employee",
+                ),
+            ),
+        )
+    engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_event(
     monkeypatch: pytest.MonkeyPatch,
@@ -46,6 +98,7 @@ async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_e
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
     engine.dispose()
+    _seed_candidate_rule(database_url)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app()),
