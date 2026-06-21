@@ -6,8 +6,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0004_add_policy_versions_table"
-down_revision = "0003_add_rules_table"
+revision = "0005_add_policy_versions_table"
+down_revision = "0004_add_document_versions_table"
 branch_labels = None
 depends_on = None
 

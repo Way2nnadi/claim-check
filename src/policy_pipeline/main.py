@@ -1,7 +1,7 @@
 import re
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -10,7 +10,14 @@ from policy_pipeline.audit import AuditEventListResponse, list_audit_events, rec
 from policy_pipeline.auth import require_roles
 from policy_pipeline.config import get_settings
 from policy_pipeline.database import get_session
+from policy_pipeline.documents import (
+    DocumentVersion,
+    create_document_version,
+    get_document_version,
+    validate_upload_file,
+)
 from policy_pipeline.identity import AuthenticatedPrincipal, Role
+from policy_pipeline.object_storage import get_object_storage
 from policy_pipeline.rule_store import create_rule
 from policy_pipeline.rules import (
     Applicability,
@@ -92,6 +99,88 @@ def create_app() -> FastAPI:
         rule_count: int
         status: str
         published_by: str
+
+    @app.post(
+        "/policy-documents/{document_id}/versions",
+        response_model=DocumentVersion,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_policy_document_version(
+        document_id: str,
+        file: Annotated[UploadFile, File()],
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> DocumentVersion:
+        filename, content_type = validate_upload_file(file)
+        document_bytes = await file.read()
+        document_version = create_document_version(
+            session,
+            document_id=document_id,
+            filename=filename,
+            content_type=content_type,
+            document_bytes=document_bytes,
+            commit=False,
+        )
+        record_audit_event(
+            session,
+            action="document_version.uploaded",
+            actor_subject=principal.subject,
+            actor_roles=[role.value for role in principal.roles],
+            entity_type="document_version",
+            entity_id=document_version.document_version_id,
+            payload={
+                "document_id": document_version.document_id,
+                "filename": document_version.filename,
+                "content_type": document_version.content_type,
+                "size_bytes": document_version.size_bytes,
+                "sha256": document_version.sha256,
+            },
+            commit=False,
+        )
+        session.commit()
+        return document_version
+
+    @app.get("/policy-documents/{document_id}/versions/{document_version_id}")
+    def download_policy_document_version(
+        document_id: str,
+        document_version_id: str,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> Response:
+        record = get_document_version(
+            session,
+            document_id=document_id,
+            document_version_id=document_version_id,
+        )
+        if record is None:
+            return Response(status_code=status.HTTP_404_NOT_FOUND)
+
+        document_bytes = get_object_storage().get_bytes(key=record.storage_key)
+        record_audit_event(
+            session,
+            action="document_version.accessed",
+            actor_subject=principal.subject,
+            actor_roles=[role.value for role in principal.roles],
+            entity_type="document_version",
+            entity_id=record.document_version_id,
+            payload={
+                "document_id": record.document_id,
+                "filename": record.filename,
+            },
+            commit=False,
+        )
+        session.commit()
+        return Response(
+            content=document_bytes,
+            media_type=record.content_type,
+            headers={"Content-Disposition": f'attachment; filename="{record.filename}"'},
+        )
 
     @app.post(
         "/candidate-rules/{candidate_rule_id}/approvals",
