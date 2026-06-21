@@ -1,9 +1,11 @@
 import json
 from hashlib import sha256
+from pathlib import Path
 
 import httpx
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from policy_pipeline.database import Base
 from policy_pipeline.main import create_app
@@ -96,6 +98,11 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
         "content_type": "application/pdf",
         "size_bytes": len(document_bytes),
         "sha256": expected_sha256,
+        "retention_until": None,
+        "retention_reason": None,
+        "deleted_at": None,
+        "deleted_by": None,
+        "deletion_reason": None,
     }
 
     assert access_response.status_code == 200
@@ -121,6 +128,8 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
                     "content_type": "application/pdf",
                     "size_bytes": len(document_bytes),
                     "sha256": expected_sha256,
+                    "retention_until": None,
+                    "retention_reason": None,
                 },
             },
             {
@@ -301,3 +310,319 @@ async def test_uploading_duplicate_pdf_bytes_still_creates_distinct_document_ver
     assert first_access_response.content == document_bytes
     assert second_access_response.status_code == 200
     assert second_access_response.content == document_bytes
+
+
+@pytest.mark.anyio
+async def test_uploading_document_version_with_retention_metadata_blocks_early_deletion(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    document_bytes = b"%PDF-1.7\nretained-document\n"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": ("expense-policy.pdf", document_bytes, "application/pdf"),
+                "retention_until": (None, "2099-01-01T00:00:00Z"),
+                "retention_reason": (None, "Finance seven-year retention schedule."),
+            },
+        )
+
+        assert upload_response.status_code == 201
+        document_version = upload_response.json()
+
+        delete_response = await client.request(
+            "DELETE",
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{document_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer admin-token"},
+            json={"reason": "Cleanup before retention expires."},
+        )
+
+    assert document_version["retention_until"] == "2099-01-01T00:00:00Z"
+    assert document_version["retention_reason"] == "Finance seven-year retention schedule."
+    assert delete_response.status_code == 409
+    assert delete_response.json() == {
+        "detail": (
+            "Document Version is retained until 2099-01-01T00:00:00Z "
+            "and cannot be deleted yet."
+        ),
+    }
+
+
+@pytest.mark.anyio
+async def test_admin_deletes_document_version_after_retention_and_audit_trail_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    document_bytes = b"%PDF-1.7\ndelete-me\n"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": ("expense-policy.pdf", document_bytes, "application/pdf"),
+                "retention_until": (None, "2000-01-01T00:00:00Z"),
+                "retention_reason": (None, "Legacy retention window already satisfied."),
+            },
+        )
+
+        assert upload_response.status_code == 201
+        document_version = upload_response.json()
+
+        storage_path = (
+            Path(object_storage_root)
+            / "policy-documents"
+            / "expense-policy"
+            / document_version["document_version_id"]
+            / "expense-policy.pdf"
+        )
+        assert storage_path.exists()
+
+        delete_response = await client.request(
+            "DELETE",
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{document_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer admin-token"},
+            json={"reason": "Retention period satisfied; purge source bytes."},
+        )
+        download_response = await client.get(
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{document_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+        audit_response = await client.get(
+            "/audit-events",
+            headers={"Authorization": "Bearer viewer-token"},
+            params={
+                "entity_type": "document_version",
+                "entity_id": document_version["document_version_id"],
+            },
+        )
+
+    assert delete_response.status_code == 200
+    deleted_version = delete_response.json()
+    assert deleted_version["document_id"] == "expense-policy"
+    assert deleted_version["retention_until"] == "2000-01-01T00:00:00Z"
+    assert deleted_version["retention_reason"] == "Legacy retention window already satisfied."
+    assert deleted_version["deleted_by"] == "admin-user"
+    assert deleted_version["deletion_reason"] == "Retention period satisfied; purge source bytes."
+    assert deleted_version["deleted_at"] is not None
+
+    assert download_response.status_code == 410
+    assert download_response.json() == {
+        "detail": "Document Version has been deleted.",
+    }
+    assert not storage_path.exists()
+
+    assert audit_response.status_code == 200
+    assert audit_response.json() == {
+        "items": [
+            {
+                "action": "document_version.uploaded",
+                "actor_subject": "admin-user",
+                "actor_roles": ["admin"],
+                "entity_type": "document_version",
+                "entity_id": document_version["document_version_id"],
+                "payload": {
+                    "document_id": "expense-policy",
+                    "filename": "expense-policy.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": len(document_bytes),
+                    "sha256": sha256(document_bytes).hexdigest(),
+                    "retention_until": "2000-01-01T00:00:00Z",
+                    "retention_reason": "Legacy retention window already satisfied.",
+                },
+            },
+            {
+                "action": "document_version.deleted",
+                "actor_subject": "admin-user",
+                "actor_roles": ["admin"],
+                "entity_type": "document_version",
+                "entity_id": document_version["document_version_id"],
+                "payload": {
+                    "document_id": "expense-policy",
+                    "filename": "expense-policy.pdf",
+                    "retention_until": "2000-01-01T00:00:00Z",
+                    "deleted_at": deleted_version["deleted_at"],
+                    "reason": "Retention period satisfied; purge source bytes.",
+                },
+            },
+        ]
+    }
+
+
+@pytest.mark.anyio
+async def test_delete_commit_failure_keeps_document_bytes_available(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    document_bytes = b"%PDF-1.7\ncommit-failure\n"
+    commit_count = 0
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": ("expense-policy.pdf", document_bytes, "application/pdf"),
+            },
+        )
+
+        assert upload_response.status_code == 201
+        document_version = upload_response.json()
+
+    storage_path = (
+        Path(object_storage_root)
+        / "policy-documents"
+        / "expense-policy"
+        / document_version["document_version_id"]
+        / "expense-policy.pdf"
+    )
+    assert storage_path.exists()
+
+    original_commit = Session.commit
+
+    def flaky_commit(self) -> None:
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 1:
+            raise RuntimeError("commit failed")
+        original_commit(self)
+
+    monkeypatch.setattr(Session, "commit", flaky_commit)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(), raise_app_exceptions=False),
+        base_url="http://testserver",
+    ) as client:
+        delete_response = await client.request(
+            "DELETE",
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{document_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer admin-token"},
+            json={"reason": "Retention period satisfied; purge source bytes."},
+        )
+        download_response = await client.get(
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{document_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert delete_response.status_code == 500
+    assert storage_path.exists()
+    assert download_response.status_code == 200
+    assert download_response.content == document_bytes
+
+
+@pytest.mark.anyio
+async def test_reason_fields_enforce_database_length_limits(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    object_storage_root = tmp_path / "object-storage"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url, str(object_storage_root))
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    document_bytes = b"%PDF-1.7\nvalidated-reasons\n"
+    oversized_reason = "x" * 501
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": ("expense-policy.pdf", document_bytes, "application/pdf"),
+                "retention_reason": (None, oversized_reason),
+            },
+        )
+
+        valid_upload_response = await client.post(
+            "/policy-documents/expense-policy/versions",
+            headers={"Authorization": "Bearer admin-token"},
+            files={
+                "file": ("expense-policy.pdf", document_bytes, "application/pdf"),
+            },
+        )
+
+        assert valid_upload_response.status_code == 201
+        document_version = valid_upload_response.json()
+
+        delete_response = await client.request(
+            "DELETE",
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{document_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer admin-token"},
+            json={"reason": oversized_reason},
+        )
+        download_response = await client.get(
+            (
+                "/policy-documents/expense-policy/versions/"
+                f"{document_version['document_version_id']}"
+            ),
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert upload_response.status_code == 422
+    assert delete_response.status_code == 422
+    assert download_response.status_code == 200
+    assert download_response.content == document_bytes

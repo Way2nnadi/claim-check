@@ -35,4 +35,9 @@ async def test_config_endpoint_reports_safe_runtime_configuration() -> None:
         "database": {
             "driver": "postgresql+psycopg",
         },
+        "object_storage": {
+            "encryption_at_rest_required": True,
+            "server_side_encryption_algorithm": "AES256",
+            "kms_key_id": None,
+        },
     }

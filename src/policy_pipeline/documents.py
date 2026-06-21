@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import PurePosixPath
 from uuid import uuid4
@@ -27,6 +28,19 @@ class DocumentVersion(BaseModel):
     content_type: str
     size_bytes: int
     sha256: str
+    retention_until: datetime | None = None
+    retention_reason: str | None = None
+    deleted_at: datetime | None = None
+    deleted_by: str | None = None
+    deletion_reason: str | None = None
+
+
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def validate_upload_file(file: UploadFile) -> tuple[str, str]:
@@ -50,6 +64,8 @@ def create_document_version(
     filename: str,
     content_type: str,
     document_bytes: bytes,
+    retention_until: datetime | None = None,
+    retention_reason: str | None = None,
     commit: bool = True,
 ) -> DocumentVersion:
     document_version_id = f"docv-{uuid4().hex}"
@@ -75,6 +91,8 @@ def create_document_version(
         storage_key=storage_key,
         size_bytes=len(document_bytes),
         sha256=content_hash,
+        retention_until=retention_until,
+        retention_reason=retention_reason,
     )
     session.add(record)
     session.flush()
@@ -105,4 +123,9 @@ def document_version_from_record(record: DocumentVersionRecord) -> DocumentVersi
         content_type=record.content_type,
         size_bytes=record.size_bytes,
         sha256=record.sha256,
+        retention_until=_normalize_datetime(record.retention_until),
+        retention_reason=record.retention_reason,
+        deleted_at=_normalize_datetime(record.deleted_at),
+        deleted_by=record.deleted_by,
+        deletion_reason=record.deletion_reason,
     )
