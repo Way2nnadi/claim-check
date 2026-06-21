@@ -14,7 +14,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from policy_pipeline.audit import AuditEventListResponse, list_audit_events, record_audit_event
@@ -44,9 +44,20 @@ from policy_pipeline.extraction_runs import (
 from policy_pipeline.identity import AuthenticatedPrincipal, Role
 from policy_pipeline.llm_clients import HostedEndpointDisabledError
 from policy_pipeline.object_storage import get_object_storage
-from policy_pipeline.rule_store import create_rule
+from policy_pipeline.rule_store import (
+    CandidateRuleNotFoundError,
+    InvalidCandidateRuleApprovalError,
+    InvalidCandidateRuleReviewError,
+    InvalidCandidateRuleTransitionError,
+    approve_candidate_rule_review,
+    create_rule,
+    get_candidate_rule_review,
+    reject_candidate_rule_review,
+    update_candidate_rule_review,
+)
 from policy_pipeline.rules import (
     Applicability,
+    CandidateRuleReview,
     Citation,
     EnforceabilityClass,
     LifecycleState,
@@ -129,6 +140,29 @@ def create_app() -> FastAPI:
         rationale: str
 
     class CandidateRuleApprovalResponse(BaseModel):
+        candidate_rule_id: str
+        status: str
+        recorded_by: str
+
+    class CandidateRuleReviewUpdateRequest(BaseModel):
+        statement: str | None = Field(default=None, min_length=1)
+        enforceability_class: EnforceabilityClass | None = None
+        scope: Scope | None = None
+        citation: Citation | None = None
+        condition: RuleCondition | None = None
+        applicability: Applicability | None = None
+        exceptions: list[RuleException] | None = None
+
+        @model_validator(mode="after")
+        def validate_requested_fields(self) -> "CandidateRuleReviewUpdateRequest":
+            if not self.model_fields_set:
+                raise ValueError("Candidate Rule review update requires at least one field.")
+            return self
+
+    class CandidateRuleRejectionRequest(BaseModel):
+        reason: str = Field(min_length=1)
+
+    class CandidateRuleRejectionResponse(BaseModel):
         candidate_rule_id: str
         status: str
         recorded_by: str
@@ -420,7 +454,7 @@ def create_app() -> FastAPI:
         response_model=CandidateRuleApprovalResponse,
         status_code=status.HTTP_201_CREATED,
     )
-    def approve_candidate_rule(
+    def approve_candidate_rule_endpoint(
         candidate_rule_id: str,
         approval: CandidateRuleApprovalRequest,
         principal: Annotated[
@@ -429,6 +463,30 @@ def create_app() -> FastAPI:
         ],
         session: Annotated[Session, Depends(get_session)],
     ) -> CandidateRuleApprovalResponse:
+        try:
+            approve_candidate_rule_review(
+                session,
+                candidate_rule_id=candidate_rule_id,
+                commit=False,
+            )
+        except CandidateRuleNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate Rule was not found.",
+            ) from exc
+        except InvalidCandidateRuleTransitionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Candidate Rule cannot transition from "
+                    f"{exc.current_state.value} to {exc.target_state.value}."
+                ),
+            ) from exc
+        except InvalidCandidateRuleApprovalError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=exc.detail,
+            ) from exc
         record_audit_event(
             session,
             action="candidate_rule.approved",
@@ -437,10 +495,140 @@ def create_app() -> FastAPI:
             entity_type="candidate_rule",
             entity_id=candidate_rule_id,
             payload={"rationale": approval.rationale},
+            commit=False,
         )
+        session.commit()
         return CandidateRuleApprovalResponse(
             candidate_rule_id=candidate_rule_id,
             status="approved",
+            recorded_by=principal.subject,
+        )
+
+    @app.get(
+        "/candidate-rules/{candidate_rule_id}",
+        response_model=CandidateRuleReview,
+    )
+    def get_candidate_rule(
+        candidate_rule_id: str,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> CandidateRuleReview:
+        del principal
+        try:
+            return get_candidate_rule_review(
+                session,
+                candidate_rule_id=candidate_rule_id,
+            )
+        except CandidateRuleNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate Rule was not found.",
+            ) from exc
+
+    @app.patch(
+        "/candidate-rules/{candidate_rule_id}",
+        response_model=CandidateRuleReview,
+    )
+    def update_candidate_rule(
+        candidate_rule_id: str,
+        request: CandidateRuleReviewUpdateRequest,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> CandidateRuleReview:
+        updated_fields = sorted(request.model_fields_set)
+        try:
+            review = update_candidate_rule_review(
+                session,
+                candidate_rule_id=candidate_rule_id,
+                updates=request.model_dump(mode="json", exclude_unset=True),
+                commit=False,
+            )
+        except CandidateRuleNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate Rule was not found.",
+            ) from exc
+        except InvalidCandidateRuleTransitionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Candidate Rule cannot transition from "
+                    f"{exc.current_state.value} to {exc.target_state.value}."
+                ),
+            ) from exc
+        except InvalidCandidateRuleReviewError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=exc.detail,
+            ) from exc
+        record_audit_event(
+            session,
+            action="candidate_rule.edited",
+            actor_subject=principal.subject,
+            actor_roles=[role.value for role in principal.roles],
+            entity_type="candidate_rule",
+            entity_id=candidate_rule_id,
+            payload={
+                "fields": updated_fields,
+                "to_lifecycle_state": review.lifecycle_state.value,
+            },
+            commit=False,
+        )
+        session.commit()
+        return review
+
+    @app.post(
+        "/candidate-rules/{candidate_rule_id}/rejections",
+        response_model=CandidateRuleRejectionResponse,
+    )
+    def reject_candidate_rule(
+        candidate_rule_id: str,
+        rejection: CandidateRuleRejectionRequest,
+        principal: Annotated[
+            AuthenticatedPrincipal,
+            Depends(require_roles(Role.ADMIN, Role.APPROVER)),
+        ],
+        session: Annotated[Session, Depends(get_session)],
+    ) -> CandidateRuleRejectionResponse:
+        try:
+            reject_candidate_rule_review(
+                session,
+                candidate_rule_id=candidate_rule_id,
+                commit=False,
+            )
+        except CandidateRuleNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate Rule was not found.",
+            ) from exc
+        except InvalidCandidateRuleTransitionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Candidate Rule cannot transition from "
+                    f"{exc.current_state.value} to {exc.target_state.value}."
+                ),
+            ) from exc
+        record_audit_event(
+            session,
+            action="candidate_rule.rejected",
+            actor_subject=principal.subject,
+            actor_roles=[role.value for role in principal.roles],
+            entity_type="candidate_rule",
+            entity_id=candidate_rule_id,
+            payload={"reason": rejection.reason},
+            commit=False,
+        )
+        session.commit()
+        return CandidateRuleRejectionResponse(
+            candidate_rule_id=candidate_rule_id,
+            status="rejected",
             recorded_by=principal.subject,
         )
 

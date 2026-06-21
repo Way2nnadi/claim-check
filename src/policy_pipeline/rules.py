@@ -114,13 +114,9 @@ class _RulePayload(BaseModel):
     exceptions: list[RuleException] = Field(default_factory=list)
 
 
-class CandidateRule(_RulePayload):
-    qa_flags: list[QAFlag] = Field(default_factory=list)
-
+class CandidateRuleValue(_RulePayload):
     @model_validator(mode="after")
-    def validate_candidate_rule(self) -> "CandidateRule":
-        if self.lifecycle_state not in {LifecycleState.EXTRACTED, LifecycleState.IN_REVIEW}:
-            raise ValueError("Candidate Rule lifecycle_state must be extracted or in_review.")
+    def validate_candidate_rule_value(self) -> "CandidateRuleValue":
         if (
             self.enforceability_class is not EnforceabilityClass.ENFORCEABLE
             and self.condition is not None
@@ -129,6 +125,16 @@ class CandidateRule(_RulePayload):
                 "Guidance and subjective Candidate Rules must not include "
                 "a machine-checkable condition."
             )
+        return self
+
+
+class CandidateRule(CandidateRuleValue):
+    qa_flags: list[QAFlag] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_candidate_rule(self) -> "CandidateRule":
+        if self.lifecycle_state not in {LifecycleState.EXTRACTED, LifecycleState.IN_REVIEW}:
+            raise ValueError("Candidate Rule lifecycle_state must be extracted or in_review.")
         return self
 
 
@@ -155,3 +161,12 @@ class PolicyVersionSnapshot(BaseModel):
     change_summary: str = Field(min_length=1)
     published_by: str = Field(min_length=1)
     rules: list[Rule] = Field(default_factory=list)
+
+
+class CandidateRuleReview(BaseModel):
+    candidate_rule_id: str = Field(min_length=1)
+    lifecycle_state: LifecycleState
+    current_rule: CandidateRuleValue
+    extracted_rule: CandidateRuleValue
+    committed_rule: CandidateRuleValue | None = None
+    qa_flags: list[QAFlag] = Field(default_factory=list)
