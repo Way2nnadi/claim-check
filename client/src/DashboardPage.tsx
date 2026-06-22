@@ -77,7 +77,7 @@ export default function DashboardPage({
     <div className="dashboard-page content-enter">
       <section className="dashboard-hero reveal">
         <div className="dashboard-hero-copy">
-          <span className="folio">Editorial desk · Issue #59</span>
+          <span className="folio">Editorial desk · Policy Pipeline</span>
           <h3>Policy Pipeline at a glance</h3>
           <p>
             Track pending Candidate Rules, the latest published Policy Version,
