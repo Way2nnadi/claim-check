@@ -133,21 +133,20 @@ async def test_admin_and_approver_can_create_manual_rule_without_citation_and_au
         "exceptions": payload["exceptions"],
     }
     assert audit_response.status_code == 200
-    assert audit_response.json() == {
-        "items": [
-            {
-                "action": "rule.created",
-                "actor_subject": subject,
-                "actor_roles": ["admin" if token == "admin-token" else "approver"],
-                "entity_type": "rule",
-                "entity_id": payload["rule_id"],
-                "payload": {
-                    "origin": "manual",
-                    "rationale": payload["rationale"],
-                    "has_citation": False,
-                },
-            }
-        ]
+    audit_payload = audit_response.json()
+    assert len(audit_payload["items"]) == 1
+    assert audit_payload["items"][0] == {
+        "action": "rule.created",
+        "actor_subject": subject,
+        "actor_roles": ["admin" if token == "admin-token" else "approver"],
+        "entity_type": "rule",
+        "entity_id": payload["rule_id"],
+        "payload": {
+            "origin": "manual",
+            "rationale": payload["rationale"],
+            "has_citation": False,
+        },
+        "occurred_at": audit_payload["items"][0]["occurred_at"],
     }
 
     engine = create_engine(database_url)
@@ -205,7 +204,8 @@ async def test_approver_can_create_manual_rule_with_citation(
     assert create_response.status_code == 201
     assert create_response.json()["citation"] == payload["citation"]
     assert audit_response.status_code == 200
-    assert audit_response.json()["items"] == [
+    audit_items = audit_response.json()["items"]
+    assert audit_items == [
         {
             "action": "rule.created",
             "actor_subject": "approver-user",
@@ -217,6 +217,7 @@ async def test_approver_can_create_manual_rule_with_citation(
                 "rationale": payload["rationale"],
                 "has_citation": True,
             },
+            "occurred_at": audit_items[0]["occurred_at"],
         }
     ]
 

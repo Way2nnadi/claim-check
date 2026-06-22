@@ -11,6 +11,7 @@ import CandidateRuleCatalog from "./CandidateRuleCatalog";
 import ExtractionRunCatalog from "./ExtractionRunCatalog";
 import ManualRulesPage from "./ManualRulesPage";
 import PolicyVersionCatalog from "./PolicyVersionCatalog";
+import AuditLogPage from "./AuditLogPage";
 import ThemeToggle from "./ThemeToggle";
 import { hasAnyRole } from "./permissions";
 import type { AuthenticatedPrincipal, Role } from "./types";
@@ -460,6 +461,8 @@ export default function App() {
 						<PolicyVersionCatalog principal={principal} />
 					) : activeSection === "manual-rules" ? (
 						<ManualRulesPage principal={principal} />
+					) : activeSection === "audit" ? (
+						<AuditLogPage />
 					) : (
 						<div className="catalog-page content-enter">
 							<div className="ledger-grid">
