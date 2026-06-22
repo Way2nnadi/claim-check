@@ -1,5 +1,5 @@
-from enum import StrEnum
 import re
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator

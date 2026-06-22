@@ -258,6 +258,18 @@ export interface PolicyVersionSnapshot {
   rules: Rule[];
 }
 
+export interface ManualRuleCreateRequest {
+  rule_id: string;
+  statement: string;
+  enforceability_class: EnforceabilityClass;
+  rationale: string;
+  scope: Scope;
+  citation?: Citation;
+  condition?: RuleCondition;
+  applicability?: Applicability;
+  exceptions: RuleException[];
+}
+
 export interface CandidateRuleReview {
   candidate_rule_id: string;
   lifecycle_state: LifecycleState;

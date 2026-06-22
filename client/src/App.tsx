@@ -9,6 +9,7 @@ import {
 import DocumentCatalog from "./DocumentCatalog";
 import CandidateRuleCatalog from "./CandidateRuleCatalog";
 import ExtractionRunCatalog from "./ExtractionRunCatalog";
+import ManualRulesPage from "./ManualRulesPage";
 import PolicyVersionCatalog from "./PolicyVersionCatalog";
 import ThemeToggle from "./ThemeToggle";
 import { hasAnyRole } from "./permissions";
@@ -473,6 +474,8 @@ export default function App() {
 							principal={principal}
 							publishIntentToken={policyVersionPublishIntent}
 						/>
+					) : activeSection === "manual-rules" ? (
+						<ManualRulesPage principal={principal} />
 					) : (
 						<div className="catalog-page content-enter">
 							<div className="ledger-grid">
