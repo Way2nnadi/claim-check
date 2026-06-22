@@ -12,6 +12,7 @@ import {
 import CandidateRuleDecisionModal from "./CandidateRuleDecisionModal";
 import CandidateRuleDetail from "./CandidateRuleDetail";
 import CandidateRuleLedger from "./CandidateRuleLedger";
+import { catalogApproveDisabled } from "./candidateRuleDecisions";
 import { describeCandidateRuleError } from "./candidateRuleFormat";
 import {
 	PRIMARY_REVIEW_TABS,
@@ -100,6 +101,21 @@ function resolveQueueScopeLabel(
 		return `${displayedCount} total`;
 	}
 	return `${displayedCount} rule${displayedCount === 1 ? "" : "s"}`;
+}
+
+function isLowRiskBulkApprovalCandidate(
+	review: CandidateRuleReview,
+	canBulkApprove: boolean,
+): boolean {
+	const diffCategory = review.reingestion_diff_category;
+
+	return (
+		canBulkApprove &&
+		!catalogApproveDisabled(review, canBulkApprove) &&
+		review.qa_flags.length === 0 &&
+		diffCategory !== "changed" &&
+		diffCategory !== "removed"
+	);
 }
 
 export default function CandidateRuleCatalog({
@@ -341,16 +357,17 @@ export default function CandidateRuleCatalog({
 		[displayedReviews, extractionRunId, lifecycleTab, reviews, scopeFilterCount],
 	);
 
+	const canBulkApprove = hasAnyRole(principal, ["admin", "approver"]);
 	const selectableCandidateRuleIds = useMemo(
 		() =>
 			new Set(
 				displayedReviews
 					.filter((review) =>
-						REVIEW_QUEUE_LIFECYCLE_STATES.includes(review.lifecycle_state),
+						isLowRiskBulkApprovalCandidate(review, canBulkApprove),
 					)
 					.map((review) => review.candidate_rule_id),
 			),
-		[displayedReviews],
+		[canBulkApprove, displayedReviews],
 	);
 
 	useEffect(() => {
@@ -367,15 +384,15 @@ export default function CandidateRuleCatalog({
 		});
 	}, [selectableCandidateRuleIds]);
 
-	const selectedBulkCount = useMemo(
+	const selectedBulkCandidateRuleIds = useMemo(
 		() =>
 			[...selectedCandidateRuleIds].filter((candidateRuleId) =>
 				selectableCandidateRuleIds.has(candidateRuleId),
-			).length,
+			),
 		[selectedCandidateRuleIds, selectableCandidateRuleIds],
 	);
+	const selectedBulkCount = selectedBulkCandidateRuleIds.length;
 
-	const canBulkApprove = hasAnyRole(principal, ["admin", "approver"]);
 	const bulkApproveDisabled =
 		!canBulkApprove || selectedBulkCount === 0 || isBulkApproving;
 
@@ -411,6 +428,11 @@ export default function CandidateRuleCatalog({
 		});
 	}
 
+	function clearCandidateRuleSelections(): void {
+		clearBulkFeedback();
+		setSelectedCandidateRuleIds(new Set());
+	}
+
 	function openBulkApproval(): void {
 		clearBulkFeedback();
 		setBulkApprovalOpen(true);
@@ -443,7 +465,7 @@ export default function CandidateRuleCatalog({
 
 		try {
 			const response = await approveCandidateRulesBulk({
-				candidate_rule_ids: [...selectedCandidateRuleIds],
+				candidate_rule_ids: selectedBulkCandidateRuleIds,
 				rationale: trimmedRationale,
 			});
 			await loadRules(activeRuleFilters);
@@ -604,29 +626,6 @@ export default function CandidateRuleCatalog({
 						</p>
 					) : null}
 
-					<section className="review-bulk-rail reveal">
-						<div className="review-bulk-copy">
-							<span className="review-save-kicker">Bulk approval</span>
-							<p className="review-save-note">
-								{canBulkApprove
-									? selectedBulkCount > 0
-										? `${selectedBulkCount} Candidate Rule${selectedBulkCount === 1 ? "" : "s"} selected for approval.`
-										: "Select unchanged or low-risk Candidate Rules to approve them together with one rationale."
-									: "Viewer role can inspect queue deltas but cannot bulk approve Candidate Rules."}
-							</p>
-						</div>
-						<div className="review-bulk-actions">
-							<button
-								type="button"
-								className="review-save-button"
-								disabled={bulkApproveDisabled}
-								onClick={openBulkApproval}
-							>
-								Approve selected Candidate Rules
-							</button>
-						</div>
-					</section>
-
 					{bulkFeedback ? (
 						<section
 							className={`review-bulk-feedback reveal ${bulkFeedback.tone}`}
@@ -664,10 +663,15 @@ export default function CandidateRuleCatalog({
 						emptyHint={resolveReviewEmptyHint(emptyContext)}
 						selectedCandidateRuleIds={selectedCandidateRuleIds}
 						selectableCandidateRuleIds={selectableCandidateRuleIds}
+						canBulkApprove={canBulkApprove}
+						bulkApproveDisabled={bulkApproveDisabled}
+						isBulkApproving={isBulkApproving}
 						onToggleCandidateRuleSelection={toggleCandidateRuleSelection}
 						onToggleAllCandidateRuleSelections={
 							toggleAllCandidateRuleSelections
 						}
+						onClearCandidateRuleSelections={clearCandidateRuleSelections}
+						onBulkApprove={openBulkApproval}
 					/>
 
 					{decisionMode && decisionReview ? (
@@ -697,10 +701,13 @@ export default function CandidateRuleCatalog({
 						aria-label="Bulk approve Candidate Rules"
 					>
 						<div className="review-decision-head">
-							<h4>Bulk approval record</h4>
+							<h4>
+								Approve {selectedBulkCount} selected Candidate Rule
+								{selectedBulkCount === 1 ? "" : "s"}
+							</h4>
 							<p>
-								Record the rationale for approving the selected Candidate
-								Rules into the Structured Policy Store.
+								Use one rationale for this low-risk batch. Changed or flagged
+								Candidate Rules should still be reviewed one at a time.
 							</p>
 						</div>
 						<label

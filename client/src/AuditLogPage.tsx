@@ -83,6 +83,8 @@ export default function AuditLogPage() {
     [events],
   );
   const filtersApplied = Boolean(appliedFilters.entityType || appliedFilters.entityId);
+  const activeFilterCount =
+    Number(Boolean(appliedFilters.entityType)) + Number(Boolean(appliedFilters.entityId));
 
   function handleFilterSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -97,11 +99,10 @@ export default function AuditLogPage() {
   return (
     <div className="catalog-page audit-page">
       <header className="catalog-head audit-head">
-        <p className="folio">TRACE ARCHIVE · IMMUTABLE CHRONOLOGY</p>
+        <p className="folio">TRACE ARCHIVE</p>
         <h3>Audit Event Log</h3>
         <p className="audit-lede">
-          Browse the system ledger across Candidate Rules, Policy Versions,
-          Extraction Runs, Document Versions, and Manual Rules.
+          Browse immutable system events.
         </p>
       </header>
 
@@ -126,68 +127,78 @@ export default function AuditLogPage() {
         </article>
       </section>
 
-      <form className="audit-filter" onSubmit={handleFilterSubmit}>
-        <div className="audit-filter-grid">
-          <label htmlFor="audit-entity-type">
-            Entity type
-            <select
-              id="audit-entity-type"
-              name="audit-entity-type"
-              value={filterDraft.entityType}
-              onChange={(event) =>
-                setFilterDraft((current) => ({
-                  ...current,
-                  entityType: event.target.value,
-                }))
-              }
+      <details className="review-scope-panel audit-filter-panel">
+        <summary>
+          Code filters
+          {activeFilterCount > 0 ? (
+            <span className="review-scope-panel-badge">
+              {activeFilterCount} active
+            </span>
+          ) : null}
+        </summary>
+        <form className="review-scope-form audit-filter" onSubmit={handleFilterSubmit}>
+          <div className="review-filter-grid audit-filter-grid">
+            <label htmlFor="audit-entity-type">
+              Entity type
+              <select
+                id="audit-entity-type"
+                name="audit-entity-type"
+                value={filterDraft.entityType}
+                onChange={(event) =>
+                  setFilterDraft((current) => ({
+                    ...current,
+                    entityType: event.target.value,
+                  }))
+                }
+              >
+                {AUDIT_ENTITY_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value || "all"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label htmlFor="audit-entity-id">
+              Entity id
+              <input
+                id="audit-entity-id"
+                name="audit-entity-id"
+                type="text"
+                value={filterDraft.entityId}
+                onChange={(event) =>
+                  setFilterDraft((current) => ({
+                    ...current,
+                    entityId: event.target.value,
+                  }))
+                }
+                placeholder="rule-123 or policy-v3"
+              />
+            </label>
+          </div>
+
+          <div className="review-filter-actions">
+            <button type="submit" className="review-filter-apply">
+              Apply filters
+            </button>
+            <button
+              type="button"
+              className="review-filter-clear"
+              disabled={!filtersApplied && !filterDraft.entityType && !filterDraft.entityId}
+              onClick={handleClearFilters}
             >
-              {AUDIT_ENTITY_TYPE_OPTIONS.map((option) => (
-                <option key={option.value || "all"} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label htmlFor="audit-entity-id">
-            Entity id
-            <input
-              id="audit-entity-id"
-              name="audit-entity-id"
-              type="text"
-              value={filterDraft.entityId}
-              onChange={(event) =>
-                setFilterDraft((current) => ({
-                  ...current,
-                  entityId: event.target.value,
-                }))
-              }
-              placeholder="rule-123 or policy-v3"
-            />
-          </label>
-        </div>
-
-        <div className="audit-filter-actions">
-          <button type="submit" className="audit-filter-apply">
-            Apply filters
-          </button>
-          <button
-            type="button"
-            className="audit-filter-clear"
-            disabled={!filtersApplied && !filterDraft.entityType && !filterDraft.entityId}
-            onClick={handleClearFilters}
-          >
-            Clear filters
-          </button>
-          <p className="audit-filter-active">
-            {filtersApplied
-              ? `Scoped to ${formatAuditEntityType(
-                  appliedFilters.entityType ?? "entity",
-                )}${appliedFilters.entityId ? ` · ${appliedFilters.entityId}` : ""}`
-              : "Showing the full audit ledger."}
-          </p>
-        </div>
-      </form>
+              Clear filters
+            </button>
+            <p className="audit-filter-active">
+              {filtersApplied
+                ? `Scoped to ${formatAuditEntityType(
+                    appliedFilters.entityType ?? "entity",
+                  )}${appliedFilters.entityId ? ` · ${appliedFilters.entityId}` : ""}`
+                : "Showing the full audit ledger."}
+            </p>
+          </div>
+        </form>
+      </details>
 
       <section className="catalog-stage">
         <div className="catalog-header">

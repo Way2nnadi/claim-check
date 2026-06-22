@@ -185,9 +185,9 @@ describe("App", () => {
       name: "Create Manual Rule",
     });
     expect(createButtons).toHaveLength(2);
-    createButtons.forEach((button) => {
+    for (const button of createButtons) {
       expect(button).toBeDisabled();
-    });
+    }
     expect(screen.getByText("Viewer access")).toBeInTheDocument();
   });
 
@@ -250,6 +250,7 @@ describe("App", () => {
     expect(screen.getByText("approver-user")).toBeInTheDocument();
     expect(screen.getByText("Citation verified by finance.")).toBeInTheDocument();
 
+    await userEvent.click(screen.getByText("Code filters"));
     await userEvent.selectOptions(screen.getByLabelText("Entity type"), "candidate_rule");
     await userEvent.clear(screen.getByLabelText("Entity id"));
     await userEvent.type(screen.getByLabelText("Entity id"), "rule-404");

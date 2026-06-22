@@ -31,8 +31,13 @@ interface CandidateRuleLedgerProps {
 	emptyHint?: string | null;
 	selectedCandidateRuleIds: ReadonlySet<string>;
 	selectableCandidateRuleIds: ReadonlySet<string>;
+	canBulkApprove: boolean;
+	bulkApproveDisabled: boolean;
+	isBulkApproving: boolean;
 	onToggleCandidateRuleSelection: (candidateRuleId: string) => void;
 	onToggleAllCandidateRuleSelections: () => void;
+	onClearCandidateRuleSelections: () => void;
+	onBulkApprove: () => void;
 }
 
 function ApproveIcon() {
@@ -100,8 +105,13 @@ export default function CandidateRuleLedger({
 	emptyHint = "Extracted Rules appear here after an Extraction Run completes.",
 	selectedCandidateRuleIds,
 	selectableCandidateRuleIds,
+	canBulkApprove,
+	bulkApproveDisabled,
+	isBulkApproving,
 	onToggleCandidateRuleSelection,
 	onToggleAllCandidateRuleSelections,
+	onClearCandidateRuleSelections,
+	onBulkApprove,
 }: CandidateRuleLedgerProps) {
 	const canEdit = canEditCandidateRules(principal);
 	const selectableCount = selectableCandidateRuleIds.size;
@@ -175,21 +185,52 @@ export default function CandidateRuleLedger({
 					aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
 					aria-label="Candidate Rule review queue"
 				>
-					<li className="review-rule-selection-summary">
-						<label className="review-rule-checkbox">
-							<input
-								type="checkbox"
-								aria-label="Select all visible Candidate Rules"
-								checked={allSelectableSelected}
-								disabled={selectableCount === 0}
-								onChange={onToggleAllCandidateRuleSelections}
-							/>
-							<span>
-								{selectedCount > 0
-									? `${selectedCount} selected`
-									: "Select visible Candidate Rules"}
+					<li
+						className={`review-rule-selection-summary${selectedCount > 0 ? " active" : ""}`}
+					>
+						<div className="review-rule-selection-copy">
+							<label className="review-rule-checkbox">
+								<input
+									type="checkbox"
+									aria-label="Select all low-risk visible Candidate Rules"
+									checked={allSelectableSelected}
+									disabled={selectableCount === 0}
+									onChange={onToggleAllCandidateRuleSelections}
+								/>
+								<span>
+									{selectedCount > 0
+										? `${selectedCount} selected`
+										: "Select low-risk visible rules"}
+								</span>
+							</label>
+							<span className="review-rule-selection-hint">
+								{canBulkApprove
+									? selectableCount > 0
+										? `${selectableCount} low-risk Candidate Rule${selectableCount === 1 ? "" : "s"} available for batch approval`
+										: "No low-risk Candidate Rules are available in this view"
+									: "Viewer role can inspect queue deltas but cannot approve Candidate Rules"}
 							</span>
-						</label>
+						</div>
+						{selectedCount > 0 ? (
+							<div className="review-rule-selection-actions">
+								<button
+									type="button"
+									className="review-secondary-button compact"
+									disabled={isBulkApproving}
+									onClick={onClearCandidateRuleSelections}
+								>
+									Clear
+								</button>
+								<button
+									type="button"
+									className="review-save-button compact"
+									disabled={bulkApproveDisabled}
+									onClick={onBulkApprove}
+								>
+									{isBulkApproving ? "Approving…" : "Approve selected"}
+								</button>
+							</div>
+						) : null}
 					</li>
 					{reviews.map((review) => {
 						const rule = review.current_rule;

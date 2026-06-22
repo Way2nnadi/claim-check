@@ -321,8 +321,9 @@ describe("CandidateRuleCatalog", () => {
     });
   });
 
-  it("bulk approves selected Candidate Rules with rationale, refreshes the queue, and shows diff badges", async () => {
+  it("bulk approves selected low-risk Candidate Rules and leaves changed rows out of the batch", async () => {
     const firstReview = buildReview({
+      qa_flags: [],
       reingestion_diff_category: "unchanged",
     });
     const secondReview = buildReview({
@@ -419,7 +420,7 @@ describe("CandidateRuleCatalog", () => {
         return Promise.resolve({
           ok: true,
           json: async () => ({
-            approved_candidate_rule_ids: ["rule-meals-cap", "rule-lodging-cap"],
+            approved_candidate_rule_ids: ["rule-meals-cap"],
             failed_candidate_rules: [],
             status: "approved",
             recorded_by: "approver-user",
@@ -434,10 +435,11 @@ describe("CandidateRuleCatalog", () => {
 
     expect(await screen.findByText("Unchanged")).toBeInTheDocument();
     expect(screen.getByText("Changed")).toBeInTheDocument();
+    expect(screen.getByText("1 low-risk Candidate Rule available for batch approval")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-meals-cap" }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-lodging-cap" }));
-    await userEvent.click(screen.getByRole("button", { name: "Approve selected Candidate Rules" }));
+    expect(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-lodging-cap" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Approve selected" }));
     await userEvent.type(
       screen.getByLabelText("Bulk approval rationale"),
       "Citation verified and unchanged Candidate Rules approved together.",
@@ -450,7 +452,7 @@ describe("CandidateRuleCatalog", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            candidate_rule_ids: ["rule-meals-cap", "rule-lodging-cap"],
+            candidate_rule_ids: ["rule-meals-cap"],
             rationale: "Citation verified and unchanged Candidate Rules approved together.",
           }),
         }),
@@ -458,7 +460,7 @@ describe("CandidateRuleCatalog", () => {
     });
 
     expect(
-      await screen.findByText("2 Candidate Rules approved. The queue has been refreshed."),
+      await screen.findByText("1 Candidate Rule approved. The queue has been refreshed."),
     ).toBeInTheDocument();
     expect(screen.getByText(/The review queue is empty/)).toBeInTheDocument();
   });
@@ -469,7 +471,10 @@ describe("CandidateRuleCatalog", () => {
     render(<CandidateRuleCatalog principal={viewerPrincipal} />);
 
     await screen.findByText(/Meals are capped at \$75 per day/);
-    expect(screen.getByRole("button", { name: "Approve selected Candidate Rules" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Select all low-risk visible Candidate Rules" })).toBeDisabled();
+    expect(
+      screen.getByText("Viewer role can inspect queue deltas but cannot approve Candidate Rules"),
+    ).toBeInTheDocument();
   });
 
   it("surfaces partial bulk approval failures clearly", async () => {
@@ -536,7 +541,7 @@ describe("CandidateRuleCatalog", () => {
         },
       },
       qa_flags: [],
-      reingestion_diff_category: "changed",
+      reingestion_diff_category: "unchanged",
     });
 
     let queueRefreshCount = 0;
@@ -592,7 +597,7 @@ describe("CandidateRuleCatalog", () => {
     await screen.findByText(/Meals are capped at \$75 per day/);
     await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-meals-cap" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-lodging-cap" }));
-    await userEvent.click(screen.getByRole("button", { name: "Approve selected Candidate Rules" }));
+    await userEvent.click(screen.getByRole("button", { name: "Approve selected" }));
     await userEvent.type(
       screen.getByLabelText("Bulk approval rationale"),
       "Bulk approval after re-ingestion review.",

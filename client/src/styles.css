@@ -4352,6 +4352,7 @@ button:disabled {
 }
 
 .review-scope-panel {
+	margin-bottom: 0.85rem;
 	border: 1px solid var(--line);
 	background: rgba(var(--rgb-mid), 0.35);
 }
@@ -4616,6 +4617,49 @@ button:disabled {
 	margin: 0;
 	padding: 0;
 	list-style: none;
+}
+
+.review-rule-selection-summary {
+	position: sticky;
+	top: 0.75rem;
+	z-index: 3;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.72rem 0.85rem;
+	border: 1px solid var(--line);
+	background: rgba(var(--rgb-mid), 0.86);
+	box-shadow: inset 0 1px 0 rgba(var(--rgb-highlight), 0.04), 0 0.5rem
+		1.2rem rgba(var(--rgb-shadow), 0.18);
+	backdrop-filter: blur(12px);
+}
+
+.review-rule-selection-summary.active {
+	border-color: rgba(var(--rgb-phosphor), 0.34);
+	background: linear-gradient(
+			120deg,
+			rgba(var(--rgb-phosphor), 0.1),
+			transparent 58%
+		),
+		rgba(var(--rgb-mid), 0.9);
+}
+
+.review-rule-selection-copy {
+	display: grid;
+	gap: 0.18rem;
+}
+
+.review-rule-selection-hint {
+	font-size: 0.76rem;
+	color: var(--muted-ink);
+}
+
+.review-rule-selection-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
 }
 
 .review-row {
@@ -5123,6 +5167,12 @@ button:disabled {
 	accent-color: var(--phosphor);
 }
 
+.review-rule-checkbox input:disabled + span,
+.review-rule-checkbox:has(input:disabled) {
+	opacity: 0.58;
+	cursor: not-allowed;
+}
+
 .review-rule-statement {
 	margin: 0;
 	font-size: 0.98rem;
@@ -5613,7 +5663,8 @@ button:disabled {
 	color: var(--muted-ink);
 }
 
-.review-secondary-button.compact {
+.review-secondary-button.compact,
+.review-save-button.compact {
 	padding: 0.35rem 0.55rem;
 	font-size: 0.54rem;
 }
@@ -6796,7 +6847,7 @@ button:disabled {
 }
 
 .audit-page {
-	gap: 1.5rem;
+	gap: 1.15rem;
 }
 
 .audit-head h3 {
@@ -6868,20 +6919,7 @@ button:disabled {
 
 .audit-filter {
 	display: grid;
-	gap: 0.85rem;
-	padding: 1rem 1.05rem;
-	border: 1px dashed rgba(var(--rgb-signal), 0.26);
-	background: radial-gradient(
-			ellipse 80% 60% at 100% 0%,
-			rgba(var(--rgb-signal), 0.08),
-			transparent 70%
-		),
-		radial-gradient(
-			ellipse 60% 50% at 0% 100%,
-			rgba(var(--rgb-phosphor), 0.08),
-			transparent 70%
-		),
-		rgba(var(--rgb-mid), 0.8);
+	gap: 0.75rem;
 }
 
 .audit-filter-grid {
@@ -6929,42 +6967,6 @@ button:disabled {
 	padding-right: 2rem;
 }
 
-.audit-filter-actions {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 0.65rem;
-}
-
-.audit-filter-apply,
-.audit-filter-clear {
-	padding: 0.62rem 0.95rem;
-	border: 1px solid rgba(var(--rgb-phosphor), 0.28);
-	font-family: var(--font-label);
-	font-size: 0.62rem;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-}
-
-.audit-filter-apply {
-	background: var(--ink);
-	color: var(--button-ink);
-}
-
-.audit-filter-apply:hover {
-	background: var(--accent);
-}
-
-.audit-filter-clear {
-	background: transparent;
-	color: var(--muted-ink);
-}
-
-.audit-filter-clear:hover:not(:disabled) {
-	border-color: rgba(var(--rgb-phosphor), 0.28);
-	color: var(--accent);
-}
-
 .audit-filter-active {
 	margin: 0;
 	font-family: var(--font-label);
@@ -6987,8 +6989,30 @@ button:disabled {
 
 .audit-table {
 	width: 100%;
+	min-width: 68rem;
 	border-collapse: collapse;
+	table-layout: fixed;
 	font-size: 0.92rem;
+}
+
+.audit-table th:nth-child(1),
+.audit-table td:nth-child(1) {
+	width: 11.5rem;
+}
+
+.audit-table th:nth-child(2),
+.audit-table td:nth-child(2) {
+	width: 9.75rem;
+}
+
+.audit-table th:nth-child(3),
+.audit-table td:nth-child(3) {
+	width: 10.75rem;
+}
+
+.audit-table th:nth-child(4),
+.audit-table td:nth-child(4) {
+	width: 13.5rem;
 }
 
 .audit-table thead {
@@ -7008,7 +7032,7 @@ button:disabled {
 }
 
 .audit-table td {
-	padding: 0.85rem;
+	padding: 0.9rem 0.85rem;
 	vertical-align: top;
 	border-top: 1px solid rgba(var(--rgb-highlight), 0.05);
 }
@@ -7019,7 +7043,6 @@ button:disabled {
 
 .audit-timestamp {
 	display: inline-block;
-	min-width: 10.5rem;
 	font-family: var(--font-mono);
 	font-size: 0.74rem;
 	line-height: 1.45;
@@ -7053,12 +7076,11 @@ button:disabled {
 	font-family: var(--font-mono);
 	font-size: 0.7rem;
 	color: var(--muted-ink);
-	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .audit-payload-summary {
 	margin: 0;
-	min-width: 18rem;
 	line-height: 1.5;
 	color: var(--ink);
 }
@@ -7075,6 +7097,10 @@ button:disabled {
 
 	.audit-overview {
 		grid-template-columns: 1fr;
+	}
+
+	.audit-table {
+		min-width: 62rem;
 	}
 }
 
