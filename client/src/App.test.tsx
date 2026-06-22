@@ -44,6 +44,46 @@ describe("App", () => {
     expect(headers.get("Authorization")).toBe("Bearer viewer-token");
   });
 
+  it("disables Policy Version publishing for viewer clearance", async () => {
+    window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/me") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              subject: "viewer-user",
+              roles: ["viewer"],
+              auth_backend: "local",
+            }),
+          });
+        }
+        if (url === "/api/policy-versions") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        if (url === "/api/policy-documents") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Documents" });
+    await userEvent.click(screen.getByRole("button", { name: /Policy Versions/i }));
+
+    expect(await screen.findByRole("heading", { name: "Policy Versions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish Policy Version" })).toBeDisabled();
+  });
+
   it("clears the token and returns to sign-in when the user signs out", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
     vi.stubGlobal(

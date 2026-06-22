@@ -48,6 +48,30 @@ export function describePolicyVersionError(
   return error.message || fallback;
 }
 
+export function describePolicyVersionPublishError(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return "Unable to publish the Policy Version.";
+  }
+
+  if (error.status === 401) {
+    return "Sign in again before publishing a Policy Version.";
+  }
+  if (error.status === 403) {
+    return "Only an Approver or admin can publish a Policy Version.";
+  }
+  if (error.status === 409) {
+    return "Published Policy Versions are immutable and cannot be overwritten.";
+  }
+  if (error.status === 422) {
+    return "No approved Rules are available for publication. Approve at least one Candidate Rule or create a Manual Rule first.";
+  }
+
+  return error.message || "Unable to publish the Policy Version.";
+}
+
 export function summarizeRuleScope(scope: Scope): string {
   const segments = [
     scope.expense_category,

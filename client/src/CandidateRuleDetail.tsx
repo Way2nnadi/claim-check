@@ -610,7 +610,7 @@ export default function CandidateRuleDetail({
           citation.document_id,
           citation.document_version_id,
         );
-        setSections(sectionsResponse.items);
+        setSections(Array.isArray(sectionsResponse.items) ? sectionsResponse.items : []);
         setSectionsStatus("ready");
       } catch (error: unknown) {
         setSectionsStatus("error");

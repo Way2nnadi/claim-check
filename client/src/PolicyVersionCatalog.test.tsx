@@ -98,6 +98,59 @@ const policyVersionDetailResponse = {
   ],
 };
 
+const publishedPolicyVersionListResponse = {
+  items: [
+    {
+      policy_version_id: "policy-v3",
+      published_by: "approver-user",
+      change_summary: "Approved meal and lodging adjustments for summer travel.",
+      rule_count: 3,
+      created_at: "2026-06-22T08:00:00Z",
+    },
+    ...policyVersionListResponse.items,
+  ],
+};
+
+const publishedPolicyVersionDetailResponse = {
+  policy_version_id: "policy-v3",
+  published_by: "approver-user",
+  change_summary: "Approved meal and lodging adjustments for summer travel.",
+  rules: [
+    {
+      rule_id: "rule-meal-cap-v3",
+      statement: "Domestic meals are capped at $90 per day.",
+      enforceability_class: "enforceable",
+      lifecycle_state: "published",
+      origin: {
+        source_type: "manual",
+        extraction_run_id: null,
+        rationale: "Approver reconciled approved meal cap edits before publication.",
+      },
+      scope: {
+        country: "US",
+        expense_category: "meals",
+        travel_type: "domestic",
+        employee_group: "employees",
+        effective_start_date: "2026-07-01",
+        effective_end_date: null,
+      },
+      citation: null,
+      condition: {
+        field: "meal.amount",
+        operator: "<=",
+        value: "90",
+      },
+      applicability: {
+        aggregation_period: "per_day",
+        unit: "money",
+        currency: "USD",
+        limit_basis: "per employee",
+      },
+      exceptions: [],
+    },
+  ],
+};
+
 function makePrincipal(role: Role): AuthenticatedPrincipal {
   return {
     subject: `${role}-user`,
@@ -209,4 +262,181 @@ describe("PolicyVersionCatalog", () => {
       });
     },
   );
+
+  it("disables publish controls for viewer clearance", async () => {
+    window.sessionStorage.setItem("policy-pipeline.auth.token", "viewer-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => policyVersionListResponse,
+      }),
+    );
+
+    render(<PolicyVersionCatalog principal={makePrincipal("viewer")} />);
+
+    expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stage publish" })).toBeDisabled();
+  });
+
+  describe.each([
+    ["approver", "approver-token"],
+    ["admin", "admin-token"],
+  ] satisfies [Role, string][])("publish as %s", (role, token) => {
+    it("publishes a new Policy Version, redirects to detail, and keeps it in the list", async () => {
+      window.sessionStorage.setItem("policy-pipeline.auth.token", token);
+
+      let listCallCount = 0;
+      const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === "/api/policy-versions" && (init?.method ?? "GET") === "GET") {
+          listCallCount += 1;
+          return Promise.resolve({
+            ok: true,
+            json: async () =>
+              listCallCount === 1
+                ? policyVersionListResponse
+                : publishedPolicyVersionListResponse,
+          });
+        }
+        if (url === "/api/policy-versions" && init?.method === "POST") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              policy_version_id: "policy-v3",
+              rule_count: 3,
+              status: "published",
+              published_by: "approver-user",
+            }),
+          });
+        }
+        if (url === "/api/policy-versions/policy-v3") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => publishedPolicyVersionDetailResponse,
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<PolicyVersionCatalog principal={makePrincipal(role)} />);
+
+      expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Stage publish" }));
+      await userEvent.type(screen.getByLabelText("Policy Version id"), "policy-v3");
+      await userEvent.type(
+        screen.getByLabelText("Change summary"),
+        "Approved meal and lodging adjustments for summer travel.",
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Publish snapshot" }));
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/api/policy-versions",
+          expect.objectContaining({
+            method: "POST",
+            body: JSON.stringify({
+              policy_version_id: "policy-v3",
+              change_summary:
+                "Approved meal and lodging adjustments for summer travel.",
+            }),
+          }),
+        );
+      });
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "Domestic meals are capped at $90 per day.",
+        }),
+      ).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "← Versions" }));
+
+      expect(await screen.findByText("policy-v3")).toBeInTheDocument();
+      expect(screen.getByText("Approved meal and lodging adjustments for summer travel.")).toBeInTheDocument();
+    });
+
+    it("surfaces a clear no-approved-Rules error", async () => {
+      window.sessionStorage.setItem("policy-pipeline.auth.token", token);
+
+      const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === "/api/policy-versions" && (init?.method ?? "GET") === "GET") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => policyVersionListResponse,
+          });
+        }
+        if (url === "/api/policy-versions" && init?.method === "POST") {
+          return Promise.resolve({
+            ok: false,
+            status: 422,
+            json: async () => ({
+              detail: "Policy Version requires at least one approved Rule.",
+            }),
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<PolicyVersionCatalog principal={makePrincipal(role)} />);
+
+      expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Stage publish" }));
+      await userEvent.type(screen.getByLabelText("Policy Version id"), "policy-v3");
+      await userEvent.type(screen.getByLabelText("Change summary"), "Ready to publish.");
+      await userEvent.click(screen.getByRole("button", { name: "Publish snapshot" }));
+
+      expect(
+        await screen.findByText(
+          "No approved Rules are available for publication. Approve at least one Candidate Rule or create a Manual Rule first.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("surfaces version conflicts clearly", async () => {
+      window.sessionStorage.setItem("policy-pipeline.auth.token", token);
+
+      const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === "/api/policy-versions" && (init?.method ?? "GET") === "GET") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => policyVersionListResponse,
+          });
+        }
+        if (url === "/api/policy-versions" && init?.method === "POST") {
+          return Promise.resolve({
+            ok: false,
+            status: 409,
+            json: async () => ({
+              detail:
+                "Published Policy Versions are immutable and cannot be overwritten.",
+            }),
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<PolicyVersionCatalog principal={makePrincipal(role)} />);
+
+      expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Stage publish" }));
+      await userEvent.type(screen.getByLabelText("Policy Version id"), "policy-v2");
+      await userEvent.type(
+        screen.getByLabelText("Change summary"),
+        "Attempted overwrite of an immutable snapshot.",
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Publish snapshot" }));
+
+      expect(
+        await screen.findByText(
+          "Published Policy Versions are immutable and cannot be overwritten.",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
 });
