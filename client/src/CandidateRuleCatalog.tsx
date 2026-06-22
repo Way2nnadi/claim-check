@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
+	approveCandidateRulesBulk,
 	fetchCandidateRules,
 	fetchExtractionRuns,
 	fetchPolicyDocuments,
@@ -21,8 +22,10 @@ import {
 } from "./candidateRuleFormat";
 import DocumentFilterPicker from "./DocumentFilterPicker";
 import { shortenId } from "./extractionRunFormat";
+import { hasAnyRole } from "./permissions";
 import type {
 	AuthenticatedPrincipal,
+	BulkCandidateRuleApprovalFailure,
 	CandidateRuleFilters,
 	CandidateRuleReview,
 	ExtractionRun,
@@ -38,9 +41,17 @@ interface CandidateRuleCatalogProps {
 
 type CatalogStatus = "loading" | "ready" | "error";
 
+type BulkFeedbackTone = "success" | "warning";
+
 interface RuleScopeFilters {
 	documentId: string;
 	documentVersionId: string;
+}
+
+interface BulkFeedbackState {
+	tone: BulkFeedbackTone;
+	message: string;
+	failures: BulkCandidateRuleApprovalFailure[];
 }
 
 function buildRuleFilters(
@@ -84,6 +95,9 @@ export default function CandidateRuleCatalog({
 	const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
 	const [activeRun, setActiveRun] = useState<ExtractionRun | null>(null);
 	const [reviews, setReviews] = useState<CandidateRuleReview[]>([]);
+	const [selectedCandidateRuleIds, setSelectedCandidateRuleIds] = useState<
+		Set<string>
+	>(() => new Set());
 	const [lifecycleTab, setLifecycleTab] = useState<LifecycleTabId>("queue");
 	const [customLifecycleSelection, setCustomLifecycleSelection] = useState<
 		Set<LifecycleState>
@@ -94,6 +108,11 @@ export default function CandidateRuleCatalog({
 	});
 	const [appliedScopeFilters, setAppliedScopeFilters] =
 		useState<CandidateRuleFilters>({});
+	const [bulkApprovalOpen, setBulkApprovalOpen] = useState(false);
+	const [bulkApprovalRationale, setBulkApprovalRationale] = useState("");
+	const [bulkApprovalError, setBulkApprovalError] = useState<string | null>(null);
+	const [bulkFeedback, setBulkFeedback] = useState<BulkFeedbackState | null>(null);
+	const [isBulkApproving, setIsBulkApproving] = useState(false);
 
 	const loadDocuments = useCallback(async (): Promise<void> => {
 		try {
@@ -202,6 +221,7 @@ export default function CandidateRuleCatalog({
 	}, [customSelection, reviews, rulesStatus]);
 
 	function applyLifecycleTab(tab: LifecycleTabId): void {
+		setSelectedCandidateRuleIds(new Set());
 		setLifecycleTab(tab);
 	}
 
@@ -215,11 +235,13 @@ export default function CandidateRuleCatalog({
 			}
 			return next;
 		});
+		setSelectedCandidateRuleIds(new Set());
 		setLifecycleTab("custom");
 	}
 
 	function handleScopeSubmit(event: FormEvent<HTMLFormElement>): void {
 		event.preventDefault();
+		setSelectedCandidateRuleIds(new Set());
 		setAppliedScopeFilters(buildRuleFilters(scopeDraft));
 	}
 
@@ -229,6 +251,7 @@ export default function CandidateRuleCatalog({
 			documentVersionId: "",
 		};
 		setScopeDraft(clearedScope);
+		setSelectedCandidateRuleIds(new Set());
 		setAppliedScopeFilters({});
 	}
 
@@ -259,6 +282,145 @@ export default function CandidateRuleCatalog({
 			scopeFilterCount,
 		],
 	);
+
+	const selectableCandidateRuleIds = useMemo(
+		() =>
+			new Set(
+				displayedReviews
+					.filter((review) =>
+						REVIEW_QUEUE_LIFECYCLE_STATES.includes(review.lifecycle_state),
+					)
+					.map((review) => review.candidate_rule_id),
+			),
+		[displayedReviews],
+	);
+
+	useEffect(() => {
+		setSelectedCandidateRuleIds((current) => {
+			const next = new Set(
+				[...current].filter((candidateRuleId) =>
+					selectableCandidateRuleIds.has(candidateRuleId),
+				),
+			);
+			if (next.size === current.size) {
+				return current;
+			}
+			return next;
+		});
+	}, [selectableCandidateRuleIds]);
+
+	const selectedBulkCount = useMemo(
+		() =>
+			[...selectedCandidateRuleIds].filter((candidateRuleId) =>
+				selectableCandidateRuleIds.has(candidateRuleId),
+			).length,
+		[selectedCandidateRuleIds, selectableCandidateRuleIds],
+	);
+
+	const canBulkApprove = hasAnyRole(principal, ["admin", "approver"]);
+	const bulkApproveDisabled =
+		!canBulkApprove || selectedBulkCount === 0 || isBulkApproving;
+
+	function clearBulkFeedback(): void {
+		setBulkFeedback(null);
+	}
+
+	function toggleCandidateRuleSelection(candidateRuleId: string): void {
+		clearBulkFeedback();
+		setSelectedCandidateRuleIds((current) => {
+			const next = new Set(current);
+			if (next.has(candidateRuleId)) {
+				next.delete(candidateRuleId);
+			} else if (selectableCandidateRuleIds.has(candidateRuleId)) {
+				next.add(candidateRuleId);
+			}
+			return next;
+		});
+	}
+
+	function toggleAllCandidateRuleSelections(): void {
+		clearBulkFeedback();
+		setSelectedCandidateRuleIds((current) => {
+			const allSelected =
+				selectableCandidateRuleIds.size > 0 &&
+				[...selectableCandidateRuleIds].every((candidateRuleId) =>
+					current.has(candidateRuleId),
+				);
+			if (allSelected) {
+				return new Set();
+			}
+			return new Set(selectableCandidateRuleIds);
+		});
+	}
+
+	function openBulkApproval(): void {
+		clearBulkFeedback();
+		setBulkApprovalOpen(true);
+		setBulkApprovalRationale("");
+		setBulkApprovalError(null);
+	}
+
+	function closeBulkApproval(): void {
+		setBulkApprovalOpen(false);
+		setBulkApprovalRationale("");
+		setBulkApprovalError(null);
+	}
+
+	async function handleBulkApprovalSubmit(): Promise<void> {
+		if (bulkApproveDisabled) {
+			return;
+		}
+
+		const trimmedRationale = bulkApprovalRationale.trim();
+		if (!trimmedRationale) {
+			setBulkApprovalError(
+				"Enter approval rationale before approving these Candidate Rules.",
+			);
+			return;
+		}
+
+		setIsBulkApproving(true);
+		setBulkApprovalError(null);
+		setErrorMessage(null);
+
+		try {
+			const response = await approveCandidateRulesBulk({
+				candidate_rule_ids: [...selectedCandidateRuleIds],
+				rationale: trimmedRationale,
+			});
+			await loadRules(activeRuleFilters);
+
+			const approvedCount = response.approved_candidate_rule_ids.length;
+			const failureCount = response.failed_candidate_rules.length;
+			setSelectedCandidateRuleIds(
+				new Set(
+					response.failed_candidate_rules.map(
+						(failure) => failure.candidate_rule_id,
+					),
+				),
+			);
+			setBulkFeedback({
+				tone: failureCount > 0 ? "warning" : "success",
+				message:
+					failureCount === 0
+						? `${approvedCount} Candidate Rule${approvedCount === 1 ? "" : "s"} approved. The queue has been refreshed.`
+						: approvedCount === 0
+							? `No Candidate Rules were approved. ${failureCount} could not be approved.`
+							: `${approvedCount} Candidate Rule${approvedCount === 1 ? "" : "s"} approved. ${failureCount} could not be approved.`,
+				failures: response.failed_candidate_rules,
+			});
+			closeBulkApproval();
+		} catch (error: unknown) {
+			setErrorMessage(
+				describeCandidateRuleError(
+					error,
+					"Unable to bulk approve Candidate Rules.",
+				),
+			);
+		} finally {
+			setIsBulkApproving(false);
+		}
+	}
 
 	return (
 		<div className="catalog-page review-catalog content-enter">
@@ -409,6 +571,46 @@ export default function CandidateRuleCatalog({
 					role="tabpanel"
 					aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
 				>
+					<section className="review-bulk-rail reveal">
+						<div className="review-bulk-copy">
+							<span className="review-save-kicker">Bulk approval</span>
+							<p className="review-save-note">
+								{canBulkApprove
+									? selectedBulkCount > 0
+										? `${selectedBulkCount} Candidate Rule${selectedBulkCount === 1 ? "" : "s"} selected for approval.`
+										: "Select unchanged or low-risk Candidate Rules to approve them together with one rationale."
+									: "Viewer role can inspect queue deltas but cannot bulk approve Candidate Rules."}
+							</p>
+						</div>
+						<div className="review-bulk-actions">
+							<button
+								type="button"
+								className="review-save-button"
+								disabled={bulkApproveDisabled}
+								onClick={openBulkApproval}
+							>
+								Approve selected Candidate Rules
+							</button>
+						</div>
+					</section>
+
+					{bulkFeedback ? (
+						<section
+							className={`review-bulk-feedback reveal ${bulkFeedback.tone}`}
+						>
+							<p>{bulkFeedback.message}</p>
+							{bulkFeedback.failures.length > 0 ? (
+								<ul className="review-bulk-failure-list">
+									{bulkFeedback.failures.map((failure) => (
+										<li key={failure.candidate_rule_id}>
+											{failure.candidate_rule_id}: {failure.detail}
+										</li>
+									))}
+								</ul>
+							) : null}
+						</section>
+					) : null}
+
 					<div className="review-workbench">
 						<div className="review-workbench-ledger">
 							<CandidateRuleLedger
@@ -418,6 +620,12 @@ export default function CandidateRuleCatalog({
 								}
 								emptyMessage={resolveReviewEmptyMessage(emptyContext)}
 								emptyHint={resolveReviewEmptyHint(emptyContext)}
+								selectedCandidateRuleIds={selectedCandidateRuleIds}
+								selectableCandidateRuleIds={selectableCandidateRuleIds}
+								onToggleCandidateRuleSelection={toggleCandidateRuleSelection}
+								onToggleAllCandidateRuleSelections={
+									toggleAllCandidateRuleSelections
+								}
 							/>
 						</div>
 						<div className="review-workbench-detail">
@@ -459,6 +667,65 @@ export default function CandidateRuleCatalog({
 									</p>
 								</div>
 							)}
+						</div>
+					</div>
+				</div>
+			) : null}
+
+			{bulkApprovalOpen ? (
+				<div className="review-decision-backdrop" role="presentation">
+					<div
+						className="review-decision-dialog"
+						role="dialog"
+						aria-modal="true"
+						aria-label="Bulk approve Candidate Rules"
+					>
+						<div className="review-decision-head">
+							<h4>Bulk approval record</h4>
+							<p>
+								Record the rationale for approving the selected Candidate
+								Rules into the Structured Policy Store.
+							</p>
+						</div>
+						<label
+							className="review-decision-field"
+							htmlFor="candidate-rule-bulk-approval-rationale"
+						>
+							Bulk approval rationale
+							<textarea
+								id="candidate-rule-bulk-approval-rationale"
+								rows={5}
+								value={bulkApprovalRationale}
+								placeholder="Why these Candidate Rules are safe to approve together."
+								onChange={(event) =>
+									setBulkApprovalRationale(event.target.value)
+								}
+							/>
+						</label>
+						{bulkApprovalError ? (
+							<p className="error-banner compact">{bulkApprovalError}</p>
+						) : null}
+						<div className="review-decision-actions">
+							<button
+								type="button"
+								className="review-secondary-button"
+								disabled={isBulkApproving}
+								onClick={closeBulkApproval}
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								className="review-save-button"
+								disabled={isBulkApproving}
+								onClick={() => {
+									void handleBulkApprovalSubmit();
+								}}
+							>
+								{isBulkApproving
+									? "Approving…"
+									: "Confirm bulk approval"}
+							</button>
 						</div>
 					</div>
 				</div>

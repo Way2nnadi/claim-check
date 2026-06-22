@@ -16,6 +16,7 @@ from policy_pipeline.rules import (
     LifecycleState,
     QAFlag,
     QAFlagCode,
+    ReingestionDiffCategory,
     RuleCondition,
     RuleOrigin,
     RuleOriginType,
@@ -91,11 +92,57 @@ def _build_candidate_rule() -> CandidateRule:
     )
 
 
+def _build_second_candidate_rule() -> CandidateRule:
+    return CandidateRule(
+        rule_id="rule-456",
+        statement="Lodging is capped at $250 per night.",
+        enforceability_class=EnforceabilityClass.ENFORCEABLE,
+        lifecycle_state=LifecycleState.EXTRACTED,
+        origin=RuleOrigin(
+            source_type=RuleOriginType.EXTRACTED,
+            extraction_run_id="extract-2026-06-21",
+        ),
+        scope=Scope(
+            expense_category="lodging",
+            employee_group="employees",
+        ),
+        citation=Citation(
+            document_id="expense-policy",
+            document_version_id="expense-policy-v1",
+            section_id="lodging#def456",
+            quote="Lodging is capped at $250 per night.",
+            start_char=43,
+            end_char=79,
+        ),
+        condition=RuleCondition(
+            field="lodging.amount",
+            operator="<=",
+            value="250",
+        ),
+        applicability=Applicability(
+            aggregation_period="per_night",
+            unit="money",
+            currency="USD",
+            limit_basis="per room",
+        ),
+        qa_flags=[],
+    )
+
+
 def _seed_candidate_rule(database_url: str) -> None:
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         create_rule(session, rule=_build_candidate_rule())
+    engine.dispose()
+
+
+def _seed_multiple_candidate_rules(database_url: str) -> None:
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        create_rule(session, rule=_build_candidate_rule(), commit=False)
+        create_rule(session, rule=_build_second_candidate_rule())
     engine.dispose()
 
 
@@ -122,6 +169,7 @@ async def test_approver_reads_candidate_rule_details_with_qa_flags_and_separate_
     assert response.json() == {
         "candidate_rule_id": "rule-123",
         "lifecycle_state": "extracted",
+        "reingestion_diff_category": None,
         "qa_flags": [
             {
                 "code": "low_extraction_confidence",
@@ -374,6 +422,106 @@ async def test_candidate_rule_approval_requires_rationale(
     assert approval_response.status_code == 422
     detail = approval_response.json()["detail"][0]
     assert detail["loc"] == ["body", "rationale"]
+
+
+@pytest.mark.anyio
+async def test_bulk_candidate_rule_approval_returns_partial_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+    _seed_multiple_candidate_rules(database_url)
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        stored_rule = session.scalar(select(RuleRecord).where(RuleRecord.rule_id == "rule-456"))
+        assert stored_rule is not None
+        payload = dict(stored_rule.payload)
+        payload["lifecycle_state"] = "approved"
+        payload["committed_rule"] = {
+            **payload["extracted_rule"],
+            "lifecycle_state": "approved",
+        }
+        stored_rule.payload = payload
+        session.commit()
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        approval_response = await client.post(
+            "/candidate-rules/approvals/bulk",
+            headers={"Authorization": "Bearer approver-token"},
+            json={
+                "candidate_rule_ids": ["rule-123", "rule-456"],
+                "rationale": "Bulk approval after re-ingestion diff review.",
+            },
+        )
+        audit_response = await client.get(
+            "/audit-events",
+            headers={"Authorization": "Bearer viewer-token"},
+            params={"entity_type": "candidate_rule"},
+        )
+
+    assert approval_response.status_code == 200
+    assert approval_response.json() == {
+        "approved_candidate_rule_ids": ["rule-123"],
+        "failed_candidate_rules": [
+            {
+                "candidate_rule_id": "rule-456",
+                "detail": "Candidate Rule cannot transition from approved to approved.",
+            }
+        ],
+        "status": "partial",
+        "recorded_by": "approver-user",
+    }
+    assert audit_response.status_code == 200
+    assert audit_response.json()["items"] == [
+        {
+            "action": "candidate_rule.approved",
+            "actor_subject": "approver-user",
+            "actor_roles": ["approver"],
+            "entity_type": "candidate_rule",
+            "entity_id": "rule-123",
+            "payload": {"rationale": "Bulk approval after re-ingestion diff review."},
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_candidate_rule_reads_reingestion_diff_category_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+    _seed_candidate_rule(database_url)
+
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        stored_rule = session.scalar(select(RuleRecord).where(RuleRecord.rule_id == "rule-123"))
+        assert stored_rule is not None
+        payload = dict(stored_rule.payload)
+        payload["reingestion_diff_category"] = ReingestionDiffCategory.UNCHANGED.value
+        stored_rule.payload = payload
+        session.commit()
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/candidate-rules/rule-123",
+            headers={"Authorization": "Bearer approver-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["reingestion_diff_category"] == "unchanged"
 
 
 @pytest.mark.anyio

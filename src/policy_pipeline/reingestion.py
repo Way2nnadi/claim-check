@@ -13,7 +13,17 @@ from policy_pipeline.documents import (
 )
 from policy_pipeline.extraction_runs import ExtractionExecutionResult, execute_extraction_run
 from policy_pipeline.object_storage import get_object_storage
-from policy_pipeline.rules import CandidateRule, LifecycleState, Rule, RuleOriginType
+from policy_pipeline.rule_store import (
+    clear_reingestion_diff_categories,
+    set_reingestion_diff_category,
+)
+from policy_pipeline.rules import (
+    CandidateRule,
+    LifecycleState,
+    ReingestionDiffCategory,
+    Rule,
+    RuleOriginType,
+)
 from policy_pipeline.structured_policy_store import get_latest_policy_version_snapshot
 
 _NUMBER_PATTERN = re.compile(r"[$€£]?\d+(?:\.\d+)?")
@@ -94,6 +104,11 @@ def reingest_document(
             document_id=document_id,
             candidate_rules=extraction_run.candidate_rules,
             current_policy_version=current_policy_version,
+        )
+        _apply_reingestion_diff_categories(
+            session,
+            document_id=document_id,
+            diff=diff,
         )
     except Exception:
         session.rollback()
@@ -240,6 +255,40 @@ def _applicability_signature(rule: CandidateRule | Rule) -> tuple[object, ...]:
         rule.applicability.currency,
         rule.applicability.limit_basis,
     )
+
+
+def _apply_reingestion_diff_categories(
+    session: Session,
+    *,
+    document_id: str,
+    diff: PolicyVersionDiff,
+) -> None:
+    clear_reingestion_diff_categories(session, document_id=document_id)
+
+    for candidate_rule in diff.added:
+        set_reingestion_diff_category(
+            session,
+            candidate_rule_id=candidate_rule.rule_id,
+            category=ReingestionDiffCategory.ADDED,
+        )
+    for changed_rule in diff.changed:
+        set_reingestion_diff_category(
+            session,
+            candidate_rule_id=changed_rule.candidate_rule.rule_id,
+            category=ReingestionDiffCategory.CHANGED,
+        )
+    for removed_rule in diff.removed:
+        set_reingestion_diff_category(
+            session,
+            candidate_rule_id=removed_rule.current_rule.rule_id,
+            category=ReingestionDiffCategory.REMOVED,
+        )
+    for unchanged_rule in diff.unchanged:
+        set_reingestion_diff_category(
+            session,
+            candidate_rule_id=unchanged_rule.candidate_rule.rule_id,
+            category=ReingestionDiffCategory.UNCHANGED,
+        )
 
 
 def _exceptions_signature(rule: CandidateRule | Rule) -> tuple[object, ...]:

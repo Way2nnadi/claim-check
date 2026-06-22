@@ -1,5 +1,7 @@
 import type {
   AuthenticatedPrincipal,
+  BulkCandidateRuleApprovalRequest,
+  BulkCandidateRuleApprovalResponse,
   CandidateRuleApprovalRequest,
   CandidateRuleApprovalResponse,
   CandidateRuleFilters,
@@ -351,6 +353,18 @@ export function approveCandidateRule(
 ): Promise<CandidateRuleApprovalResponse> {
   return apiRequest<CandidateRuleApprovalResponse>(
     `/api/candidate-rules/${encodeURIComponent(candidateRuleId)}/approvals`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
+}
+
+export function approveCandidateRulesBulk(
+  request: BulkCandidateRuleApprovalRequest,
+): Promise<BulkCandidateRuleApprovalResponse> {
+  return apiRequest<BulkCandidateRuleApprovalResponse>(
+    "/api/candidate-rules/approvals/bulk",
     {
       method: "POST",
       body: JSON.stringify(request),

@@ -278,6 +278,36 @@ describe("apiRequest", () => {
     );
   });
 
+  it("posts bulk candidate rule approvals with JSON bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        approved_candidate_rule_ids: ["rule-123", "rule-456"],
+        failed_candidate_rules: [],
+        status: "approved",
+        recorded_by: "approver-user",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { approveCandidateRulesBulk } = await import("./api");
+    await approveCandidateRulesBulk({
+      candidate_rule_ids: ["rule-123", "rule-456"],
+      rationale: "Citation verified and unchanged Candidate Rules approved together.",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/candidate-rules/approvals/bulk",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          candidate_rule_ids: ["rule-123", "rule-456"],
+          rationale: "Citation verified and unchanged Candidate Rules approved together.",
+        }),
+      }),
+    );
+  });
+
   it("posts candidate rule rejections with JSON bodies", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

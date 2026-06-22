@@ -1,5 +1,11 @@
 import { ApiError } from "./api";
-import type { CandidateRuleReview, EnforceabilityClass, LifecycleState, QAFlagCode } from "./types";
+import type {
+  CandidateRuleReview,
+  EnforceabilityClass,
+  LifecycleState,
+  QAFlagCode,
+  ReingestionDiffCategory,
+} from "./types";
 
 const CANDIDATE_RULE_ERROR_FALLBACK = "Unable to load Candidate Rules.";
 
@@ -189,6 +195,18 @@ export function formatQAFlagCode(code: QAFlagCode): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export function formatReingestionDiffCategory(
+  category: ReingestionDiffCategory,
+): string {
+  return category.charAt(0).toUpperCase() + category.slice(1);
+}
+
+export function reingestionDiffCategoryClassName(
+  category: ReingestionDiffCategory,
+): string {
+  return category;
 }
 
 export type QAFlagDomain =

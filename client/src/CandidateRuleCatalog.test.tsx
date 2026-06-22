@@ -10,6 +10,12 @@ const principal: AuthenticatedPrincipal = {
   auth_backend: "local",
 };
 
+const viewerPrincipal: AuthenticatedPrincipal = {
+  subject: "viewer-user",
+  roles: ["viewer"],
+  auth_backend: "local",
+};
+
 const sampleRuns = {
   items: [
     {
@@ -119,6 +125,7 @@ function buildReview(
         detail: "Candidate Rule extraction confidence 0.62 is below 0.75.",
       },
     ],
+    reingestion_diff_category: null,
     ...overrides,
   };
 }
@@ -307,6 +314,293 @@ describe("CandidateRuleCatalog", () => {
         expect.any(Object),
       );
     });
+  });
+
+  it("bulk approves selected Candidate Rules with rationale, refreshes the queue, and shows diff badges", async () => {
+    const firstReview = buildReview({
+      reingestion_diff_category: "unchanged",
+    });
+    const secondReview = buildReview({
+      candidate_rule_id: "rule-lodging-cap",
+      current_rule: {
+        ...buildReview().current_rule,
+        rule_id: "rule-lodging-cap",
+        statement: "Lodging is capped at $250 per night.",
+        scope: {
+          ...buildReview().current_rule.scope,
+          expense_category: "lodging",
+        },
+        citation: {
+          document_id: "expense-policy",
+          document_version_id: "docv-expense-v1",
+          section_id: "lodging#xyz",
+          quote: "Lodging is capped at $250 per night.",
+          start_char: 33,
+          end_char: 69,
+        },
+        condition: {
+          field: "lodging.amount",
+          operator: "<=",
+          value: "250",
+        },
+        applicability: {
+          aggregation_period: "per_night",
+          unit: "money",
+          currency: "USD",
+          limit_basis: "per room",
+        },
+      },
+      extracted_rule: {
+        ...buildReview().extracted_rule,
+        rule_id: "rule-lodging-cap",
+        statement: "Lodging is capped at $250 per night.",
+        scope: {
+          ...buildReview().extracted_rule.scope,
+          expense_category: "lodging",
+        },
+        citation: {
+          document_id: "expense-policy",
+          document_version_id: "docv-expense-v1",
+          section_id: "lodging#xyz",
+          quote: "Lodging is capped at $250 per night.",
+          start_char: 33,
+          end_char: 69,
+        },
+        condition: {
+          field: "lodging.amount",
+          operator: "<=",
+          value: "250",
+        },
+        applicability: {
+          aggregation_period: "per_night",
+          unit: "money",
+          currency: "USD",
+          limit_basis: "per room",
+        },
+      },
+      qa_flags: [],
+      reingestion_diff_category: "changed",
+    });
+
+    let queueRefreshCount = 0;
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/policy-documents") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                document_id: "expense-policy",
+                latest_document_version_id: "docv-expense-v1",
+                latest_uploaded_at: "2026-06-21T10:00:00Z",
+                version_count: 1,
+                active_version_count: 1,
+                has_deleted_versions: false,
+              },
+            ],
+          }),
+        });
+      }
+      if (url === "/api/candidate-rules") {
+        queueRefreshCount += 1;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: queueRefreshCount === 1 ? [firstReview, secondReview] : [],
+          }),
+        });
+      }
+      if (url === "/api/candidate-rules/approvals/bulk" && init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            approved_candidate_rule_ids: ["rule-meals-cap", "rule-lodging-cap"],
+            failed_candidate_rules: [],
+            status: "approved",
+            recorded_by: "approver-user",
+          }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CandidateRuleCatalog principal={principal} />);
+
+    expect(await screen.findByText("Unchanged")).toBeInTheDocument();
+    expect(screen.getByText("Changed")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-meals-cap" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-lodging-cap" }));
+    await userEvent.click(screen.getByRole("button", { name: "Approve selected Candidate Rules" }));
+    await userEvent.type(
+      screen.getByLabelText("Bulk approval rationale"),
+      "Citation verified and unchanged Candidate Rules approved together.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Confirm bulk approval" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/candidate-rules/approvals/bulk",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            candidate_rule_ids: ["rule-meals-cap", "rule-lodging-cap"],
+            rationale: "Citation verified and unchanged Candidate Rules approved together.",
+          }),
+        }),
+      );
+    });
+
+    expect(
+      await screen.findByText("2 Candidate Rules approved. The queue has been refreshed."),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/The review queue is empty/)).toBeInTheDocument();
+  });
+
+  it("disables bulk approve for the viewer role", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<CandidateRuleCatalog principal={viewerPrincipal} />);
+
+    await screen.findByText(/Meals are capped at \$75 per day/);
+    expect(screen.getByRole("button", { name: "Approve selected Candidate Rules" })).toBeDisabled();
+  });
+
+  it("surfaces partial bulk approval failures clearly", async () => {
+    const firstReview = buildReview({
+      qa_flags: [],
+      reingestion_diff_category: "unchanged",
+    });
+    const secondReview = buildReview({
+      candidate_rule_id: "rule-lodging-cap",
+      current_rule: {
+        ...buildReview().current_rule,
+        rule_id: "rule-lodging-cap",
+        statement: "Lodging is capped at $250 per night.",
+        scope: {
+          ...buildReview().current_rule.scope,
+          expense_category: "lodging",
+        },
+        citation: {
+          document_id: "expense-policy",
+          document_version_id: "docv-expense-v1",
+          section_id: "lodging#xyz",
+          quote: "Lodging is capped at $250 per night.",
+          start_char: 33,
+          end_char: 69,
+        },
+        condition: {
+          field: "lodging.amount",
+          operator: "<=",
+          value: "250",
+        },
+        applicability: {
+          aggregation_period: "per_night",
+          unit: "money",
+          currency: "USD",
+          limit_basis: "per room",
+        },
+      },
+      extracted_rule: {
+        ...buildReview().extracted_rule,
+        rule_id: "rule-lodging-cap",
+        statement: "Lodging is capped at $250 per night.",
+        scope: {
+          ...buildReview().extracted_rule.scope,
+          expense_category: "lodging",
+        },
+        citation: {
+          document_id: "expense-policy",
+          document_version_id: "docv-expense-v1",
+          section_id: "lodging#xyz",
+          quote: "Lodging is capped at $250 per night.",
+          start_char: 33,
+          end_char: 69,
+        },
+        condition: {
+          field: "lodging.amount",
+          operator: "<=",
+          value: "250",
+        },
+        applicability: {
+          aggregation_period: "per_night",
+          unit: "money",
+          currency: "USD",
+          limit_basis: "per room",
+        },
+      },
+      qa_flags: [],
+      reingestion_diff_category: "changed",
+    });
+
+    let queueRefreshCount = 0;
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/policy-documents") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                document_id: "expense-policy",
+                latest_document_version_id: "docv-expense-v1",
+                latest_uploaded_at: "2026-06-21T10:00:00Z",
+                version_count: 1,
+                active_version_count: 1,
+                has_deleted_versions: false,
+              },
+            ],
+          }),
+        });
+      }
+      if (url === "/api/candidate-rules") {
+        queueRefreshCount += 1;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: queueRefreshCount === 1 ? [firstReview, secondReview] : [secondReview],
+          }),
+        });
+      }
+      if (url === "/api/candidate-rules/approvals/bulk" && init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            approved_candidate_rule_ids: ["rule-meals-cap"],
+            failed_candidate_rules: [
+              {
+                candidate_rule_id: "rule-lodging-cap",
+                detail: "Candidate Rule cannot transition from approved to approved.",
+              },
+            ],
+            status: "partial",
+            recorded_by: "approver-user",
+          }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CandidateRuleCatalog principal={principal} />);
+
+    await screen.findByText(/Meals are capped at \$75 per day/);
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-meals-cap" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-lodging-cap" }));
+    await userEvent.click(screen.getByRole("button", { name: "Approve selected Candidate Rules" }));
+    await userEvent.type(
+      screen.getByLabelText("Bulk approval rationale"),
+      "Bulk approval after re-ingestion review.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Confirm bulk approval" }));
+
+    expect(
+      await screen.findByText("1 Candidate Rule approved. 1 could not be approved."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("rule-lodging-cap: Candidate Rule cannot transition from approved to approved."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Lodging is capped at $250 per night.")).toBeInTheDocument();
   });
 
   it("advances to the next filtered queue item after approval", async () => {

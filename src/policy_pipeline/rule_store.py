@@ -13,6 +13,7 @@ from policy_pipeline.rules import (
     CandidateRuleValue,
     LifecycleState,
     QAFlag,
+    ReingestionDiffCategory,
     Rule,
     RuleOriginType,
 )
@@ -41,8 +42,19 @@ class InvalidCandidateRuleReviewError(Exception):
         self.detail = detail
 
 
+class BulkCandidateRuleApprovalFailure(BaseModel):
+    candidate_rule_id: str
+    detail: str
+
+
+class BulkCandidateRuleApprovalResult(BaseModel):
+    approved_reviews: list[CandidateRuleReview]
+    failures: list[BulkCandidateRuleApprovalFailure]
+
+
 _CANDIDATE_RULE_METADATA_FIELDS = {"qa_flags", "extracted_rule", "committed_rule"}
 _EDITABLE_REVIEW_STATES = {LifecycleState.EXTRACTED, LifecycleState.IN_REVIEW}
+_REINGESTION_DIFF_CATEGORY_FIELD = "reingestion_diff_category"
 
 
 def create_rule(session: Session, *, rule: Rule | CandidateRule, commit: bool = True) -> RuleRecord:
@@ -166,32 +178,57 @@ def bulk_approve_candidate_rule_reviews(
     *,
     candidate_rule_ids: list[str],
     commit: bool = True,
-) -> list[CandidateRuleReview]:
+) -> BulkCandidateRuleApprovalResult:
     unique_candidate_rule_ids = list(dict.fromkeys(candidate_rule_ids))
     records = session.scalars(
-        select(RuleRecord)
-        .where(RuleRecord.rule_id.in_(unique_candidate_rule_ids))
-        .order_by(RuleRecord.rule_id)
+        select(RuleRecord).where(RuleRecord.rule_id.in_(unique_candidate_rule_ids))
     ).all()
     record_by_id = {record.rule_id: record for record in records}
+    approved_records: list[RuleRecord] = []
+    failures: list[BulkCandidateRuleApprovalFailure] = []
 
     for candidate_rule_id in unique_candidate_rule_ids:
         record = record_by_id.get(candidate_rule_id)
         if record is None or record.origin_source_type != "extracted":
-            raise CandidateRuleNotFoundError(candidate_rule_id)
-
-    for candidate_rule_id in unique_candidate_rule_ids:
-        _approve_candidate_rule_record(record_by_id[candidate_rule_id])
+            failures.append(
+                BulkCandidateRuleApprovalFailure(
+                    candidate_rule_id=candidate_rule_id,
+                    detail="Candidate Rule was not found.",
+                )
+            )
+            continue
+        try:
+            _approve_candidate_rule_record(record)
+        except InvalidCandidateRuleTransitionError as exc:
+            failures.append(
+                BulkCandidateRuleApprovalFailure(
+                    candidate_rule_id=candidate_rule_id,
+                    detail=(
+                        "Candidate Rule cannot transition from "
+                        f"{exc.current_state.value} to {exc.target_state.value}."
+                    ),
+                )
+            )
+            continue
+        except InvalidCandidateRuleApprovalError as exc:
+            failures.append(
+                BulkCandidateRuleApprovalFailure(
+                    candidate_rule_id=candidate_rule_id,
+                    detail=exc.detail,
+                )
+            )
+            continue
+        approved_records.append(record)
 
     session.flush()
     if commit:
         session.commit()
-        for record in records:
+        for record in approved_records:
             session.refresh(record)
-    return [
-        _build_candidate_rule_review(record_by_id[candidate_rule_id])
-        for candidate_rule_id in unique_candidate_rule_ids
-    ]
+    return BulkCandidateRuleApprovalResult(
+        approved_reviews=[_build_candidate_rule_review(record) for record in approved_records],
+        failures=failures,
+    )
 
 
 def reject_candidate_rule_review(
@@ -269,6 +306,7 @@ def _build_candidate_rule_review(record: RuleRecord) -> CandidateRuleReview:
             else None
         ),
         qa_flags=[QAFlag.model_validate(flag) for flag in record.payload.get("qa_flags", [])],
+        reingestion_diff_category=_reingestion_diff_category(record),
     )
 
 
@@ -300,6 +338,37 @@ def _rule_value_payload(rule: CandidateRuleValue) -> dict[str, object]:
     return rule.model_dump(mode="json")
 
 
+def clear_reingestion_diff_categories(session: Session, *, document_id: str) -> None:
+    statement = select(RuleRecord).where(
+        RuleRecord.origin_source_type == RuleOriginType.EXTRACTED.value
+    )
+    for record in session.scalars(statement).all():
+        current_citation = record.payload.get("citation")
+        extracted_citation = (record.payload.get("extracted_rule") or {}).get("citation")
+        if not _payload_matches_document(
+            current_citation,
+            document_id,
+        ) and not _payload_matches_document(extracted_citation, document_id):
+            continue
+        payload = deepcopy(record.payload)
+        payload.pop(_REINGESTION_DIFF_CATEGORY_FIELD, None)
+        record.payload = payload
+
+
+def set_reingestion_diff_category(
+    session: Session,
+    *,
+    candidate_rule_id: str,
+    category: ReingestionDiffCategory,
+) -> None:
+    record = session.get(RuleRecord, candidate_rule_id)
+    if record is None:
+        return
+    payload = deepcopy(record.payload)
+    payload[_REINGESTION_DIFF_CATEGORY_FIELD] = category.value
+    record.payload = payload
+
+
 def _ensure_transition_allowed(
     *,
     current_state: LifecycleState,
@@ -324,3 +393,14 @@ def _first_validation_message(error: ValidationError) -> str:
         return str(error)
     message = details[0].get("msg")
     return message if isinstance(message, str) else str(error)
+
+
+def _payload_matches_document(payload: object, document_id: str) -> bool:
+    return isinstance(payload, dict) and payload.get("document_id") == document_id
+
+
+def _reingestion_diff_category(record: RuleRecord) -> ReingestionDiffCategory | None:
+    raw_value = record.payload.get(_REINGESTION_DIFF_CATEGORY_FIELD)
+    if raw_value is None:
+        return None
+    return ReingestionDiffCategory(raw_value)

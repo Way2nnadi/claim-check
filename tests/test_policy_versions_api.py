@@ -419,6 +419,7 @@ async def test_bulk_approve_extracted_candidate_rules_and_publish_policy_version
             "rule-extracted-domestic-meals",
             "rule-extracted-international-meals",
         ],
+        "failed_candidate_rules": [],
         "status": "approved",
         "recorded_by": "approver-user",
     }
