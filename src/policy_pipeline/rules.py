@@ -46,6 +46,13 @@ class QAFlagCode(StrEnum):
     UNDEFINED_TERM = "undefined_term"
 
 
+class ReingestionDiffCategory(StrEnum):
+    ADDED = "added"
+    CHANGED = "changed"
+    REMOVED = "removed"
+    UNCHANGED = "unchanged"
+
+
 class RuleOrigin(BaseModel):
     source_type: RuleOriginType
     extraction_run_id: str | None = None
@@ -191,3 +198,4 @@ class CandidateRuleReview(BaseModel):
     extracted_rule: CandidateRuleValue
     committed_rule: CandidateRuleValue | None = None
     qa_flags: list[QAFlag] = Field(default_factory=list)
+    reingestion_diff_category: ReingestionDiffCategory | None = None

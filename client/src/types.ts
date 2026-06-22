@@ -180,6 +180,12 @@ export type QAFlagCode =
   | "possible_contradiction"
   | "undefined_term";
 
+export type ReingestionDiffCategory =
+  | "added"
+  | "changed"
+  | "removed"
+  | "unchanged";
+
 export type AggregationPeriod =
   | "per_transaction"
   | "per_day"
@@ -277,6 +283,7 @@ export interface CandidateRuleReview {
   extracted_rule: CandidateRuleValue;
   committed_rule: CandidateRuleValue | null;
   qa_flags: QAFlag[];
+  reingestion_diff_category?: ReingestionDiffCategory | null;
 }
 
 export interface CandidateRuleReviewListResponse {
@@ -305,6 +312,23 @@ export interface CandidateRuleApprovalRequest {
 
 export interface CandidateRuleApprovalResponse {
   candidate_rule_id: string;
+  status: string;
+  recorded_by: string;
+}
+
+export interface BulkCandidateRuleApprovalRequest {
+  candidate_rule_ids: string[];
+  rationale: string;
+}
+
+export interface BulkCandidateRuleApprovalFailure {
+  candidate_rule_id: string;
+  detail: string;
+}
+
+export interface BulkCandidateRuleApprovalResponse {
+  approved_candidate_rule_ids: string[];
+  failed_candidate_rules: BulkCandidateRuleApprovalFailure[];
   status: string;
   recorded_by: string;
 }

@@ -3,7 +3,9 @@ import {
 	enforceabilityClassName,
 	formatEnforceabilityClass,
 	formatLifecycleState,
+	formatReingestionDiffCategory,
 	lifecycleStateClassName,
+	reingestionDiffCategoryClassName,
 	truncateStatement,
 	type LifecycleTabId,
 } from "./candidateRuleFormat";
@@ -27,6 +29,10 @@ interface CandidateRuleLedgerProps {
 	onRejectReview: (review: CandidateRuleReview) => void;
 	emptyMessage?: string;
 	emptyHint?: string | null;
+	selectedCandidateRuleIds: ReadonlySet<string>;
+	selectableCandidateRuleIds: ReadonlySet<string>;
+	onToggleCandidateRuleSelection: (candidateRuleId: string) => void;
+	onToggleAllCandidateRuleSelections: () => void;
 }
 
 function ApproveIcon() {
@@ -92,8 +98,18 @@ export default function CandidateRuleLedger({
 	onRejectReview,
 	emptyMessage = "No Candidate Rules are waiting in this queue.",
 	emptyHint = "Extracted Rules appear here after an Extraction Run completes.",
+	selectedCandidateRuleIds,
+	selectableCandidateRuleIds,
+	onToggleCandidateRuleSelection,
+	onToggleAllCandidateRuleSelections,
 }: CandidateRuleLedgerProps) {
 	const canEdit = canEditCandidateRules(principal);
+	const selectableCount = selectableCandidateRuleIds.size;
+	const selectedCount = [...selectedCandidateRuleIds].filter((candidateRuleId) =>
+		selectableCandidateRuleIds.has(candidateRuleId),
+	).length;
+	const allSelectableSelected =
+		selectableCount > 0 && selectedCount === selectableCount;
 
 	if (allReviews.length === 0) {
 		return (
@@ -115,29 +131,29 @@ export default function CandidateRuleLedger({
 					role="tablist"
 					aria-label="Filter by lifecycle state"
 				>
-				{PRIMARY_REVIEW_TABS.map((tab) => {
-					const isSelected = lifecycleTab === tab.id;
-					const count = tabCounts[tab.id];
+					{PRIMARY_REVIEW_TABS.map((tab) => {
+						const isSelected = lifecycleTab === tab.id;
+						const count = tabCounts[tab.id];
 
-					return (
-						<button
-							key={tab.id}
-							type="button"
-							role="tab"
-							id={`review-lifecycle-tab-${tab.id}`}
-							className={`catalog-tab${isSelected ? " active" : ""}`}
-							data-tab-id={tab.id}
-							aria-selected={isSelected}
-							aria-controls="review-rule-panel"
-							onClick={() => onLifecycleTabChange(tab.id)}
-						>
-							<span>{tab.label}</span>
-							{count !== undefined ? (
-								<span className="catalog-tab-count">{count}</span>
-							) : null}
-						</button>
-					);
-				})}
+						return (
+							<button
+								key={tab.id}
+								type="button"
+								role="tab"
+								id={`review-lifecycle-tab-${tab.id}`}
+								className={`catalog-tab${isSelected ? " active" : ""}`}
+								data-tab-id={tab.id}
+								aria-selected={isSelected}
+								aria-controls="review-rule-panel"
+								onClick={() => onLifecycleTabChange(tab.id)}
+							>
+								<span>{tab.label}</span>
+								{count !== undefined ? (
+									<span className="catalog-tab-count">{count}</span>
+								) : null}
+							</button>
+						);
+					})}
 				</div>
 			</div>
 
@@ -159,6 +175,22 @@ export default function CandidateRuleLedger({
 					aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
 					aria-label="Candidate Rule review queue"
 				>
+					<li className="review-rule-selection-summary">
+						<label className="review-rule-checkbox">
+							<input
+								type="checkbox"
+								aria-label="Select all visible Candidate Rules"
+								checked={allSelectableSelected}
+								disabled={selectableCount === 0}
+								onChange={onToggleAllCandidateRuleSelections}
+							/>
+							<span>
+								{selectedCount > 0
+									? `${selectedCount} selected`
+									: "Select visible Candidate Rules"}
+							</span>
+						</label>
+					</li>
 					{reviews.map((review) => {
 						const rule = review.current_rule;
 						const qaCount = review.qa_flags.length;
@@ -169,12 +201,32 @@ export default function CandidateRuleLedger({
 						const statement = truncateStatement(rule.statement, 160);
 						const approveDisabled = catalogApproveDisabled(review, canEdit);
 						const rejectDisabled = catalogRejectDisabled(review, canEdit);
+						const isSelectable = selectableCandidateRuleIds.has(
+							review.candidate_rule_id,
+						);
+						const isSelected = selectedCandidateRuleIds.has(
+							review.candidate_rule_id,
+						);
 
 						return (
 							<li key={review.candidate_rule_id}>
 								<article
-									className={`review-row reveal lifecycle-${lifecycleClass}`}
+									className={`review-row reveal lifecycle-${lifecycleClass}${isSelected ? " selected" : ""}`}
 								>
+									<label className="review-rule-checkbox">
+										<input
+											type="checkbox"
+											aria-label={`Select Candidate Rule ${review.candidate_rule_id}`}
+											checked={isSelected}
+											disabled={!isSelectable}
+											onChange={() =>
+												onToggleCandidateRuleSelection(review.candidate_rule_id)
+											}
+										/>
+										<span className="sr-only">
+											Select Candidate Rule {review.candidate_rule_id}
+										</span>
+									</label>
 									{canEdit ? (
 										<div className="review-row-actions">
 											<button
@@ -208,6 +260,17 @@ export default function CandidateRuleLedger({
 									<p className="review-statement">{statement}</p>
 									<div className="review-row-head">
 										<div className="review-row-idline">
+											{review.reingestion_diff_category ? (
+												<span
+													className={`review-diff-badge ${reingestionDiffCategoryClassName(
+														review.reingestion_diff_category,
+													)}`}
+												>
+													{formatReingestionDiffCategory(
+														review.reingestion_diff_category,
+													)}
+												</span>
+											) : null}
 											<span className={`review-lifecycle ${lifecycleClass}`}>
 												{formatLifecycleState(review.lifecycle_state)}
 											</span>

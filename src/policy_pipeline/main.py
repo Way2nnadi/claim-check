@@ -190,6 +190,7 @@ def create_app() -> FastAPI:
 
     class BulkCandidateRuleApprovalResponse(BaseModel):
         approved_candidate_rule_ids: list[str]
+        failed_candidate_rules: list[dict[str, str]] = Field(default_factory=list)
         status: str
         recorded_by: str
 
@@ -892,32 +893,15 @@ def create_app() -> FastAPI:
         ],
         session: Annotated[Session, Depends(get_session)],
     ) -> BulkCandidateRuleApprovalResponse:
-        try:
-            reviews = bulk_approve_candidate_rule_reviews(
-                session,
-                candidate_rule_ids=approval.candidate_rule_ids,
-                commit=False,
-            )
-        except CandidateRuleNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Candidate Rule was not found.",
-            ) from exc
-        except InvalidCandidateRuleTransitionError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Candidate Rule cannot transition from "
-                    f"{exc.current_state.value} to {exc.target_state.value}."
-                ),
-            ) from exc
-        except InvalidCandidateRuleApprovalError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=exc.detail,
-            ) from exc
+        result = bulk_approve_candidate_rule_reviews(
+            session,
+            candidate_rule_ids=approval.candidate_rule_ids,
+            commit=False,
+        )
 
-        approved_candidate_rule_ids = [review.candidate_rule_id for review in reviews]
+        approved_candidate_rule_ids = [
+            review.candidate_rule_id for review in result.approved_reviews
+        ]
         for candidate_rule_id in approved_candidate_rule_ids:
             record_audit_event(
                 session,
@@ -932,7 +916,16 @@ def create_app() -> FastAPI:
         session.commit()
         return BulkCandidateRuleApprovalResponse(
             approved_candidate_rule_ids=approved_candidate_rule_ids,
-            status="approved",
+            failed_candidate_rules=[
+                failure.model_dump(mode="json") for failure in result.failures
+            ],
+            status=(
+                "approved"
+                if not result.failures
+                else "partial"
+                if approved_candidate_rule_ids
+                else "failed"
+            ),
             recorded_by=principal.subject,
         )
 
