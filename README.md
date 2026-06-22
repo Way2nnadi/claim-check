@@ -54,3 +54,8 @@ With the default local auth settings, use one of these bearer tokens from the si
 - `local-admin-token`
 - `local-approver-token`
 - `local-viewer-token`
+
+## Expense Report CSV import
+
+Expense Reports are imported from a fixed-template CSV on an all-or-nothing basis.
+If any row fails validation, the API returns file-level and row-level errors and does not persist a partial Expense Report.

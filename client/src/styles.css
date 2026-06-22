@@ -7448,3 +7448,114 @@ button:disabled {
 		justify-content: center;
 	}
 }
+
+.expense-report-intake {
+	display: grid;
+	gap: 1.5rem;
+	margin-bottom: 1.75rem;
+}
+
+.expense-report-copy {
+	margin: 0;
+	max-width: 42rem;
+	color: var(--muted-ink);
+}
+
+.expense-report-form {
+	display: grid;
+	gap: 1rem;
+}
+
+.expense-report-actions {
+	display: grid;
+	gap: 0.85rem;
+	align-items: start;
+}
+
+.expense-report-actions button {
+	justify-self: start;
+}
+
+.expense-report-permission-note {
+	margin: 0;
+	color: var(--muted-ink);
+}
+
+.expense-report-errors {
+	margin-bottom: 1.5rem;
+}
+
+.expense-report-errors h3 {
+	margin: 0 0 0.75rem;
+}
+
+.expense-report-error-card h4 {
+	margin: 0 0 0.65rem;
+}
+
+.expense-report-list {
+	display: grid;
+	gap: 1rem;
+}
+
+.expense-report-card {
+	display: grid;
+	gap: 1rem;
+}
+
+.expense-report-card-header {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 1rem;
+}
+
+.expense-report-card-header h3,
+.expense-report-card-header p {
+	margin: 0;
+}
+
+.expense-report-card-meta {
+	display: grid;
+	gap: 0.25rem;
+	justify-items: end;
+	color: var(--muted-ink);
+	font-size: 0.94rem;
+}
+
+.expense-report-table th:nth-child(1),
+.expense-report-table td:nth-child(1) {
+	width: 12%;
+}
+
+.expense-report-table th:nth-child(2),
+.expense-report-table td:nth-child(2) {
+	width: 12%;
+}
+
+.expense-report-table th:nth-child(3),
+.expense-report-table td:nth-child(3) {
+	width: 12%;
+}
+
+.expense-report-table th:nth-child(4),
+.expense-report-table td:nth-child(4) {
+	width: 10%;
+}
+
+.expense-report-table th:nth-child(5),
+.expense-report-table td:nth-child(5) {
+	width: 9%;
+}
+
+.expense-report-table th:nth-child(6),
+.expense-report-table td:nth-child(6) {
+	width: 23%;
+}
+
+.expense-report-table th:nth-child(7),
+.expense-report-table td:nth-child(7),
+.expense-report-table th:nth-child(8),
+.expense-report-table td:nth-child(8) {
+	width: 11%;
+}

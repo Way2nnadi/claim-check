@@ -15,6 +15,8 @@ import type {
   DocumentSectionListResponse,
   DocumentVersion,
   DocumentVersionListResponse,
+  ExpenseReport,
+  ExpenseReportListResponse,
   ExtractionExecutionResult,
   ExtractionRunCreateRequest,
   ExtractionRunFilters,
@@ -34,13 +36,20 @@ import type {
 
 export const SESSION_STORAGE_TOKEN_KEY = "policy-pipeline.auth.token";
 
+interface ValidationErrorDetail {
+  loc?: Array<string | number>;
+  msg?: string;
+}
+
 export class ApiError extends Error {
   status: number;
+  payload: unknown;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, payload: unknown = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.payload = payload;
   }
 }
 
@@ -88,18 +97,31 @@ export async function apiRequest<T>(
 
 async function apiErrorFromResponse(response: Response): Promise<ApiError> {
   let detail = `Request failed with status ${response.status}.`;
+  let payload: unknown = null;
   try {
-    const payload = (await response.json()) as {
-      detail?: string | Array<{ loc?: Array<string | number>; msg?: string }>;
+    payload = (await response.json()) as {
+      detail?: string | ValidationErrorDetail[];
     };
-    if (typeof payload.detail === "string" && payload.detail) {
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in payload &&
+      typeof payload.detail === "string" &&
+      payload.detail
+    ) {
       detail = payload.detail;
-    } else if (Array.isArray(payload.detail) && payload.detail.length > 0) {
-      detail = payload.detail
+    } else if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in payload &&
+      Array.isArray(payload.detail) &&
+      payload.detail.length > 0
+    ) {
+      detail = (payload.detail as ValidationErrorDetail[])
         .map((item) => {
           const message = item.msg?.replace(/^Value error,\s*/u, "").trim();
           const path = item.loc
-            ?.filter((segment) => segment !== "body")
+            ?.filter((segment: string | number) => segment !== "body")
             .join(".");
           if (path && message) {
             return `${path}: ${message}`;
@@ -111,7 +133,7 @@ async function apiErrorFromResponse(response: Response): Promise<ApiError> {
   } catch {
     // Leave the default error message when the response is not JSON.
   }
-  return new ApiError(detail, response.status);
+  return new ApiError(detail, response.status, payload);
 }
 
 export function fetchMe(token: string): Promise<AuthenticatedPrincipal> {
@@ -120,6 +142,19 @@ export function fetchMe(token: string): Promise<AuthenticatedPrincipal> {
 
 export function fetchPolicyVersions(): Promise<PolicyVersionListResponse> {
   return apiRequest<PolicyVersionListResponse>("/api/policy-versions");
+}
+
+export function fetchExpenseReports(): Promise<ExpenseReportListResponse> {
+  return apiRequest<ExpenseReportListResponse>("/api/expense-reports");
+}
+
+export function importExpenseReportCsv(file: File): Promise<ExpenseReport> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiRequest<ExpenseReport>("/api/expense-reports", {
+    method: "POST",
+    body: formData,
+  });
 }
 
 export function fetchPolicyVersion(
