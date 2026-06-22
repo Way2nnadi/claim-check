@@ -11,6 +11,7 @@ import type {
   ExtractionRunCreateRequest,
   ExtractionRunFilters,
   ExtractionRunListResponse,
+  ManualRuleCreateRequest,
   ModelConfigurationListResponse,
   PolicyVersionListResponse,
   PolicyVersionPublishRequest,
@@ -20,6 +21,7 @@ import type {
   PromptTemplateListResponse,
   ReingestionRequest,
   ReingestionResult,
+  Rule,
 } from "./types";
 
 export const SESSION_STORAGE_TOKEN_KEY = "policy-pipeline.auth.token";
@@ -79,9 +81,24 @@ export async function apiRequest<T>(
 async function apiErrorFromResponse(response: Response): Promise<ApiError> {
   let detail = `Request failed with status ${response.status}.`;
   try {
-    const payload = (await response.json()) as { detail?: string };
-    if (payload.detail) {
+    const payload = (await response.json()) as {
+      detail?: string | Array<{ loc?: Array<string | number>; msg?: string }>;
+    };
+    if (typeof payload.detail === "string" && payload.detail) {
       detail = payload.detail;
+    } else if (Array.isArray(payload.detail) && payload.detail.length > 0) {
+      detail = payload.detail
+        .map((item) => {
+          const message = item.msg?.replace(/^Value error,\s*/u, "").trim();
+          const path = item.loc
+            ?.filter((segment) => segment !== "body")
+            .join(".");
+          if (path && message) {
+            return `${path}: ${message}`;
+          }
+          return message || detail;
+        })
+        .join(" ");
     }
   } catch {
     // Leave the default error message when the response is not JSON.
@@ -109,6 +126,13 @@ export function publishPolicyVersion(
   request: PolicyVersionPublishRequest,
 ): Promise<PolicyVersionPublishResponse> {
   return apiRequest<PolicyVersionPublishResponse>("/api/policy-versions", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function createManualRule(request: ManualRuleCreateRequest): Promise<Rule> {
+  return apiRequest<Rule>("/api/rules/manual", {
     method: "POST",
     body: JSON.stringify(request),
   });

@@ -159,6 +159,29 @@ describe("apiRequest", () => {
     );
   });
 
+  it("formats FastAPI validation detail arrays into readable messages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: async () => ({
+          detail: [
+            {
+              loc: ["body", "citation", "end_char"],
+              msg: "Value error, Citation end_char must be greater than start_char.",
+            },
+          ],
+        }),
+      }),
+    );
+
+    await expect(apiRequest("/api/example")).rejects.toMatchObject({
+      message: "citation.end_char: Citation end_char must be greater than start_char.",
+      status: 422,
+    });
+  });
+
   it("builds extraction run query parameters", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
