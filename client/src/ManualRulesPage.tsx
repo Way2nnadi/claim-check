@@ -246,6 +246,10 @@ function buildValidationErrors(draft: ManualRuleDraft): ValidationErrors {
   if (applicabilityTouched && !normalizeRequiredString(draft.applicability.unit)) {
     errors.applicability_unit = "Unit is required when Applicability is provided.";
   }
+  if (applicabilityTouched && !draft.applicability.aggregation_period) {
+    errors.applicability_aggregation_period =
+      "Aggregation period is required when Applicability is provided.";
+  }
 
   const citationTouched = Object.values(draft.citation).some((value) =>
     normalizeRequiredString(value).length > 0,
@@ -710,6 +714,11 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                       </option>
                     ))}
                   </select>
+                  {validationErrors.applicability_aggregation_period ? (
+                    <small className="manual-field-error">
+                      {validationErrors.applicability_aggregation_period}
+                    </small>
+                  ) : null}
                 </label>
 
                 <label className="manual-field">

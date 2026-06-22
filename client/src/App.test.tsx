@@ -84,6 +84,47 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Publish Policy Version" })).toBeDisabled();
   });
 
+  it("opens Manual Rules and keeps creation disabled for viewer clearance", async () => {
+    window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/me") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              subject: "viewer-user",
+              roles: ["viewer"],
+              auth_backend: "local",
+            }),
+          });
+        }
+        if (url === "/api/policy-documents") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Documents" });
+    await userEvent.click(screen.getByRole("button", { name: /Manual Rules/i }));
+
+    expect(await screen.findByRole("heading", { name: "Manual Rules" })).toBeInTheDocument();
+    const createButtons = screen.getAllByRole("button", {
+      name: "Create Manual Rule",
+    });
+    expect(createButtons).toHaveLength(2);
+    createButtons.forEach((button) => {
+      expect(button).toBeDisabled();
+    });
+    expect(screen.getByText("Viewer access")).toBeInTheDocument();
+  });
+
   it("clears the token and returns to sign-in when the user signs out", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
     vi.stubGlobal(

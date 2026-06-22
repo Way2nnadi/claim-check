@@ -188,6 +188,43 @@ describe("ManualRulesPage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("requires an aggregation period when Applicability is partially provided", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ManualRulesPage principal={makePrincipal("approver")} />);
+
+    fireEvent.change(screen.getByLabelText("Rule ID"), {
+      target: { value: "rule-manual-meal-cap" },
+    });
+    fireEvent.change(screen.getByLabelText("Statement"), {
+      target: { value: "Meals are reimbursable up to $90." },
+    });
+    fireEvent.change(screen.getByLabelText("Rationale"), {
+      target: { value: "Temporary finance exception pending document update." },
+    });
+    fireEvent.change(screen.getByLabelText("Condition field"), {
+      target: { value: "meal.amount" },
+    });
+    fireEvent.change(screen.getByLabelText("Threshold value"), {
+      target: { value: "90" },
+    });
+    fireEvent.change(screen.getByLabelText("Unit"), {
+      target: { value: "money" },
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create Manual Rule" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Aggregation period is required when Applicability is provided.",
+      ),
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("disables creation for viewer clearance", () => {
     vi.stubGlobal("fetch", vi.fn());
 
