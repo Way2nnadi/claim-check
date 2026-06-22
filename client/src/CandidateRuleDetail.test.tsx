@@ -322,6 +322,40 @@ describe("CandidateRuleDetail", () => {
     ).toBeInTheDocument();
   });
 
+  it("blocks approval and rejection while Candidate Rule edits are unsaved", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/candidate-rules/rule-meals-cap") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => buildReview(),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CandidateRuleDetail
+        candidateRuleId="rule-meals-cap"
+        principal={approverPrincipal}
+        onBack={() => undefined}
+      />,
+    );
+
+    await screen.findByDisplayValue("Meals are capped at $75 per day.");
+    await userEvent.clear(screen.getByLabelText("Statement"));
+    await userEvent.type(screen.getByLabelText("Statement"), "Meals are capped at $80 per day.");
+
+    expect(screen.getByText("Decision blockers")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Save Candidate Rule edits before approving or rejecting so the decision uses the current reviewed values.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve Candidate Rule" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject Candidate Rule" })).toBeDisabled();
+  });
+
   it("requires rationale before approving and posts the approval decision", async () => {
     const approvedReview = buildReview({
       lifecycle_state: "approved",

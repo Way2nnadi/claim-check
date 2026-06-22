@@ -401,6 +401,16 @@ function approvalBlockersFor(review: CandidateRuleReview, draft: RuleDraft): str
   return [...blockers];
 }
 
+function decisionBlockersFor(unsavedChangeCount: number): string[] {
+  if (unsavedChangeCount === 0) {
+    return [];
+  }
+
+  return [
+    "Save Candidate Rule edits before approving or rejecting so the decision uses the current reviewed values.",
+  ];
+}
+
 function normalizeStatement(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -793,6 +803,7 @@ export default function CandidateRuleDetail({
     Boolean(citation && selectedSection && selectedSection.section_id === citation.section_id);
   const approvalBlockers =
     review && draft ? approvalBlockersFor(review, draft) : [];
+  const decisionBlockers = decisionBlockersFor(unsavedChangeCount);
 
   function clearFeedback(): void {
     if (errorMessage !== null) {
@@ -961,8 +972,13 @@ export default function CandidateRuleDetail({
   const saveDisabled =
     !canEdit || isSaving || isResolving || unsavedChangeCount === 0;
   const approveDisabled =
-    !canResolve || isSaving || isResolving || approvalBlockers.length > 0;
-  const rejectDisabled = !canResolve || isSaving || isResolving;
+    !canResolve ||
+    isSaving ||
+    isResolving ||
+    decisionBlockers.length > 0 ||
+    approvalBlockers.length > 0;
+  const rejectDisabled =
+    !canResolve || isSaving || isResolving || decisionBlockers.length > 0;
   const hasCommittedEdits = review.committed_rule !== null;
 
   const pageTitle = citation
@@ -1374,6 +1390,26 @@ export default function CandidateRuleDetail({
                 </div>
                 <ul className="review-approval-blockers-list">
                   {approvalBlockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {decisionBlockers.length > 0 ? (
+              <section
+                className="review-approval-blockers reveal"
+                aria-label="Decision blockers"
+                style={{ "--reveal-delay": "150ms" } as CSSProperties}
+              >
+                <div className="review-approval-blockers-head">
+                  <span className="review-save-kicker">Decision blockers</span>
+                  <p className="review-save-note">
+                    Persist reviewed values before recording an approval or rejection.
+                  </p>
+                </div>
+                <ul className="review-approval-blockers-list">
+                  {decisionBlockers.map((blocker) => (
                     <li key={blocker}>{blocker}</li>
                   ))}
                 </ul>
