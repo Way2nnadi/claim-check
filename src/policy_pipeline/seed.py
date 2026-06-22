@@ -9,13 +9,13 @@ import sys
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, sessionmaker
 
-from policy_pipeline.config import Settings, get_settings
-from policy_pipeline.database import _engine_for_url
-from policy_pipeline.extraction_registry import (
+from policy_pipeline.extraction.registry import (
     RegistryRecordInUseError,
     save_model_configuration,
     save_prompt_template,
 )
+from policy_pipeline.shared.config import Settings, get_settings
+from policy_pipeline.shared.database.base import _engine_for_url
 
 RULE_EXTRACTION_PROMPT_TEMPLATE_ID = "rule-extraction"
 RULE_EXTRACTION_PROMPT_TEMPLATE_VERSION = "v2"

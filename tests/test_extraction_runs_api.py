@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base, ExtractionRunRecord, RuleRecord
-from policy_pipeline.extraction_registry import save_model_configuration, save_prompt_template
+from policy_pipeline.extraction.registry import save_model_configuration, save_prompt_template
 from policy_pipeline.main import create_app
+from policy_pipeline.shared.database import Base, ExtractionRunRecord, RuleRecord
 
 
 def _configure_local_auth(

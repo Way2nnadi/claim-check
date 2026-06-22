@@ -4,9 +4,9 @@ import {
   fetchExpenseReports,
   importExpenseReportCsv,
 } from "./api";
-import { hasAnyRole } from "./permissions";
+import { hasAnyRole } from "./shared/permissions";
+import type { AuthenticatedPrincipal } from "./shared/auth/types";
 import type {
-  AuthenticatedPrincipal,
   ExpenseReport,
   ExpenseReportImportErrorResponse,
 } from "./types";

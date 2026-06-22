@@ -1,284 +1,33 @@
-from __future__ import annotations
+from policy_pipeline.shared.database import (
+    AuditEventRecord,
+    Base,
+    DocumentSectionEmbeddingRecord,
+    DocumentSectionRecord,
+    DocumentVersionRecord,
+    ExpenseReportRecord,
+    ExtractionRunRecord,
+    ModelConfigurationRecord,
+    PolicyVersionRecord,
+    PromptTemplateRecord,
+    RuleRecord,
+    VectorType,
+    clear_database_cache,
+    get_session,
+)
 
-from datetime import datetime
-from functools import lru_cache
-from typing import Any
-
-import sqlalchemy as sa
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
-
-from policy_pipeline.config import get_settings
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-class _PostgresVectorType(sa.types.UserDefinedType):
-    cache_ok = True
-
-    def __init__(self, dimensions: int) -> None:
-        self.dimensions = dimensions
-
-    def get_col_spec(self, **_kwargs: Any) -> str:
-        return f"VECTOR({self.dimensions})"
-
-
-class VectorType(sa.types.TypeDecorator):
-    impl = sa.JSON
-    cache_ok = True
-
-    def __init__(self, dimensions: int) -> None:
-        super().__init__()
-        self.dimensions = dimensions
-
-    def load_dialect_impl(self, dialect: sa.engine.Dialect) -> sa.types.TypeEngine[Any]:
-        if dialect.name == "postgresql":
-            return dialect.type_descriptor(_PostgresVectorType(self.dimensions))
-        return dialect.type_descriptor(sa.JSON())
-
-    def process_bind_param(
-        self,
-        value: list[float] | None,
-        dialect: sa.engine.Dialect,
-    ) -> str | list[float] | None:
-        if value is None:
-            return None
-
-        normalized = [float(component) for component in value]
-        if len(normalized) != self.dimensions:
-            raise ValueError(
-                f"Expected {self.dimensions}-dimensional vector, got {len(normalized)}."
-            )
-        if dialect.name == "postgresql":
-            return "[" + ",".join(f"{component:.12g}" for component in normalized) + "]"
-        return normalized
-
-    def process_result_value(
-        self,
-        value: str | list[float] | None,
-        _dialect: sa.engine.Dialect,
-    ) -> list[float] | None:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            stripped = value.strip()[1:-1].strip()
-            if not stripped:
-                components: list[float] = []
-            else:
-                components = [float(component) for component in stripped.split(",")]
-        else:
-            components = [float(component) for component in value]
-        if len(components) != self.dimensions:
-            raise ValueError(
-                f"Expected {self.dimensions}-dimensional vector, got {len(components)}."
-            )
-        return components
-
-
-class AuditEventRecord(Base):
-    __tablename__ = "audit_events"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    action: Mapped[str] = mapped_column(sa.String(length=120), nullable=False)
-    actor_subject: Mapped[str] = mapped_column(sa.String(length=120), nullable=False)
-    actor_roles: Mapped[list[str]] = mapped_column(sa.JSON(), nullable=False)
-    entity_type: Mapped[str] = mapped_column(sa.String(length=120), nullable=False)
-    entity_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(sa.JSON(), nullable=False, default=dict)
-    occurred_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class RuleRecord(Base):
-    __tablename__ = "rules"
-
-    rule_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
-    origin_source_type: Mapped[str] = mapped_column(sa.String(length=50), nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(sa.JSON(), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class DocumentVersionRecord(Base):
-    __tablename__ = "document_versions"
-
-    document_version_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
-    document_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False, index=True)
-    filename: Mapped[str] = mapped_column(sa.String(length=255), nullable=False)
-    content_type: Mapped[str] = mapped_column(sa.String(length=150), nullable=False)
-    storage_key: Mapped[str] = mapped_column(sa.String(length=500), nullable=False, unique=True)
-    size_bytes: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
-    sha256: Mapped[str] = mapped_column(sa.String(length=64), nullable=False)
-    retention_until: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
-    retention_reason: Mapped[str | None] = mapped_column(sa.String(length=500))
-    deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
-    deleted_by: Mapped[str | None] = mapped_column(sa.String(length=120))
-    deletion_reason: Mapped[str | None] = mapped_column(sa.String(length=500))
-    quality_gate: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON())
-    table_extraction: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON())
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class DocumentSectionRecord(Base):
-    __tablename__ = "document_sections"
-
-    document_version_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
-    section_id: Mapped[str] = mapped_column(sa.String(length=255), primary_key=True)
-    document_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False, index=True)
-    heading_path: Mapped[list[str]] = mapped_column(sa.JSON(), nullable=False)
-    content: Mapped[str] = mapped_column(sa.Text(), nullable=False)
-    start_char: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
-    end_char: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class DocumentSectionEmbeddingRecord(Base):
-    __tablename__ = "document_section_embeddings"
-    __table_args__ = (
-        sa.ForeignKeyConstraint(
-            ["document_version_id", "section_id"],
-            ["document_sections.document_version_id", "document_sections.section_id"],
-        ),
-        sa.Index("ix_document_section_embeddings_document_id", "document_id"),
-    )
-
-    document_version_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
-    section_id: Mapped[str] = mapped_column(sa.String(length=255), primary_key=True)
-    document_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(VectorType(16), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class PolicyVersionRecord(Base):
-    __tablename__ = "policy_versions"
-
-    policy_version_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
-    published_by: Mapped[str] = mapped_column(sa.String(length=120), nullable=False)
-    change_summary: Mapped[str] = mapped_column(sa.String(length=500), nullable=False)
-    snapshot: Mapped[dict[str, Any]] = mapped_column(sa.JSON(), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class ExpenseReportRecord(Base):
-    __tablename__ = "expense_reports"
-
-    expense_report_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
-    imported_by: Mapped[str] = mapped_column(sa.String(length=120), nullable=False)
-    source_filename: Mapped[str] = mapped_column(sa.String(length=255), nullable=False)
-    row_count: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
-    rows: Mapped[list[dict[str, Any]]] = mapped_column(sa.JSON(), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class PromptTemplateRecord(Base):
-    __tablename__ = "prompt_templates"
-
-    prompt_template_id: Mapped[str] = mapped_column(
-        sa.String(length=200),
-        primary_key=True,
-    )
-    version: Mapped[str] = mapped_column(sa.String(length=50), primary_key=True)
-    template: Mapped[str] = mapped_column(sa.Text(), nullable=False)
-    description: Mapped[str | None] = mapped_column(sa.String(length=500))
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class ModelConfigurationRecord(Base):
-    __tablename__ = "model_configurations"
-
-    model_configuration_id: Mapped[str] = mapped_column(
-        sa.String(length=200),
-        primary_key=True,
-    )
-    version: Mapped[str] = mapped_column(sa.String(length=50), primary_key=True)
-    model: Mapped[str] = mapped_column(sa.String(length=200), nullable=False)
-    endpoint: Mapped[str] = mapped_column(sa.String(length=500), nullable=False)
-    settings: Mapped[dict[str, Any]] = mapped_column(sa.JSON(), nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-class ExtractionRunRecord(Base):
-    __tablename__ = "extraction_runs"
-    __table_args__ = (
-        sa.ForeignKeyConstraint(
-            ["prompt_template_id", "prompt_template_version"],
-            ["prompt_templates.prompt_template_id", "prompt_templates.version"],
-        ),
-        sa.ForeignKeyConstraint(
-            ["model_configuration_id", "model_configuration_version"],
-            ["model_configurations.model_configuration_id", "model_configurations.version"],
-        ),
-        sa.Index("ix_extraction_runs_document_version_id", "document_version_id"),
-    )
-
-    extraction_run_id: Mapped[str] = mapped_column(sa.String(length=200), primary_key=True)
-    document_version_id: Mapped[str] = mapped_column(
-        sa.String(length=200),
-        sa.ForeignKey("document_versions.document_version_id"),
-        nullable=False,
-    )
-    prompt_template_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False)
-    prompt_template_version: Mapped[str] = mapped_column(sa.String(length=50), nullable=False)
-    model_configuration_id: Mapped[str] = mapped_column(sa.String(length=200), nullable=False)
-    model_configuration_version: Mapped[str] = mapped_column(sa.String(length=50), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.text("CURRENT_TIMESTAMP"),
-    )
-
-
-@lru_cache
-def _engine_for_url(database_url: str) -> Engine:
-    return sa.create_engine(database_url)
-
-
-def clear_database_cache() -> None:
-    _engine_for_url.cache_clear()
-
-
-def get_session() -> Session:
-    settings = get_settings()
-    session_factory = sessionmaker(
-        bind=_engine_for_url(settings.database_url),
-        autoflush=False,
-        expire_on_commit=False,
-    )
-    with session_factory() as session:
-        yield session
+__all__ = [
+    "AuditEventRecord",
+    "Base",
+    "DocumentSectionEmbeddingRecord",
+    "DocumentSectionRecord",
+    "DocumentVersionRecord",
+    "ExpenseReportRecord",
+    "ExtractionRunRecord",
+    "ModelConfigurationRecord",
+    "PolicyVersionRecord",
+    "PromptTemplateRecord",
+    "RuleRecord",
+    "VectorType",
+    "clear_database_cache",
+    "get_session",
+]

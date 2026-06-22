@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from policy_pipeline.rules import Applicability, EnforceabilityClass, RuleCondition, Scope
+from policy_pipeline.rules.models import Applicability, EnforceabilityClass, RuleCondition, Scope
 
 
 @dataclass(frozen=True)

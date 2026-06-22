@@ -6,18 +6,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base
-from policy_pipeline.documents import (
-    PDF_CONTENT_TYPE,
-    create_document_version,
-    list_document_sections,
-)
-from policy_pipeline.qa_retrieval import (
+from policy_pipeline.extraction.qa_retrieval import (
     SECTION_EMBEDDING_DIMENSION,
     retrieve_candidate_rule_context,
     store_section_embeddings,
 )
-from policy_pipeline.rules import (
+from policy_pipeline.policy_documents.parsing import PDF_CONTENT_TYPE
+from policy_pipeline.policy_documents.service import create_document_version, list_document_sections
+from policy_pipeline.rules.models import (
     CandidateRule,
     Citation,
     EnforceabilityClass,
@@ -27,6 +23,7 @@ from policy_pipeline.rules import (
     RuleOriginType,
     Scope,
 )
+from policy_pipeline.shared.database import Base
 from tests.test_document_sections import _make_pdf_bytes
 
 
@@ -253,12 +250,12 @@ def test_postgres_related_section_distance_is_cast_to_float() -> None:
     import sqlalchemy as sa
     from sqlalchemy.dialects import postgresql
 
-    from policy_pipeline.database import (
+    from policy_pipeline.extraction.qa_retrieval import SECTION_EMBEDDING_DIMENSION
+    from policy_pipeline.shared.database import (
         DocumentSectionEmbeddingRecord,
         DocumentSectionRecord,
         VectorType,
     )
-    from policy_pipeline.qa_retrieval import SECTION_EMBEDDING_DIMENSION
 
     query_literal = sa.literal(
         [0.0] * SECTION_EMBEDDING_DIMENSION,

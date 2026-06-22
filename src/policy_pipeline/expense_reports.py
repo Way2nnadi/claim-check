@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import ExpenseReportRecord
+from policy_pipeline.shared.database import ExpenseReportRecord
 
 _REQUIRED_COLUMNS = (
     "employee_id",

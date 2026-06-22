@@ -8,7 +8,14 @@ Read `CONTEXT.md` for domain terms (Rule, Policy Version, Citation, etc.) and `d
 
 Before writing or styling any client UI, read and follow **`$frontend-design`**.
 
-The skill lives at `.agents/skills/frontend-design/SKILL.md`. Commit to a bold, cohesive aesthetic — avoid generic AI UI patterns.
+The skill lives at `.agents/skills/frontend-design/SKILL.md`. Apply it **within** the established Notion-inspired visual language — do not replace or restyle global UI.
+
+**Visual language (preserve, do not override):**
+- `client/src/app/notion.css` — Notion-style database views, layout, drawers, empty states
+- Existing shell: sidebar navigation, page headers, section cards, role-gated actions
+- Reuse existing component patterns (tables, chips, modals, drawers) before inventing new ones
+
+Extend pages and features to feel cohesive with what is already shipped. Avoid generic AI UI patterns and avoid reverting the Notion-like theme to an older editorial look.
 
 ## Assigned issue
 
@@ -29,7 +36,7 @@ You are the **implementer** — implement **issue #{{ISSUE_NUMBER}}** on this br
 ## Workflow
 
 1. **Explore** — read the issue, parent PRD (#41) if referenced, `CONTEXT.md`, and relevant ADRs. Read existing client and backend source before writing code.
-2. **Plan** — keep the change scoped to this issue's acceptance criteria only. Apply **`$frontend-design`** before implementing UI.
+2. **Plan** — keep the change scoped to this issue's acceptance criteria only. Read `client/src/app/notion.css` and neighboring pages first; apply **`$frontend-design`** within the existing Notion-inspired shell.
 3. **Execute** — use red-green-refactor where tests apply: failing test first, then implementation.
 4. **Verify** — run all of the following before committing; fix failures before proceeding:
    - `uv run pytest`
@@ -45,7 +52,7 @@ You are the **implementer** — implement **issue #{{ISSUE_NUMBER}}** on this br
 
 - Work on **issue #{{ISSUE_NUMBER}} only** in this session.
 - Use domain language from `CONTEXT.md` (Rule, not test; Policy Version, not ruleset).
-- Follow **`$frontend-design`** for every page, component, and layout change.
+- Follow **`$frontend-design`** for every page, component, and layout change — extend the Notion-inspired theme; do not replace global styles or shell primitives.
 - Do not expand scope beyond the current issue.
 - Do **not** push, open PRs, close issues, or edit issue labels — Sandcastle handles those steps.
 - If blocked, comment on the issue explaining why and output `<promise>COMPLETE</promise>` without committing. Sandcastle will return the issue to `ready-for-agent`.

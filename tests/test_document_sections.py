@@ -6,15 +6,14 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base, DocumentVersionRecord
-from policy_pipeline.documents import (
+from policy_pipeline.policy_documents.citations import (
     CitationMatchKind,
-    DocumentQualityGateRejectedError,
-    create_document_version,
-    list_document_sections,
     resolve_citation_anchor,
     resolve_citation_anchor_with_fallback,
 )
+from policy_pipeline.policy_documents.parsing import DocumentQualityGateRejectedError
+from policy_pipeline.policy_documents.service import create_document_version, list_document_sections
+from policy_pipeline.shared.database import Base, DocumentVersionRecord
 
 
 def _make_pdf_bytes(lines: list[tuple[str, int]]) -> bytes:

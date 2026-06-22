@@ -272,6 +272,31 @@ const markIssuePrOpen = (issueNumber: number): void => {
 	]);
 };
 
+const formatFailureReason = (reason: unknown): string => {
+	if (reason instanceof Error) {
+		return reason.message.trim() || reason.name;
+	}
+	if (typeof reason === "string") {
+		return reason.trim();
+	}
+	try {
+		return JSON.stringify(reason);
+	} catch {
+		return String(reason);
+	}
+};
+
+const truncateForComment = (text: string, maxLength = 4000): string => {
+	const trimmed = text.trim();
+	if (!trimmed) {
+		return "(no output)";
+	}
+	if (trimmed.length <= maxLength) {
+		return trimmed;
+	}
+	return `${trimmed.slice(0, maxLength)}\n\n… (truncated)`;
+};
+
 const releaseIssueToBacklog = (
 	issueNumber: number,
 	comment: string,
@@ -467,11 +492,15 @@ async function processIssue({ issue, branch }: ClaimedIssue): Promise<void> {
 
 		const issueNumber =
 			extractIssueNumber(sandbox.worktreePath) ?? issue.number;
+		const verifyOutput = truncateForComment(
+			[verify.stdout, verify.stderr].filter(Boolean).join("\n"),
+		);
+		const verifySummary = clientIssue
+			? "Sandcastle verification failed after review (`pytest` / `ruff` / `client:build`)."
+			: "Sandcastle verification failed after review (`pytest` / `ruff`).";
 		releaseIssueToBacklog(
 			issueNumber,
-			clientIssue
-				? "Sandcastle verification failed after review (`pytest` / `ruff` / `client:build`). Returned issue to `ready-for-agent` for retry."
-				: "Sandcastle verification failed after review (`pytest` / `ruff`). Returned issue to `ready-for-agent` for retry.",
+			`${verifySummary} Returned issue to \`${LABEL_READY}\` for retry.\n\n**Reason:** exit code ${verify.exitCode}\n\n<details><summary>Verification output</summary>\n\n\`\`\`\n${verifyOutput}\n\`\`\`\n</details>`,
 		);
 		console.log(`Released issue #${issueNumber} back to ${LABEL_READY}.`);
 		return;
@@ -521,9 +550,10 @@ if (issues.length === 0) {
 			console.error(
 				`Issue #${issue.number} (${branch}) failed: ${outcome.reason}`,
 			);
+			const reason = formatFailureReason(outcome.reason);
 			releaseIssueToBacklog(
 				issue.number,
-				`Sandcastle pipeline failed unexpectedly. Returned issue to \`${LABEL_READY}\` for retry.`,
+				`Sandcastle pipeline failed unexpectedly on branch \`${branch}\`. Returned issue to \`${LABEL_READY}\` for retry.\n\n**Reason:** ${reason}`,
 			);
 		}
 	}

@@ -8,11 +8,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base
-from policy_pipeline.extraction_registry import save_model_configuration, save_prompt_template
+from policy_pipeline.extraction.registry import save_model_configuration, save_prompt_template
 from policy_pipeline.main import create_app
-from policy_pipeline.rule_store import create_rule
-from policy_pipeline.rules import (
+from policy_pipeline.rules.models import (
     Applicability,
     Citation,
     EnforceabilityClass,
@@ -23,6 +21,8 @@ from policy_pipeline.rules import (
     RuleOriginType,
     Scope,
 )
+from policy_pipeline.rules.store import create_rule
+from policy_pipeline.shared.database import Base
 
 
 def _configure_local_auth(

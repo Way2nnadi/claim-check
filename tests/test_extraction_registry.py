@@ -5,20 +5,20 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import (
-    Base,
-    DocumentVersionRecord,
-    ExtractionRunRecord,
-    ModelConfigurationRecord,
-    PromptTemplateRecord,
-)
-from policy_pipeline.extraction_registry import (
+from policy_pipeline.extraction.registry import (
     RegistryRecordInUseError,
     create_extraction_run,
     get_model_configuration,
     get_prompt_template,
     save_model_configuration,
     save_prompt_template,
+)
+from policy_pipeline.shared.database import (
+    Base,
+    DocumentVersionRecord,
+    ExtractionRunRecord,
+    ModelConfigurationRecord,
+    PromptTemplateRecord,
 )
 
 

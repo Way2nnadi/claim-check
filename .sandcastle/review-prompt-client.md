@@ -30,7 +30,7 @@ Read the issue referenced in the commit message (`agent: #<N> ...`). If present,
 4. **Scope** — no unrelated changes or scope creep beyond the issue?
 5. **Tests** — new/changed behavior has meaningful tests; run `uv run pytest` and `uv run ruff check .`
 6. **Client build** — run `npm ci --prefix client` (when `client/` exists) and `npm run client:build`
-7. **Design quality** — UI follows **`$frontend-design`**: distinctive typography, cohesive theme, intentional layout; not generic AI aesthetics
+7. **Design quality** — UI extends the Notion-inspired visual language (`client/src/app/notion.css`, shell layout, database views); follows **`$frontend-design`** within that system; does not revert or override the established theme; not generic AI aesthetics
 8. **RBAC** — write actions hidden or disabled for roles that lack permission
 9. **Security** — no secrets committed, no token leakage in logs, audit-sensitive paths handled carefully
 

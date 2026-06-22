@@ -5,13 +5,13 @@ import json
 import httpx
 import pytest
 
-from policy_pipeline.config import Settings
-from policy_pipeline.extraction_registry import ModelConfiguration, PromptTemplate
-from policy_pipeline.llm_clients import (
+from policy_pipeline.extraction.llm_clients import (
     HostedEndpointDisabledError,
     OpenAICompatibleLLMClient,
     build_llm_client,
 )
+from policy_pipeline.extraction.registry import ModelConfiguration, PromptTemplate
+from policy_pipeline.shared.config import Settings
 
 
 def _prompt_template() -> PromptTemplate:

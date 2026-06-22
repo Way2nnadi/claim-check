@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ExpenseReportsPage from "./ExpenseReportsPage";
-import type { AuthenticatedPrincipal } from "./types";
+import type { AuthenticatedPrincipal } from "./shared/auth/types";
 
 function jsonResponse(payload: unknown) {
   return Promise.resolve({

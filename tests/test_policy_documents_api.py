@@ -9,8 +9,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base
 from policy_pipeline.main import create_app
+from policy_pipeline.shared.database import Base
 
 
 def _configure_local_auth(
@@ -270,6 +270,8 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
 
         assert upload_response.status_code == 201
         payload = upload_response.json()
+        created_at = payload.pop("created_at")
+        assert created_at
 
         access_response = await client.get(
             f"/policy-documents/expense-policy/versions/{payload['document_version_id']}",

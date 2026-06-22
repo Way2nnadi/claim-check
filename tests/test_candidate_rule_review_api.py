@@ -5,10 +5,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base, RuleRecord
 from policy_pipeline.main import create_app
-from policy_pipeline.rule_store import create_rule
-from policy_pipeline.rules import (
+from policy_pipeline.rules.models import (
     Applicability,
     CandidateRule,
     Citation,
@@ -22,6 +20,8 @@ from policy_pipeline.rules import (
     RuleOriginType,
     Scope,
 )
+from policy_pipeline.rules.store import create_rule
+from policy_pipeline.shared.database import Base, RuleRecord
 
 
 def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:

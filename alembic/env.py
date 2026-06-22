@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool, text
 
 from alembic import context
-from policy_pipeline.config import get_settings
+from policy_pipeline.shared.config import get_settings
 
 config = context.config
 

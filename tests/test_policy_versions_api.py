@@ -5,10 +5,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base, PolicyVersionRecord, RuleRecord
 from policy_pipeline.main import create_app
-from policy_pipeline.rule_store import create_rule
-from policy_pipeline.rules import (
+from policy_pipeline.rules.models import (
     Applicability,
     CandidateRule,
     Citation,
@@ -21,6 +19,8 @@ from policy_pipeline.rules import (
     RuleOriginType,
     Scope,
 )
+from policy_pipeline.rules.store import create_rule
+from policy_pipeline.shared.database import Base, PolicyVersionRecord, RuleRecord
 
 
 def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
@@ -514,3 +514,35 @@ async def test_post_publish_candidate_rule_mutation_attempts_are_rejected(
 
     assert stored_rule is not None
     assert stored_rule.payload["lifecycle_state"] == "published"
+
+
+@pytest.mark.anyio
+async def test_publish_policy_version_without_approved_rules_returns_422(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        publish_response = await client.post(
+            "/policy-versions",
+            headers={"Authorization": "Bearer approver-token"},
+            json={
+                "policy_version_id": "policy-empty",
+                "change_summary": "Attempt to publish with no approved Rules.",
+            },
+        )
+
+    assert publish_response.status_code == 422
+    assert publish_response.json() == {
+        "detail": "Policy Version requires at least one approved Rule.",
+    }

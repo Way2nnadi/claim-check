@@ -6,13 +6,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from policy_pipeline.config import Settings
-from policy_pipeline.database import Base, ExtractionRunRecord
-from policy_pipeline.documents import PDF_CONTENT_TYPE, create_document_version
-from policy_pipeline.extraction_registry import save_model_configuration, save_prompt_template
-from policy_pipeline.extraction_runs import execute_extraction_run
-from policy_pipeline.llm_clients import HostedEndpointDisabledError
-from policy_pipeline.qa_retrieval import SECTION_EMBEDDING_DIMENSION
+from policy_pipeline.extraction.llm_clients import HostedEndpointDisabledError
+from policy_pipeline.extraction.qa_retrieval import SECTION_EMBEDDING_DIMENSION
+from policy_pipeline.extraction.registry import save_model_configuration, save_prompt_template
+from policy_pipeline.extraction.runs import execute_extraction_run
+from policy_pipeline.policy_documents.parsing import PDF_CONTENT_TYPE
+from policy_pipeline.policy_documents.service import create_document_version
+from policy_pipeline.shared.config import Settings
+from policy_pipeline.shared.database import Base, ExtractionRunRecord
 from tests.test_document_sections import _make_pdf_bytes
 
 

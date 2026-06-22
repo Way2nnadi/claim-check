@@ -1,0 +1,7 @@
+# Custom in-process Compliance Evaluator mapped to the Rule schema (not OPA/Rego for v1)
+
+Downstream expense compliance runs against a **Compiled Rule Set** produced from an approved **Policy Version**. v1 implements a custom, in-process **Compliance Evaluator** that executes directly against the existing Rule schema (`RuleCondition`, `Applicability`, `Scope`, `RuleException`) rather than translating Rules into OPA/Rego and calling an external policy engine.
+
+We chose this over OPA/Rego because the Rule schema is already the product's source of truth: a 1:1 evaluator preserves audit explainability (which Rule, which Citation, which threshold fired) without a Rego translation layer that could drift from approved Rules. In-process execution keeps private/offline deployments simple — no additional stateful service — and aligns with ADR-0001: evaluation is fully deterministic; the LLM never decides pass, violation, or review outcomes. Per ADR-0003, only `enforceable` Rules produce machine pass/violation results; `guidance` and `subjective` Rules that match an expense's scope route to `needs_review`, and **Exception** evidence gating can yield `missing_evidence` when required fields are absent.
+
+The trade-off is that we own evaluator semantics, precedence, and test coverage ourselves rather than inheriting OPA's policy language and tooling. OPA remains a plausible future option if Rule complexity outgrows a direct schema executor, but v1 optimizes for schema fidelity, reproducibility, and operational simplicity over policy-engine generality.

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from policy_pipeline.rules import (
+from policy_pipeline.rules.models import (
     AggregationPeriod,
     EnforceabilityClass,
     LifecycleState,

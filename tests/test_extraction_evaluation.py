@@ -6,24 +6,21 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from policy_pipeline.database import Base
-from policy_pipeline.documents import (
-    PDF_CONTENT_TYPE,
-    CitationAnchor,
-    create_document_version,
-    resolve_citation_anchor,
-)
-from policy_pipeline.extraction_evaluation import (
+from policy_pipeline.extraction.evaluation import (
     ExpectedRule,
     GoldenCorpusCaseEvaluation,
     evaluate_golden_corpus,
 )
-from policy_pipeline.extraction_registry import save_model_configuration, save_prompt_template
-from policy_pipeline.extraction_runs import (
+from policy_pipeline.extraction.registry import save_model_configuration, save_prompt_template
+from policy_pipeline.extraction.runs import (
     StructuredOutputRejectedError,
     execute_extraction_run,
 )
-from policy_pipeline.rules import Citation
+from policy_pipeline.policy_documents.citations import CitationAnchor, resolve_citation_anchor
+from policy_pipeline.policy_documents.parsing import PDF_CONTENT_TYPE
+from policy_pipeline.policy_documents.service import create_document_version
+from policy_pipeline.rules.models import Citation
+from policy_pipeline.shared.database import Base
 from tests.golden_corpus import GOLDEN_CORPUS_CASES, GoldenCorpusCase
 from tests.test_document_sections import _make_pdf_bytes
 

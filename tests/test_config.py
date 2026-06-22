@@ -1,4 +1,4 @@
-from policy_pipeline.config import Settings, get_settings
+from policy_pipeline.shared.config import Settings, get_settings
 
 
 def test_settings_use_local_defaults() -> None:
@@ -13,6 +13,7 @@ def test_settings_use_local_defaults() -> None:
     assert settings.llm_api_key is None
     assert settings.llm_hosted_endpoints_enabled is True
     assert settings.llm_request_timeout_seconds == 30.0
+    assert settings.cors_allowed_origins == ("http://127.0.0.1:5173",)
     assert settings.is_local_auth_enabled is True
 
 
