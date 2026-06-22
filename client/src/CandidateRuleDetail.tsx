@@ -8,6 +8,12 @@ import {
   rejectCandidateRule,
   updateCandidateRule,
 } from "./api";
+import CandidateRuleDecisionModal from "./CandidateRuleDecisionModal";
+import {
+  approvalBlockersForRule,
+  canEditCandidateRules,
+  canResolveCandidateRule,
+} from "./candidateRuleDecisions";
 import {
   describeCandidateRuleError,
   formatEnforceabilityClass,
@@ -18,7 +24,6 @@ import {
   qaFlagDomain,
 } from "./candidateRuleFormat";
 import { formatDocumentTitle } from "./documentFormat";
-import { hasAnyRole } from "./permissions";
 import SectionBrowserDrawer from "./SectionBrowserDrawer";
 import SearchablePicker from "./SearchablePicker";
 import type {
@@ -98,10 +103,6 @@ interface ReviewFieldProps {
   description?: string;
   className?: string;
 }
-
-const EDITOR_ROLES = ["admin", "approver"] as const;
-const QUEUE_LIFECYCLE_STATES = new Set(["extracted", "in_review"]);
-const APPROVAL_BLOCKING_QA_CODES = new Set(["unresolvable_citation"]);
 
 const ENFORCEABILITY_OPTIONS: readonly EnforceabilityClass[] = [
   "enforceable",
@@ -370,35 +371,13 @@ function countDifferences(review: CandidateRuleReview, draft: RuleDraft): number
   return count;
 }
 
-function approvalBlockersFor(review: CandidateRuleReview, draft: RuleDraft): string[] {
-  const blockers = new Set<string>();
-  const normalizedStatement = normalizeStatement(draft.statement);
-  const condition = buildConditionFromDraft(draft.condition);
-  const currentCitation = review.current_rule.citation;
-
-  if (normalizedStatement.length === 0) {
-    blockers.add("Add a Rule statement before approval.");
-  }
-
-  if (draft.enforceability_class === "enforceable" && condition === null) {
-    blockers.add("Complete the machine-checkable condition before approval.");
-  }
-
-  if (draft.enforceability_class !== "enforceable" && condition !== null) {
-    blockers.add("Remove the machine-checkable condition before approval.");
-  }
-
-  if (currentCitation === null) {
-    blockers.add("Resolve the Citation issue before approving this Candidate Rule.");
-  }
-
-  for (const flag of review.qa_flags) {
-    if (APPROVAL_BLOCKING_QA_CODES.has(flag.code)) {
-      blockers.add("Resolve the Citation issue before approving this Candidate Rule.");
-    }
-  }
-
-  return [...blockers];
+function draftAsRuleValue(draft: RuleDraft, currentRule: CandidateRuleValue): CandidateRuleValue {
+  return {
+    ...currentRule,
+    statement: draft.statement,
+    enforceability_class: draft.enforceability_class,
+    condition: buildConditionFromDraft(draft.condition),
+  };
 }
 
 function decisionBlockersFor(unsavedChangeCount: number): string[] {
@@ -406,9 +385,7 @@ function decisionBlockersFor(unsavedChangeCount: number): string[] {
     return [];
   }
 
-  return [
-    "Save Candidate Rule edits before approving or rejecting so the decision uses the current reviewed values.",
-  ];
+  return ["Save your edits first."];
 }
 
 function normalizeStatement(value: string): string {
@@ -721,7 +698,7 @@ export default function CandidateRuleDetail({
   const [showFullSection, setShowFullSection] = useState(false);
   const sourceBodyRef = useRef<HTMLElement | null>(null);
 
-  const canEdit = hasAnyRole(principal, EDITOR_ROLES);
+  const canEdit = canEditCandidateRules(principal);
 
   const loadReview = useCallback(async (): Promise<void> => {
     setStatus("loading");
@@ -802,7 +779,9 @@ export default function CandidateRuleDetail({
   const viewingCitedSection =
     Boolean(citation && selectedSection && selectedSection.section_id === citation.section_id);
   const approvalBlockers =
-    review && draft ? approvalBlockersFor(review, draft) : [];
+    review && draft
+      ? approvalBlockersForRule(review, draftAsRuleValue(draft, review.current_rule))
+      : [];
   const decisionBlockers = decisionBlockersFor(unsavedChangeCount);
 
   function clearFeedback(): void {
@@ -871,9 +850,7 @@ export default function CandidateRuleDetail({
     const trimmedComment = decisionComment.trim();
     if (!trimmedComment) {
       setDecisionError(
-        decisionMode === "approve"
-          ? "Enter approval rationale before moving this Candidate Rule into the Structured Policy Store."
-          : "Enter a rejection reason before removing this Candidate Rule from the review queue.",
+        decisionMode === "approve" ? "Rationale is required." : "Reason is required.",
       );
       return;
     }
@@ -898,11 +875,7 @@ export default function CandidateRuleDetail({
       setReview(updatedReview);
       setDraft(createRuleDraft(updatedReview.current_rule));
       onReviewChange?.(updatedReview);
-      setSaveMessage(
-        decisionMode === "approve"
-          ? "Candidate Rule approved."
-          : "Candidate Rule rejected.",
-      );
+      setSaveMessage(decisionMode === "approve" ? "Approved." : "Rejected.");
       const outcome = decisionMode === "approve" ? "approved" : "rejected";
       closeDecisionModal();
       onReviewResolved?.(candidateRuleId, outcome);
@@ -967,8 +940,7 @@ export default function CandidateRuleDetail({
   const lifecycleClass = lifecycleStateClassName(review.lifecycle_state);
   const extractedCondition = review.extracted_rule.condition;
   const extractedApplicability = review.extracted_rule.applicability;
-  const canResolve =
-    canEdit && QUEUE_LIFECYCLE_STATES.has(review.lifecycle_state);
+  const canResolve = canResolveCandidateRule(review, canEdit);
   const saveDisabled =
     !canEdit || isSaving || isResolving || unsavedChangeCount === 0;
   const approveDisabled =
@@ -1404,9 +1376,7 @@ export default function CandidateRuleDetail({
               >
                 <div className="review-approval-blockers-head">
                   <span className="review-save-kicker">Decision blockers</span>
-                  <p className="review-save-note">
-                    Persist reviewed values before recording an approval or rejection.
-                  </p>
+                  <p className="review-save-note">Save edits first.</p>
                 </div>
                 <ul className="review-approval-blockers-list">
                   {decisionBlockers.map((blocker) => (
@@ -1425,9 +1395,7 @@ export default function CandidateRuleDetail({
                   {canEdit ? "Approver access" : "Viewer access"}
                 </span>
                 <p className="review-save-note">
-                  {canEdit
-                    ? "Saving preserves the extracted Rule, while approve and reject record an explicit decision for the current Candidate Rule."
-                    : "Viewer role can inspect extracted and current values but cannot save or decide Candidate Rules."}
+                  {canEdit ? "Save edits before deciding." : "Read-only access."}
                 </p>
               </div>
               <div className="review-save-actions">
@@ -1437,7 +1405,7 @@ export default function CandidateRuleDetail({
                   disabled={approveDisabled}
                   onClick={() => openDecisionModal("approve")}
                 >
-                  Approve Candidate Rule
+                  Approve
                 </button>
                 <button
                   type="button"
@@ -1445,7 +1413,7 @@ export default function CandidateRuleDetail({
                   disabled={rejectDisabled}
                   onClick={() => openDecisionModal("reject")}
                 >
-                  Reject Candidate Rule
+                  Reject
                 </button>
                 <button type="submit" className="review-save-button" disabled={saveDisabled}>
                   {isSaving ? "Saving…" : "Save Candidate Rule"}
@@ -1508,92 +1476,20 @@ export default function CandidateRuleDetail({
       </div>
 
       {decisionMode ? (
-        <div className="review-decision-backdrop" role="presentation">
-          <div
-            className="review-decision-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label={
-              decisionMode === "approve"
-                ? "Approve Candidate Rule"
-                : "Reject Candidate Rule"
+        <CandidateRuleDecisionModal
+          mode={decisionMode}
+          isResolving={isResolving}
+          comment={decisionComment}
+          error={decisionError}
+          onCommentChange={(value) => {
+            setDecisionComment(value);
+            if (decisionError !== null) {
+              setDecisionError(null);
             }
-          >
-            <div className="review-decision-head">
-              <span className="review-save-kicker">
-                {decisionMode === "approve" ? "Approval record" : "Rejection record"}
-              </span>
-              <h4>
-                {decisionMode === "approve"
-                  ? "Approve Candidate Rule"
-                  : "Reject Candidate Rule"}
-              </h4>
-              <p>
-                {decisionMode === "approve"
-                  ? "Capture the rationale that justifies publishing this Candidate Rule into the Structured Policy Store."
-                  : "Capture why this Candidate Rule should leave the current filtered queue."}
-              </p>
-            </div>
-
-            <label
-              className="review-decision-field"
-              htmlFor={
-                decisionMode === "approve"
-                  ? "candidate-rule-approval-rationale"
-                  : "candidate-rule-rejection-reason"
-              }
-            >
-              {decisionMode === "approve" ? "Approval rationale" : "Rejection reason"}
-              <textarea
-                id={
-                  decisionMode === "approve"
-                    ? "candidate-rule-approval-rationale"
-                    : "candidate-rule-rejection-reason"
-                }
-                value={decisionComment}
-                rows={4}
-                disabled={isResolving}
-                onChange={(event) => {
-                  setDecisionComment(event.target.value);
-                  if (decisionError !== null) {
-                    setDecisionError(null);
-                  }
-                }}
-              />
-            </label>
-
-            {decisionError ? <p className="error-banner">{decisionError}</p> : null}
-
-            <div className="review-decision-actions">
-              <button
-                type="button"
-                className="review-secondary-button"
-                disabled={isResolving}
-                onClick={closeDecisionModal}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={
-                  decisionMode === "approve"
-                    ? "review-save-button"
-                    : "review-save-button review-danger-button"
-                }
-                disabled={isResolving}
-                onClick={() => void handleResolveReview()}
-              >
-                {isResolving
-                  ? decisionMode === "approve"
-                    ? "Approving…"
-                    : "Rejecting…"
-                  : decisionMode === "approve"
-                    ? "Confirm approval"
-                    : "Confirm rejection"}
-              </button>
-            </div>
-          </div>
-        </div>
+          }}
+          onConfirm={() => void handleResolveReview()}
+          onCancel={closeDecisionModal}
+        />
       ) : null}
     </div>
   );

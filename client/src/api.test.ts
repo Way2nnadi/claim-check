@@ -222,6 +222,25 @@ describe("apiRequest", () => {
     );
   });
 
+  it("builds audit event query parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchAuditEvents } = await import("./api");
+    await fetchAuditEvents({
+      entityType: "candidate_rule",
+      entityId: "rule-123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/audit-events?entity_type=candidate_rule&entity_id=rule-123",
+      expect.any(Object),
+    );
+  });
+
   it("patches candidate rule review updates with JSON bodies", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

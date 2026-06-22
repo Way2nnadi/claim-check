@@ -292,7 +292,8 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
     second_citation = response_body["candidate_rules"][1]["citation"]
     assert first_citation["end_char"] > first_citation["start_char"]
     assert second_citation["end_char"] > second_citation["start_char"]
-    assert audit_response.json() == {
+    audit_payload = audit_response.json()
+    assert audit_payload == {
         "items": [
             {
                 "action": "extraction_run.created",
@@ -310,6 +311,7 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
                     "attempt_count": 1,
                     "candidate_rule_count": 2,
                 },
+                "occurred_at": audit_payload["items"][0]["occurred_at"],
             }
         ]
     }

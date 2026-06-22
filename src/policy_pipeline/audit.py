@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -15,6 +16,7 @@ class AuditEventItem(BaseModel):
     actor_roles: list[str]
     entity_type: str
     entity_id: str
+    occurred_at: str
     payload: dict[str, Any]
 
 
@@ -70,7 +72,16 @@ def list_audit_events(
             actor_roles=item.actor_roles,
             entity_type=item.entity_type,
             entity_id=item.entity_id,
+            occurred_at=_serialize_datetime(item.occurred_at),
             payload=item.payload,
         )
         for item in items
     ]
+
+
+def _serialize_datetime(value: datetime) -> str:
+    if value.tzinfo is None:
+        normalized = value.replace(tzinfo=UTC)
+    else:
+        normalized = value.astimezone(UTC)
+    return normalized.isoformat().replace("+00:00", "Z")

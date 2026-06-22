@@ -318,7 +318,8 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
     )
 
     assert audit_response.status_code == 200
-    assert audit_response.json() == {
+    audit_payload = audit_response.json()
+    assert audit_payload == {
         "items": [
             {
                 "action": "document_version.uploaded",
@@ -335,6 +336,7 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
                     "retention_until": None,
                     "retention_reason": None,
                 },
+                "occurred_at": audit_payload["items"][0]["occurred_at"],
             },
             {
                 "action": "document_version.accessed",
@@ -346,6 +348,7 @@ async def test_admin_uploads_pdf_document_version_and_viewer_access_is_audited(
                     "document_id": "expense-policy",
                     "filename": "expense-policy.pdf",
                 },
+                "occurred_at": audit_payload["items"][1]["occurred_at"],
             },
         ]
     }
@@ -824,7 +827,8 @@ async def test_admin_deletes_document_version_after_retention_and_audit_trail_is
     assert not storage_path.exists()
 
     assert audit_response.status_code == 200
-    assert audit_response.json() == {
+    audit_payload = audit_response.json()
+    assert audit_payload == {
         "items": [
             {
                 "action": "document_version.uploaded",
@@ -841,6 +845,7 @@ async def test_admin_deletes_document_version_after_retention_and_audit_trail_is
                     "retention_until": "2000-01-01T00:00:00Z",
                     "retention_reason": "Legacy retention window already satisfied.",
                 },
+                "occurred_at": audit_payload["items"][0]["occurred_at"],
             },
             {
                 "action": "document_version.deleted",
@@ -855,6 +860,7 @@ async def test_admin_deletes_document_version_after_retention_and_audit_trail_is
                     "deleted_at": deleted_version["deleted_at"],
                     "reason": "Retention period satisfied; purge source bytes.",
                 },
+                "occurred_at": audit_payload["items"][1]["occurred_at"],
             },
         ]
     }

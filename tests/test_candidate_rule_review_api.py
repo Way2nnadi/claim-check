@@ -309,7 +309,8 @@ async def test_approver_edits_candidate_rule_without_overwriting_extracted_value
         "per traveler"
     )
     assert audit_response.status_code == 200
-    assert audit_response.json() == {
+    audit_payload = audit_response.json()
+    assert audit_payload == {
         "items": [
             {
                 "action": "candidate_rule.edited",
@@ -321,6 +322,7 @@ async def test_approver_edits_candidate_rule_without_overwriting_extracted_value
                     "fields": ["applicability", "condition", "statement"],
                     "to_lifecycle_state": "in_review",
                 },
+                "occurred_at": audit_payload["items"][0]["occurred_at"],
             }
         ]
     }

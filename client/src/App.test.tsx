@@ -191,6 +191,89 @@ describe("App", () => {
     expect(screen.getByText("Viewer access")).toBeInTheDocument();
   });
 
+  it("opens Audit, loads events, and applies entity filters", async () => {
+    window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/me") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            subject: "viewer-user",
+            roles: ["viewer"],
+            auth_backend: "local",
+          }),
+        });
+      }
+      if (url === "/api/policy-documents") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [] }),
+        });
+      }
+      if (url === "/api/audit-events") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                action: "candidate_rule.approved",
+                actor_subject: "approver-user",
+                actor_roles: ["approver"],
+                entity_type: "candidate_rule",
+                entity_id: "rule-123",
+                occurred_at: "2026-06-22T10:15:00Z",
+                payload: { rationale: "Citation verified by finance." },
+              },
+            ],
+          }),
+        });
+      }
+      if (
+        url ===
+        "/api/audit-events?entity_type=candidate_rule&entity_id=rule-404"
+      ) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [] }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Documents" });
+    await userEvent.click(screen.getByRole("button", { name: /AuditTrace Archive/i }));
+
+    expect(await screen.findByRole("heading", { name: "Audit Event Log" })).toBeInTheDocument();
+    expect(screen.getByText("approver-user")).toBeInTheDocument();
+    expect(screen.getByText("Citation verified by finance.")).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Entity type"), "candidate_rule");
+    await userEvent.clear(screen.getByLabelText("Entity id"));
+    await userEvent.type(screen.getByLabelText("Entity id"), "rule-404");
+    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/audit-events?entity_type=candidate_rule&entity_id=rule-404",
+        expect.any(Object),
+      );
+    });
+    expect(
+      await screen.findByText("No audit events match the current scope."),
+    ).toBeInTheDocument();
+
+    const auditRequest = fetchMock.mock.calls.find(
+      ([url]) =>
+        url === "/api/audit-events?entity_type=candidate_rule&entity_id=rule-404",
+    )?.[1];
+    expect(new Headers(auditRequest?.headers).get("Authorization")).toBe(
+      "Bearer viewer-token",
+    );
+  });
+
   it("clears the token and returns to sign-in when the user signs out", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
     vi.stubGlobal(

@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
+	approveCandidateRule,
 	approveCandidateRulesBulk,
+	fetchCandidateRule,
 	fetchCandidateRules,
 	fetchExtractionRuns,
 	fetchPolicyDocuments,
+	rejectCandidateRule,
 } from "./api";
+import CandidateRuleDecisionModal from "./CandidateRuleDecisionModal";
 import CandidateRuleDetail from "./CandidateRuleDetail";
 import CandidateRuleLedger from "./CandidateRuleLedger";
+import { describeCandidateRuleError } from "./candidateRuleFormat";
 import {
-	ALL_LIFECYCLE_STATES,
-	LIFECYCLE_TABS,
+	PRIMARY_REVIEW_TABS,
 	REVIEW_QUEUE_LIFECYCLE_STATES,
-	describeCandidateRuleError,
 	filterReviewsForTab,
-	formatLifecycleState,
-	isDefaultCustomSelection,
 	resolveReviewEmptyHint,
 	resolveReviewEmptyMessage,
 	type LifecycleTabId,
@@ -29,7 +30,6 @@ import type {
 	CandidateRuleFilters,
 	CandidateRuleReview,
 	ExtractionRun,
-	LifecycleState,
 	PolicyDocumentSummary,
 } from "./types";
 
@@ -40,6 +40,7 @@ interface CandidateRuleCatalogProps {
 }
 
 type CatalogStatus = "loading" | "ready" | "error";
+type DecisionMode = "approve" | "reject";
 
 type BulkFeedbackTone = "success" | "warning";
 
@@ -82,6 +83,25 @@ function countScopeFilters(filters: CandidateRuleFilters): number {
 	);
 }
 
+function resolveQueueScopeLabel(
+	lifecycleTab: LifecycleTabId,
+	displayedCount: number,
+): string {
+	if (lifecycleTab === "queue") {
+		return `${displayedCount} awaiting review`;
+	}
+	if (lifecycleTab === "flagged") {
+		return `${displayedCount} flagged`;
+	}
+	if (lifecycleTab === "archive") {
+		return `${displayedCount} in archive`;
+	}
+	if (lifecycleTab === "all") {
+		return `${displayedCount} total`;
+	}
+	return `${displayedCount} rule${displayedCount === 1 ? "" : "s"}`;
+}
+
 export default function CandidateRuleCatalog({
 	principal,
 	extractionRunId = null,
@@ -99,9 +119,6 @@ export default function CandidateRuleCatalog({
 		Set<string>
 	>(() => new Set());
 	const [lifecycleTab, setLifecycleTab] = useState<LifecycleTabId>("queue");
-	const [customLifecycleSelection, setCustomLifecycleSelection] = useState<
-		Set<LifecycleState>
-	>(() => new Set(REVIEW_QUEUE_LIFECYCLE_STATES));
 	const [scopeDraft, setScopeDraft] = useState<RuleScopeFilters>({
 		documentId: "",
 		documentVersionId: "",
@@ -113,6 +130,12 @@ export default function CandidateRuleCatalog({
 	const [bulkApprovalError, setBulkApprovalError] = useState<string | null>(null);
 	const [bulkFeedback, setBulkFeedback] = useState<BulkFeedbackState | null>(null);
 	const [isBulkApproving, setIsBulkApproving] = useState(false);
+	const [decisionReview, setDecisionReview] =
+		useState<CandidateRuleReview | null>(null);
+	const [decisionMode, setDecisionMode] = useState<DecisionMode | null>(null);
+	const [decisionComment, setDecisionComment] = useState("");
+	const [decisionError, setDecisionError] = useState<string | null>(null);
+	const [isResolving, setIsResolving] = useState(false);
 
 	const loadDocuments = useCallback(async (): Promise<void> => {
 		try {
@@ -183,14 +206,9 @@ export default function CandidateRuleCatalog({
 		setSelectedCandidateRuleId(null);
 	}, [extractionRunId, loadActiveRun]);
 
-	const customSelection = useMemo(
-		() => [...customLifecycleSelection],
-		[customLifecycleSelection],
-	);
-
 	const displayedReviews = useMemo(
-		() => filterReviewsForTab(reviews, lifecycleTab, customSelection),
-		[customSelection, lifecycleTab, reviews],
+		() => filterReviewsForTab(reviews, lifecycleTab, REVIEW_QUEUE_LIFECYCLE_STATES),
+		[lifecycleTab, reviews],
 	);
 
 	useEffect(() => {
@@ -210,34 +228,15 @@ export default function CandidateRuleCatalog({
 		}
 
 		const counts: Partial<Record<LifecycleTabId, number>> = {};
-		for (const tab of LIFECYCLE_TABS) {
+		for (const tab of PRIMARY_REVIEW_TABS) {
 			counts[tab.id] = filterReviewsForTab(
 				reviews,
 				tab.id,
-				customSelection,
+				REVIEW_QUEUE_LIFECYCLE_STATES,
 			).length;
 		}
 		return counts;
-	}, [customSelection, reviews, rulesStatus]);
-
-	function applyLifecycleTab(tab: LifecycleTabId): void {
-		setSelectedCandidateRuleIds(new Set());
-		setLifecycleTab(tab);
-	}
-
-	function handleCustomLifecycleToggle(state: LifecycleState): void {
-		setCustomLifecycleSelection((current) => {
-			const next = new Set(current);
-			if (next.has(state)) {
-				next.delete(state);
-			} else {
-				next.add(state);
-			}
-			return next;
-		});
-		setSelectedCandidateRuleIds(new Set());
-		setLifecycleTab("custom");
-	}
+	}, [reviews, rulesStatus]);
 
 	function handleScopeSubmit(event: FormEvent<HTMLFormElement>): void {
 		event.preventDefault();
@@ -255,14 +254,80 @@ export default function CandidateRuleCatalog({
 		setAppliedScopeFilters({});
 	}
 
+	function openDecisionModal(
+		review: CandidateRuleReview,
+		mode: DecisionMode,
+	): void {
+		setDecisionReview(review);
+		setDecisionMode(mode);
+		setDecisionComment("");
+		setDecisionError(null);
+	}
+
+	function closeDecisionModal(): void {
+		setDecisionReview(null);
+		setDecisionMode(null);
+		setDecisionComment("");
+		setDecisionError(null);
+	}
+
+	async function handleResolveReview(): Promise<void> {
+		if (decisionReview === null || decisionMode === null || isResolving) {
+			return;
+		}
+
+		const trimmedComment = decisionComment.trim();
+		if (!trimmedComment) {
+			setDecisionError(
+				decisionMode === "approve" ? "Rationale is required." : "Reason is required.",
+			);
+			return;
+		}
+
+		setIsResolving(true);
+		setDecisionError(null);
+
+		try {
+			const candidateRuleId = decisionReview.candidate_rule_id;
+
+			if (decisionMode === "approve") {
+				await approveCandidateRule(candidateRuleId, {
+					rationale: trimmedComment,
+				});
+			} else {
+				await rejectCandidateRule(candidateRuleId, {
+					reason: trimmedComment,
+				});
+			}
+
+			const updatedReview = await fetchCandidateRule(candidateRuleId);
+			setReviews((current) =>
+				current.map((review) =>
+					review.candidate_rule_id === updatedReview.candidate_rule_id
+						? updatedReview
+						: review,
+				),
+			);
+			closeDecisionModal();
+		} catch (error: unknown) {
+			setDecisionError(
+				describeCandidateRuleError(
+					error,
+					decisionMode === "approve"
+						? "Unable to approve Candidate Rule."
+						: "Unable to reject Candidate Rule.",
+				),
+			);
+		} finally {
+			setIsResolving(false);
+		}
+	}
+
 	const scopeFilterCount = countScopeFilters(appliedScopeFilters);
 
 	const scopeActiveInDraft =
 		Boolean(scopeDraft.documentId.trim()) ||
 		Boolean(scopeDraft.documentVersionId.trim());
-
-	const hasNonDefaultLifecycleFilters =
-		lifecycleTab === "custom" && !isDefaultCustomSelection(customSelection);
 
 	const emptyContext = useMemo(
 		() => ({
@@ -271,16 +336,9 @@ export default function CandidateRuleCatalog({
 			displayedReviews,
 			scopeFilterCount,
 			extractionRunId,
-			hasNonDefaultLifecycleFilters,
+			hasNonDefaultLifecycleFilters: false,
 		}),
-		[
-			displayedReviews,
-			extractionRunId,
-			hasNonDefaultLifecycleFilters,
-			lifecycleTab,
-			reviews,
-			scopeFilterCount,
-		],
+		[displayedReviews, extractionRunId, lifecycleTab, reviews, scopeFilterCount],
 	);
 
 	const selectableCandidateRuleIds = useMemo(
@@ -422,9 +480,39 @@ export default function CandidateRuleCatalog({
 		}
 	}
 
+	if (selectedCandidateRuleId) {
+		return (
+			<CandidateRuleDetail
+				candidateRuleId={selectedCandidateRuleId}
+				principal={principal}
+				backLabel="← Queue"
+				onBack={() => setSelectedCandidateRuleId(null)}
+				onReviewChange={(updatedReview: CandidateRuleReview) => {
+					setReviews((current) =>
+						current.map((review) =>
+							review.candidate_rule_id === updatedReview.candidate_rule_id
+								? updatedReview
+								: review,
+						),
+					);
+				}}
+				onReviewResolved={(candidateRuleId: string) => {
+					const currentIndex = displayedReviews.findIndex(
+						(review) => review.candidate_rule_id === candidateRuleId,
+					);
+					const nextCandidateRuleId =
+						currentIndex >= 0
+							? (displayedReviews[currentIndex + 1]?.candidate_rule_id ?? null)
+							: null;
+					setSelectedCandidateRuleId(nextCandidateRuleId);
+				}}
+			/>
+		);
+	}
+
 	return (
 		<div className="catalog-page review-catalog content-enter">
-			<details className="review-scope-panel reveal">
+			<details className="review-scope-panel">
 				<summary>
 					Scope filters
 					{scopeFilterCount > 0 ? (
@@ -475,10 +563,21 @@ export default function CandidateRuleCatalog({
 				</form>
 			</details>
 
-			{scopeFilterCount > 0 || extractionRunId ? (
-				<div className="review-active-scope reveal">
+			{rulesStatus === "loading" ? (
+				<p className="catalog-status">
+					<span className="catalog-status-rule" aria-hidden="true" />
+					Loading Candidate Rules…
+				</p>
+			) : null}
+
+			{rulesStatus === "error" ? (
+				<p className="error-banner">{errorMessage}</p>
+			) : null}
+
+			{rulesStatus === "ready" ? (
+				<>
 					{scopeFilterCount > 0 ? (
-						<p className="review-scope-chips">
+						<p className="catalog-scope">
 							{appliedScopeFilters.documentId ?? null}
 							{appliedScopeFilters.documentId &&
 							appliedScopeFilters.documentVersionId
@@ -487,8 +586,9 @@ export default function CandidateRuleCatalog({
 							{appliedScopeFilters.documentVersionId ?? null}
 						</p>
 					) : null}
+
 					{extractionRunId ? (
-						<p className="review-scope-chips review-run-scope-chip">
+						<p className="catalog-scope review-run-scope-chip">
 							<span>{activeRun?.document_id ?? "Extraction run"}</span>
 							<span aria-hidden="true"> · </span>
 							<code title={extractionRunId}>{shortenId(extractionRunId)}</code>
@@ -503,74 +603,7 @@ export default function CandidateRuleCatalog({
 							) : null}
 						</p>
 					) : null}
-				</div>
-			) : null}
 
-			<div className="review-toolbar reveal">
-				<div
-					className="catalog-tabs"
-					role="tablist"
-					aria-label="Filter by lifecycle state"
-				>
-					{LIFECYCLE_TABS.map((tab) => {
-						const isSelected = lifecycleTab === tab.id;
-						const count = tabCounts[tab.id];
-
-						return (
-							<button
-								key={tab.id}
-								type="button"
-								role="tab"
-								id={`review-lifecycle-tab-${tab.id}`}
-								className={`catalog-tab${isSelected ? " active" : ""}`}
-								data-tab-id={tab.id}
-								aria-selected={isSelected}
-								aria-controls="review-rule-panel"
-								onClick={() => applyLifecycleTab(tab.id)}
-							>
-								<span>{tab.label}</span>
-								{count !== undefined ? (
-									<span className="catalog-tab-count">{count}</span>
-								) : null}
-							</button>
-						);
-					})}
-				</div>
-
-				{lifecycleTab === "custom" ? (
-					<fieldset className="review-lifecycle-custom">
-						<legend>Custom lifecycle</legend>
-						{ALL_LIFECYCLE_STATES.map((state) => (
-							<label key={state} className="review-lifecycle-option">
-								<input
-									type="checkbox"
-									checked={customLifecycleSelection.has(state)}
-									onChange={() => handleCustomLifecycleToggle(state)}
-								/>
-								<span>{formatLifecycleState(state)}</span>
-							</label>
-						))}
-					</fieldset>
-				) : null}
-			</div>
-
-			{rulesStatus === "loading" ? (
-				<p className="catalog-status">
-					<span className="catalog-status-rule" aria-hidden="true" />
-					Loading Candidate Rules…
-				</p>
-			) : null}
-
-			{rulesStatus === "error" ? (
-				<p className="error-banner">{errorMessage}</p>
-			) : null}
-
-			{rulesStatus === "ready" ? (
-				<div
-					id="review-rule-panel"
-					role="tabpanel"
-					aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
-				>
 					<section className="review-bulk-rail reveal">
 						<div className="review-bulk-copy">
 							<span className="review-save-kicker">Bulk approval</span>
@@ -611,73 +644,56 @@ export default function CandidateRuleCatalog({
 						</section>
 					) : null}
 
-					<div className="review-workbench">
-						<div className="review-workbench-ledger">
-							<CandidateRuleLedger
-								reviews={displayedReviews}
-								onOpenReview={(candidateRuleId) =>
-									setSelectedCandidateRuleId(candidateRuleId)
+					<CandidateRuleLedger
+						allReviews={reviews}
+						reviews={displayedReviews}
+						lifecycleTab={lifecycleTab}
+						tabCounts={tabCounts}
+						scopeLabel={resolveQueueScopeLabel(
+							lifecycleTab,
+							displayedReviews.length,
+						)}
+						principal={principal}
+						onLifecycleTabChange={setLifecycleTab}
+						onOpenReview={(candidateRuleId) =>
+							setSelectedCandidateRuleId(candidateRuleId)
+						}
+						onApproveReview={(review) => openDecisionModal(review, "approve")}
+						onRejectReview={(review) => openDecisionModal(review, "reject")}
+						emptyMessage={resolveReviewEmptyMessage(emptyContext)}
+						emptyHint={resolveReviewEmptyHint(emptyContext)}
+						selectedCandidateRuleIds={selectedCandidateRuleIds}
+						selectableCandidateRuleIds={selectableCandidateRuleIds}
+						onToggleCandidateRuleSelection={toggleCandidateRuleSelection}
+						onToggleAllCandidateRuleSelections={
+							toggleAllCandidateRuleSelections
+						}
+					/>
+
+					{decisionMode && decisionReview ? (
+						<CandidateRuleDecisionModal
+							mode={decisionMode}
+							isResolving={isResolving}
+							comment={decisionComment}
+							error={decisionError}
+							onCommentChange={(value) => {
+								setDecisionComment(value);
+								if (decisionError !== null) {
+									setDecisionError(null);
 								}
-								emptyMessage={resolveReviewEmptyMessage(emptyContext)}
-								emptyHint={resolveReviewEmptyHint(emptyContext)}
-								selectedCandidateRuleIds={selectedCandidateRuleIds}
-								selectableCandidateRuleIds={selectableCandidateRuleIds}
-								onToggleCandidateRuleSelection={toggleCandidateRuleSelection}
-								onToggleAllCandidateRuleSelections={
-									toggleAllCandidateRuleSelections
-								}
-							/>
-						</div>
-						<div className="review-workbench-detail">
-							{selectedCandidateRuleId ? (
-								<CandidateRuleDetail
-									candidateRuleId={selectedCandidateRuleId}
-									principal={principal}
-									backLabel="Clear selection"
-									onBack={() => setSelectedCandidateRuleId(null)}
-									onReviewChange={(updatedReview) => {
-										setReviews((current) =>
-											current.map((review) =>
-												review.candidate_rule_id ===
-												updatedReview.candidate_rule_id
-													? updatedReview
-													: review,
-											),
-										);
-									}}
-									onReviewResolved={(candidateRuleId) => {
-										const currentIndex = displayedReviews.findIndex(
-											(review) =>
-												review.candidate_rule_id === candidateRuleId,
-										);
-										const nextCandidateRuleId =
-											currentIndex >= 0
-												? displayedReviews[currentIndex + 1]
-														?.candidate_rule_id ?? null
-												: null;
-										setSelectedCandidateRuleId(nextCandidateRuleId);
-									}}
-								/>
-							) : (
-								<div className="review-selection-empty reveal">
-									<span className="folio">Decision desk</span>
-									<p>
-										Choose a Candidate Rule to inspect source, QA flags, and
-										review deltas.
-									</p>
-								</div>
-							)}
-						</div>
-					</div>
-				</div>
+							}}
+							onConfirm={() => void handleResolveReview()}
+							onCancel={closeDecisionModal}
+						/>
+					) : null}
+				</>
 			) : null}
 
 			{bulkApprovalOpen ? (
 				<div className="review-decision-backdrop" role="presentation">
-					<div
+					<dialog
+						open
 						className="review-decision-dialog"
-						role="dialog"
-						aria-modal="true"
 						aria-label="Bulk approve Candidate Rules"
 					>
 						<div className="review-decision-head">
@@ -727,7 +743,7 @@ export default function CandidateRuleCatalog({
 									: "Confirm bulk approval"}
 							</button>
 						</div>
-					</div>
+					</dialog>
 				</div>
 			) : null}
 		</div>

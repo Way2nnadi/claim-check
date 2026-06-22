@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, createManualRule } from "./api";
 import { formatEnforceabilityClass } from "./candidateRuleFormat";
 import { hasAnyRole } from "./permissions";
@@ -7,6 +7,7 @@ import {
   summarizeApplicability,
   summarizeRuleScope,
 } from "./policyVersionFormat";
+import SearchablePicker from "./SearchablePicker";
 import type {
   AggregationPeriod,
   Applicability,
@@ -89,15 +90,42 @@ const AGGREGATION_PERIOD_OPTIONS: readonly AggregationPeriod[] = [
   "per_attendee",
 ];
 
+function formatAggregationPeriod(value: AggregationPeriod | ""): string {
+  if (!value) {
+    return "Not set";
+  }
+  return value.replaceAll("_", " ");
+}
+
+const OPERATOR_OPTIONS = ["<=", "<", "==", ">=", ">"] as const;
+
+const ENFORCEABILITY_PICKER_OPTIONS = ENFORCEABILITY_OPTIONS.map((value) => ({
+  value,
+  label: formatEnforceabilityClass(value),
+}));
+
+const AGGREGATION_PERIOD_PICKER_OPTIONS = [
+  { value: "", label: "Not set" },
+  ...AGGREGATION_PERIOD_OPTIONS.map((value) => ({
+    value,
+    label: formatAggregationPeriod(value),
+  })),
+];
+
+const OPERATOR_PICKER_OPTIONS = OPERATOR_OPTIONS.map((value) => ({
+  value,
+  label: value,
+}));
+
 const SCOPE_FIELDS: ReadonlyArray<{
   key: keyof ScopeDraft;
   label: string;
   placeholder: string;
 }> = [
-  { key: "country", label: "Country", placeholder: "US" },
-  { key: "expense_category", label: "Expense category", placeholder: "meals" },
-  { key: "travel_type", label: "Travel type", placeholder: "domestic" },
-  { key: "employee_group", label: "Employee group", placeholder: "employees" },
+  { key: "country", label: "Country", placeholder: "Country" },
+  { key: "expense_category", label: "Expense category", placeholder: "Expense category" },
+  { key: "travel_type", label: "Travel type", placeholder: "Travel type" },
+  { key: "employee_group", label: "Employee group", placeholder: "Employee group" },
   {
     key: "effective_start_date",
     label: "Effective start",
@@ -109,6 +137,31 @@ const SCOPE_FIELDS: ReadonlyArray<{
     placeholder: "YYYY-MM-DD",
   },
 ];
+
+interface ManualFieldProps {
+  label: string;
+  inputId: string;
+  error?: string;
+  description?: string;
+  children: ReactNode;
+}
+
+function ManualField({
+  label,
+  inputId,
+  error,
+  description,
+  children,
+}: ManualFieldProps) {
+  return (
+    <div className="review-field">
+      <label htmlFor={inputId}>{label}</label>
+      {children}
+      {error ? <p className="review-field-error">{error}</p> : null}
+      {description ? <p className="review-field-description">{description}</p> : null}
+    </div>
+  );
+}
 
 function createEmptyDraft(): ManualRuleDraft {
   return {
@@ -472,47 +525,91 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
   const previewRule = createdRule;
 
   return (
-    <div className="manual-rules-page content-enter">
-      <section className="manual-rules-hero">
-        <div className="manual-rules-hero-copy">
-          <p className="eyebrow">Manual Override</p>
-          <h3>Author a Rule when policy knowledge exists before the Policy Document catches up.</h3>
-          <p className="manual-rules-lede">
-            Manual Rules enter the Structured Policy Store as approved, human-authored
-            decisions. Rationale is mandatory because Citation may be absent.
+    <div className="review-detail content-enter">
+      <div className="catalog-toolbar">
+        <p className="catalog-scope">
+          Author a rule when policy knowledge exists before the document catches up.
+          Rationale is required; citation and exceptions are optional.
+        </p>
+        <button
+          type="submit"
+          form="manual-rule-form"
+          className="document-command"
+          disabled={!canCreate || isSubmitting}
+        >
+          {isSubmitting ? "Creating…" : "Create Manual Rule"}
+        </button>
+      </div>
+
+      <div className="review-detail-badges">
+        <span className="review-enforceability guidance">Human-authored</span>
+      </div>
+
+      <div className="review-detail-body">
+        {submitError ? (
+          <p className="error-banner" role="alert">
+            {submitError}
           </p>
-          <div className="manual-origin-strip" aria-label="Manual Rule identity">
-            <span className="manual-origin-seal">Human-authored</span>
-            <span className="manual-origin-text">Manual origin · approval-ready</span>
-          </div>
-        </div>
-        <div className="manual-rules-ledger">
-          <p className="manual-rules-ledger-kicker">Authoring perimeter</p>
-          <ul>
-            <li>Only an Approver or admin can create a Manual Rule.</li>
-            <li>Optional Citation fields can anchor the Rule when a source exists.</li>
-            <li>Viewer access remains read-only.</li>
-          </ul>
-        </div>
-      </section>
+        ) : null}
+        {successMessage ? (
+          <p className="review-save-banner" role="status">
+            {successMessage}
+          </p>
+        ) : null}
 
-      <div className="manual-rules-grid">
-        <form className="manual-rules-form" onSubmit={handleSubmit}>
-          <section className="manual-panel">
-            <div className="manual-panel-head">
-              <div>
-                <p className="manual-panel-kicker">Rule Core</p>
-                <h4>Identity, statement, and rationale</h4>
-              </div>
-              {!canCreate ? (
-                <span className="review-detail-readonly-note">Viewer access</span>
-              ) : null}
-            </div>
+        <div className="review-detail-workspace">
+          {previewRule ? (
+            <section className="review-detail-panel reveal" aria-label="Created rule">
+              <h4>Latest result</h4>
+              <dl className="review-detail-grid">
+                <div className="review-detail-span">
+                  <dt>Statement</dt>
+                  <dd>{previewRule.statement}</dd>
+                </div>
+                <div>
+                  <dt>Rule ID</dt>
+                  <dd>{previewRule.rule_id}</dd>
+                </div>
+                <div>
+                  <dt>Scope</dt>
+                  <dd>{summarizeRuleScope(previewRule.scope)}</dd>
+                </div>
+                <div>
+                  <dt>Origin</dt>
+                  <dd>{describeRuleOrigin(previewRule)}</dd>
+                </div>
+                {previewRule.condition ? (
+                  <div className="review-detail-span">
+                    <dt>Condition</dt>
+                    <dd>
+                      <code>
+                        {previewRule.condition.field} {previewRule.condition.operator}{" "}
+                        {previewRule.condition.value}
+                      </code>
+                    </dd>
+                  </div>
+                ) : null}
+                <div>
+                  <dt>Rationale</dt>
+                  <dd>{previewRule.origin.rationale}</dd>
+                </div>
+                <div>
+                  <dt>Applicability</dt>
+                  <dd>{summarizeApplicability(previewRule.applicability)}</dd>
+                </div>
+                <div>
+                  <dt>Citation</dt>
+                  <dd>{previewRule.citation ? previewRule.citation.section_id : "None"}</dd>
+                </div>
+              </dl>
+            </section>
+          ) : null}
 
-            <div className="manual-field-grid manual-field-grid-wide">
-              <label className="manual-field">
-                <span>Rule ID</span>
+          <form id="manual-rule-form" className="review-edit-form" onSubmit={handleSubmit}>
+            <section className="review-detail-panel reveal">
+              <ManualField label="Rule ID" inputId="manual-rule-id" error={validationErrors.rule_id}>
                 <input
+                  id="manual-rule-id"
                   name="rule_id"
                   value={draft.rule_id}
                   onChange={(event) =>
@@ -520,110 +617,110 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                   }
                   placeholder="rule-manual-offsite-dinner-cap"
                   disabled={!canCreate || isSubmitting}
+                  spellCheck={false}
                 />
-                {validationErrors.rule_id ? (
-                  <small className="manual-field-error">{validationErrors.rule_id}</small>
-                ) : null}
-              </label>
+              </ManualField>
 
-              <label className="manual-field">
-                <span>Enforceability class</span>
-                <select
-                  name="enforceability_class"
-                  value={draft.enforceability_class}
+              <ManualField
+                label="Statement"
+                inputId="manual-rule-statement"
+                error={validationErrors.statement}
+              >
+                <textarea
+                  id="manual-rule-statement"
+                  name="statement"
+                  value={draft.statement}
                   onChange={(event) =>
-                    handleEnforceabilityChange(
-                      event.target.value as EnforceabilityClass,
-                    )
+                    setDraft((current) => ({ ...current, statement: event.target.value }))
                   }
+                  rows={4}
+                  placeholder="Team offsites may reimburse dinner up to $120 with director approval."
                   disabled={!canCreate || isSubmitting}
-                >
-                  {ENFORCEABILITY_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {formatEnforceabilityClass(value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+                />
+              </ManualField>
 
-            <label className="manual-field">
-              <span>Statement</span>
-              <textarea
-                name="statement"
-                value={draft.statement}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, statement: event.target.value }))
+              <ManualField
+                label="Rationale"
+                inputId="manual-rule-rationale"
+                error={validationErrors.rationale}
+                description="Explain why this rule is entering the store manually."
+              >
+                <textarea
+                  id="manual-rule-rationale"
+                  name="rationale"
+                  value={draft.rationale}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, rationale: event.target.value }))
+                  }
+                  rows={3}
+                  disabled={!canCreate || isSubmitting}
+                />
+              </ManualField>
+
+              <ManualField
+                label="Enforceability"
+                inputId="manual-rule-enforceability"
+                description={
+                  !isEnforceable
+                    ? "Guidance and subjective rules route to humans instead of machine checks."
+                    : undefined
                 }
-                rows={4}
-                placeholder="Team offsites may reimburse dinner up to $120 with director approval."
-                disabled={!canCreate || isSubmitting}
-              />
-              {validationErrors.statement ? (
-                <small className="manual-field-error">{validationErrors.statement}</small>
-              ) : null}
-            </label>
+              >
+                <SearchablePicker
+                  label="Enforceability"
+                  inputId="manual-rule-enforceability"
+                  hideLabel
+                  value={draft.enforceability_class}
+                  options={ENFORCEABILITY_PICKER_OPTIONS}
+                  placeholder="Select enforceability class"
+                  emptyMessage="No matching classes"
+                  disabled={!canCreate || isSubmitting}
+                  mono
+                  showAllOnOpen
+                  onChange={(nextValue) =>
+                    handleEnforceabilityChange(nextValue as EnforceabilityClass)
+                  }
+                />
+              </ManualField>
+            </section>
 
-            <label className="manual-field">
-              <span>Rationale</span>
-              <textarea
-                name="rationale"
-                value={draft.rationale}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, rationale: event.target.value }))
-                }
-                rows={4}
-                placeholder="Explain why this Rule is entering the Structured Policy Store manually."
-                disabled={!canCreate || isSubmitting}
-              />
-              {validationErrors.rationale ? (
-                <small className="manual-field-error">{validationErrors.rationale}</small>
-              ) : null}
-            </label>
-          </section>
-
-          <section className="manual-panel">
-            <div className="manual-panel-head">
-              <div>
-                <p className="manual-panel-kicker">Scope Map</p>
-                <h4>Where this Rule applies</h4>
+            <section className="review-detail-panel reveal">
+              <h4>Scope</h4>
+              <div className="review-field-grid cols-2">
+                {SCOPE_FIELDS.map((field) => (
+                  <ManualField key={field.key} label={field.label} inputId={`manual-rule-${field.key}`}>
+                    <input
+                      id={`manual-rule-${field.key}`}
+                      name={field.key}
+                      value={draft.scope[field.key]}
+                      onChange={(event) => updateScopeField(field.key, event.target.value)}
+                      placeholder={field.placeholder}
+                      disabled={!canCreate || isSubmitting}
+                      spellCheck={false}
+                    />
+                  </ManualField>
+                ))}
               </div>
-            </div>
+            </section>
 
-            <div className="manual-field-grid">
-              {SCOPE_FIELDS.map((field) => (
-                <label key={field.key} className="manual-field">
-                  <span>{field.label}</span>
-                  <input
-                    name={field.key}
-                    value={draft.scope[field.key]}
-                    onChange={(event) => updateScopeField(field.key, event.target.value)}
-                    placeholder={field.placeholder}
-                    disabled={!canCreate || isSubmitting}
-                  />
-                </label>
-              ))}
-            </div>
-          </section>
-
-          <section className="manual-panel">
-            <div className="manual-panel-head">
-              <div>
-                <p className="manual-panel-kicker">Machine Condition</p>
-                <h4>Condition and Applicability</h4>
-              </div>
+            <section
+              className={`review-detail-panel reveal${isEnforceable ? "" : " is-muted"}`}
+              aria-disabled={!isEnforceable}
+            >
+              <h4>Machine-checkable shape</h4>
               {!isEnforceable ? (
-                <span className="manual-panel-note">
-                  Guidance and subjective Rules route to humans.
-                </span>
+                <p className="review-field-description">
+                  Guidance and subjective rules route to humans instead of machine checks.
+                </p>
               ) : null}
-            </div>
-
-            <div className={`manual-machine-grid${isEnforceable ? "" : " is-muted"}`}>
-              <div className="manual-condition-row">
-                <label className="manual-field">
-                  <span>Condition field</span>
+              <div className="review-field-grid cols-3 review-condition-row">
+                <ManualField
+                  label="Field"
+                  inputId="manual-rule-condition-field"
+                  error={validationErrors.condition_field}
+                >
                   <input
+                    id="manual-rule-condition-field"
                     name="condition_field"
                     value={draft.condition.field}
                     onChange={(event) =>
@@ -634,43 +731,42 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                     }
                     placeholder="meal.amount"
                     disabled={!canCreate || isSubmitting || !isEnforceable}
+                    spellCheck={false}
                   />
-                  {validationErrors.condition_field ? (
-                    <small className="manual-field-error">
-                      {validationErrors.condition_field}
-                    </small>
-                  ) : null}
-                </label>
+                </ManualField>
 
-                <label className="manual-field">
-                  <span>Operator</span>
-                  <select
-                    name="condition_operator"
+                <ManualField
+                  label="Operator"
+                  inputId="manual-rule-condition-operator"
+                  error={validationErrors.condition_operator}
+                >
+                  <SearchablePicker
+                    label="Operator"
+                    inputId="manual-rule-condition-operator"
+                    hideLabel
                     value={draft.condition.operator}
-                    onChange={(event) =>
+                    options={OPERATOR_PICKER_OPTIONS}
+                    placeholder="Select operator"
+                    emptyMessage="No matching operators"
+                    disabled={!canCreate || isSubmitting || !isEnforceable}
+                    mono
+                    showAllOnOpen
+                    onChange={(nextValue) =>
                       setDraft((current) => ({
                         ...current,
-                        condition: { ...current.condition, operator: event.target.value },
+                        condition: { ...current.condition, operator: nextValue },
                       }))
                     }
-                    disabled={!canCreate || isSubmitting || !isEnforceable}
-                  >
-                    {["<=", "<", "==", ">=", ">"].map((operator) => (
-                      <option key={operator} value={operator}>
-                        {operator}
-                      </option>
-                    ))}
-                  </select>
-                  {validationErrors.condition_operator ? (
-                    <small className="manual-field-error">
-                      {validationErrors.condition_operator}
-                    </small>
-                  ) : null}
-                </label>
+                  />
+                </ManualField>
 
-                <label className="manual-field">
-                  <span>Threshold value</span>
+                <ManualField
+                  label="Value"
+                  inputId="manual-rule-condition-value"
+                  error={validationErrors.condition_value}
+                >
                   <input
+                    id="manual-rule-condition-value"
                     name="condition_value"
                     value={draft.condition.value}
                     onChange={(event) =>
@@ -681,49 +777,47 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                     }
                     placeholder="120"
                     disabled={!canCreate || isSubmitting || !isEnforceable}
+                    spellCheck={false}
                   />
-                  {validationErrors.condition_value ? (
-                    <small className="manual-field-error">
-                      {validationErrors.condition_value}
-                    </small>
-                  ) : null}
-                </label>
+                </ManualField>
               </div>
 
-              <div className="manual-field-grid">
-                <label className="manual-field">
-                  <span>Aggregation period</span>
-                  <select
-                    name="aggregation_period"
+              <div className="review-field-grid cols-2 review-applicability-grid">
+                <ManualField
+                  label="Aggregation period"
+                  inputId="manual-rule-aggregation-period"
+                  error={validationErrors.applicability_aggregation_period}
+                >
+                  <SearchablePicker
+                    label="Aggregation period"
+                    inputId="manual-rule-aggregation-period"
+                    hideLabel
                     value={draft.applicability.aggregation_period}
-                    onChange={(event) =>
+                    options={AGGREGATION_PERIOD_PICKER_OPTIONS}
+                    placeholder="Select aggregation period"
+                    emptyMessage="No matching periods"
+                    disabled={!canCreate || isSubmitting || !isEnforceable}
+                    mono
+                    showAllOnOpen
+                    onChange={(nextValue) =>
                       setDraft((current) => ({
                         ...current,
                         applicability: {
                           ...current.applicability,
-                          aggregation_period: event.target.value as AggregationPeriod | "",
+                          aggregation_period: nextValue as AggregationPeriod | "",
                         },
                       }))
                     }
-                    disabled={!canCreate || isSubmitting || !isEnforceable}
-                  >
-                    <option value="">Select period</option>
-                    {AGGREGATION_PERIOD_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option.replaceAll("_", " ")}
-                      </option>
-                    ))}
-                  </select>
-                  {validationErrors.applicability_aggregation_period ? (
-                    <small className="manual-field-error">
-                      {validationErrors.applicability_aggregation_period}
-                    </small>
-                  ) : null}
-                </label>
+                  />
+                </ManualField>
 
-                <label className="manual-field">
-                  <span>Unit</span>
+                <ManualField
+                  label="Unit"
+                  inputId="manual-rule-applicability-unit"
+                  error={validationErrors.applicability_unit}
+                >
                   <input
+                    id="manual-rule-applicability-unit"
                     name="applicability_unit"
                     value={draft.applicability.unit}
                     onChange={(event) =>
@@ -737,17 +831,17 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                     }
                     placeholder="money"
                     disabled={!canCreate || isSubmitting || !isEnforceable}
+                    spellCheck={false}
                   />
-                  {validationErrors.applicability_unit ? (
-                    <small className="manual-field-error">
-                      {validationErrors.applicability_unit}
-                    </small>
-                  ) : null}
-                </label>
+                </ManualField>
 
-                <label className="manual-field">
-                  <span>Currency</span>
+                <ManualField
+                  label="Currency"
+                  inputId="manual-rule-applicability-currency"
+                  description="3-letter ISO code (e.g. USD)."
+                >
                   <input
+                    id="manual-rule-applicability-currency"
                     name="applicability_currency"
                     value={draft.applicability.currency}
                     onChange={(event) =>
@@ -760,13 +854,15 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                       }))
                     }
                     placeholder="USD"
+                    maxLength={3}
                     disabled={!canCreate || isSubmitting || !isEnforceable}
+                    spellCheck={false}
                   />
-                </label>
+                </ManualField>
 
-                <label className="manual-field">
-                  <span>Limit basis</span>
+                <ManualField label="Limit basis" inputId="manual-rule-applicability-limit-basis">
                   <input
+                    id="manual-rule-applicability-limit-basis"
                     name="applicability_limit_basis"
                     value={draft.applicability.limit_basis}
                     onChange={(event) =>
@@ -780,278 +876,203 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                     }
                     placeholder="per employee"
                     disabled={!canCreate || isSubmitting || !isEnforceable}
+                    spellCheck={false}
                   />
-                </label>
+                </ManualField>
               </div>
-            </div>
-          </section>
+            </section>
 
-          <section className="manual-panel">
-            <div className="manual-panel-head">
-              <div>
-                <p className="manual-panel-kicker">Exceptions</p>
-                <h4>Evidence that modifies the Rule outcome</h4>
+            <details className="review-detail-meta reveal">
+              <summary>Exceptions</summary>
+              <div className="review-detail-meta-body">
+                <div className="review-detail-section-head">
+                  <p className="review-detail-note">Evidence that modifies the rule outcome.</p>
+                  <button
+                    type="button"
+                    className="review-secondary-button compact"
+                    onClick={addException}
+                    disabled={!canCreate || isSubmitting}
+                  >
+                    Add exception
+                  </button>
+                </div>
+
+                <div className="review-exceptions">
+                  {draft.exceptions.map((exception, index) => (
+                    <article key={index} className="review-exception-card">
+                      <div className="review-exception-head">
+                        <span className="review-exception-title">Exception {index + 1}</span>
+                        <button
+                          type="button"
+                          className="review-secondary-button compact"
+                          onClick={() => removeException(index)}
+                          disabled={!canCreate || isSubmitting}
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      <ManualField
+                        label={index === 0 ? "Exception" : `Exception ${index + 1}`}
+                        inputId={`manual-rule-exception-${index}`}
+                        error={validationErrors[`exception_${index}`]}
+                      >
+                        <textarea
+                          id={`manual-rule-exception-${index}`}
+                          value={exception.description}
+                          onChange={(event) =>
+                            updateException(index, "description", event.target.value)
+                          }
+                          rows={2}
+                          placeholder="Director approval is required."
+                          disabled={!canCreate || isSubmitting}
+                        />
+                      </ManualField>
+
+                      <ManualField
+                        label={
+                          index === 0 ? "Required evidence" : `Required evidence ${index + 1}`
+                        }
+                        inputId={`manual-rule-exception-evidence-${index}`}
+                      >
+                        <textarea
+                          id={`manual-rule-exception-evidence-${index}`}
+                          value={exception.required_evidence}
+                          onChange={(event) =>
+                            updateException(index, "required_evidence", event.target.value)
+                          }
+                          rows={2}
+                          placeholder="director_approval"
+                          disabled={!canCreate || isSubmitting}
+                        />
+                      </ManualField>
+                    </article>
+                  ))}
+                </div>
               </div>
-              <button
-                type="button"
-                className="review-secondary-button compact"
-                onClick={addException}
-                disabled={!canCreate || isSubmitting}
-              >
-                Add exception
-              </button>
-            </div>
+            </details>
 
-            <div className="manual-exception-stack">
-              {draft.exceptions.map((exception, index) => (
-                <article key={index} className="manual-exception-card">
-                  <div className="manual-exception-head">
-                    <span>Exception {index + 1}</span>
-                    <button
-                      type="button"
-                      className="review-secondary-button compact"
-                      onClick={() => removeException(index)}
-                      disabled={!canCreate || isSubmitting}
-                    >
-                      Remove
-                    </button>
-                  </div>
-
-                  <label className="manual-field">
-                    <span>{index === 0 ? "Exception" : `Exception ${index + 1}`}</span>
-                    <textarea
-                      value={exception.description}
+            <details className="review-detail-meta reveal">
+              <summary>Optional citation</summary>
+              <div className="review-detail-meta-body">
+                <p className="review-detail-note">
+                  Anchor the rule when a source section exists.
+                </p>
+                <div className="review-field-grid cols-2">
+                  <ManualField
+                    label="Document"
+                    inputId="manual-rule-citation-document"
+                    error={validationErrors.citation_document_id}
+                  >
+                    <input
+                      id="manual-rule-citation-document"
+                      value={draft.citation.document_id}
                       onChange={(event) =>
-                        updateException(index, "description", event.target.value)
+                        updateCitationField("document_id", event.target.value)
                       }
-                      rows={3}
-                      placeholder="Director approval is required."
+                      placeholder="expense-policy"
                       disabled={!canCreate || isSubmitting}
+                      spellCheck={false}
                     />
-                    {validationErrors[`exception_${index}`] ? (
-                      <small className="manual-field-error">
-                        {validationErrors[`exception_${index}`]}
-                      </small>
-                    ) : null}
-                  </label>
+                  </ManualField>
 
-                  <label className="manual-field">
-                    <span>
-                      {index === 0 ? "Required evidence" : `Required evidence ${index + 1}`}
-                    </span>
-                    <textarea
-                      value={exception.required_evidence}
+                  <ManualField
+                    label="Version"
+                    inputId="manual-rule-citation-version"
+                    error={validationErrors.citation_document_version_id}
+                  >
+                    <input
+                      id="manual-rule-citation-version"
+                      value={draft.citation.document_version_id}
                       onChange={(event) =>
-                        updateException(index, "required_evidence", event.target.value)
+                        updateCitationField("document_version_id", event.target.value)
                       }
-                      rows={2}
-                      placeholder="director_approval"
+                      placeholder="docv-2026-06-01"
                       disabled={!canCreate || isSubmitting}
+                      spellCheck={false}
                     />
-                  </label>
-                </article>
-              ))}
-            </div>
-          </section>
+                  </ManualField>
 
-          <section className="manual-panel">
-            <div className="manual-panel-head">
-              <div>
-                <p className="manual-panel-kicker">Optional Citation</p>
-                <h4>Anchor the Rule when a source section exists</h4>
-              </div>
-            </div>
+                  <ManualField
+                    label="Section"
+                    inputId="manual-rule-citation-section"
+                    error={validationErrors.citation_section_id}
+                  >
+                    <input
+                      id="manual-rule-citation-section"
+                      value={draft.citation.section_id}
+                      onChange={(event) =>
+                        updateCitationField("section_id", event.target.value)
+                      }
+                      placeholder="offsites#abc123"
+                      disabled={!canCreate || isSubmitting}
+                      spellCheck={false}
+                    />
+                  </ManualField>
 
-            <div className="manual-field-grid">
-              <label className="manual-field">
-                <span>Citation document ID</span>
-                <input
-                  value={draft.citation.document_id}
-                  onChange={(event) =>
-                    updateCitationField("document_id", event.target.value)
-                  }
-                  placeholder="expense-policy"
-                  disabled={!canCreate || isSubmitting}
-                />
-                {validationErrors.citation_document_id ? (
-                  <small className="manual-field-error">
-                    {validationErrors.citation_document_id}
-                  </small>
-                ) : null}
-              </label>
+                  <ManualField
+                    label="Start char"
+                    inputId="manual-rule-citation-start"
+                    error={validationErrors.citation_start_char}
+                  >
+                    <input
+                      id="manual-rule-citation-start"
+                      value={draft.citation.start_char}
+                      onChange={(event) =>
+                        updateCitationField("start_char", event.target.value)
+                      }
+                      placeholder="120"
+                      disabled={!canCreate || isSubmitting}
+                      spellCheck={false}
+                    />
+                  </ManualField>
 
-              <label className="manual-field">
-                <span>Citation Document Version</span>
-                <input
-                  value={draft.citation.document_version_id}
-                  onChange={(event) =>
-                    updateCitationField("document_version_id", event.target.value)
-                  }
-                  placeholder="docv-2026-06-01"
-                  disabled={!canCreate || isSubmitting}
-                />
-                {validationErrors.citation_document_version_id ? (
-                  <small className="manual-field-error">
-                    {validationErrors.citation_document_version_id}
-                  </small>
-                ) : null}
-              </label>
+                  <ManualField
+                    label="End char"
+                    inputId="manual-rule-citation-end"
+                    error={validationErrors.citation_end_char}
+                  >
+                    <input
+                      id="manual-rule-citation-end"
+                      value={draft.citation.end_char}
+                      onChange={(event) =>
+                        updateCitationField("end_char", event.target.value)
+                      }
+                      placeholder="191"
+                      disabled={!canCreate || isSubmitting}
+                      spellCheck={false}
+                    />
+                  </ManualField>
+                </div>
 
-              <label className="manual-field">
-                <span>Citation section ID</span>
-                <input
-                  value={draft.citation.section_id}
-                  onChange={(event) =>
-                    updateCitationField("section_id", event.target.value)
-                  }
-                  placeholder="offsites#abc123"
-                  disabled={!canCreate || isSubmitting}
-                />
-                {validationErrors.citation_section_id ? (
-                  <small className="manual-field-error">
-                    {validationErrors.citation_section_id}
-                  </small>
-                ) : null}
-              </label>
-
-              <label className="manual-field">
-                <span>Citation start character</span>
-                <input
-                  value={draft.citation.start_char}
-                  onChange={(event) =>
-                    updateCitationField("start_char", event.target.value)
-                  }
-                  placeholder="120"
-                  disabled={!canCreate || isSubmitting}
-                />
-                {validationErrors.citation_start_char ? (
-                  <small className="manual-field-error">
-                    {validationErrors.citation_start_char}
-                  </small>
-                ) : null}
-              </label>
-
-              <label className="manual-field">
-                <span>Citation end character</span>
-                <input
-                  value={draft.citation.end_char}
-                  onChange={(event) =>
-                    updateCitationField("end_char", event.target.value)
-                  }
-                  placeholder="191"
-                  disabled={!canCreate || isSubmitting}
-                />
-                {validationErrors.citation_end_char ? (
-                  <small className="manual-field-error">
-                    {validationErrors.citation_end_char}
-                  </small>
-                ) : null}
-              </label>
-            </div>
-
-            <label className="manual-field">
-              <span>Citation quote</span>
-              <textarea
-                value={draft.citation.quote}
-                onChange={(event) => updateCitationField("quote", event.target.value)}
-                rows={3}
-                placeholder="Team offsites may reimburse dinner up to $120 with director approval."
-                disabled={!canCreate || isSubmitting}
-              />
-              {validationErrors.citation_quote ? (
-                <small className="manual-field-error">
-                  {validationErrors.citation_quote}
-                </small>
-              ) : null}
-            </label>
-          </section>
-
-          {submitError ? (
-            <p className="error-banner" role="alert">
-              {submitError}
-            </p>
-          ) : null}
-          {successMessage ? (
-            <p className="manual-success-banner" role="status">
-              {successMessage}
-            </p>
-          ) : null}
-
-          <div className="manual-submit-rail">
-            <div>
-              <p className="manual-submit-kicker">Store boundary</p>
-              <p className="manual-submit-note">
-                Manual Rules are committed as approved entries with manual origin.
-              </p>
-            </div>
-            <button
-              type="submit"
-              className="review-save-button"
-              disabled={!canCreate || isSubmitting}
-            >
-              {isSubmitting ? "Creating…" : "Create Manual Rule"}
-            </button>
-          </div>
-        </form>
-
-        <aside className="manual-preview-rail">
-          <section className="manual-preview-card">
-            <div className="manual-preview-head">
-              <div>
-                <p className="manual-panel-kicker">Latest Result</p>
-                <h4>Human-authored Rule preview</h4>
-              </div>
-              <span className="manual-origin-seal">Human-authored</span>
-            </div>
-
-            {previewRule ? (
-              <div className="manual-preview-body">
-                <span
-                  className={`review-enforceability ${previewRule.enforceability_class}`}
+                <ManualField
+                  label="Quote"
+                  inputId="manual-rule-citation-quote"
+                  error={validationErrors.citation_quote}
                 >
-                  {formatEnforceabilityClass(previewRule.enforceability_class)}
+                  <textarea
+                    id="manual-rule-citation-quote"
+                    value={draft.citation.quote}
+                    onChange={(event) => updateCitationField("quote", event.target.value)}
+                    rows={3}
+                    disabled={!canCreate || isSubmitting}
+                  />
+                </ManualField>
+              </div>
+            </details>
+
+            <footer className="review-save-rail reveal">
+              <div>
+                <span className="review-save-kicker">
+                  {canCreate ? "Approver access" : "Viewer access"}
                 </span>
-                <h5>{previewRule.statement}</h5>
-                <p className="manual-preview-meta">
-                  {summarizeRuleScope(previewRule.scope)} · {describeRuleOrigin(previewRule)}
-                </p>
-                {previewRule.condition ? (
-                  <p className="manual-preview-code">
-                    <code>
-                      {previewRule.condition.field} {previewRule.condition.operator}{" "}
-                      {previewRule.condition.value}
-                    </code>
-                  </p>
-                ) : null}
-                <dl className="manual-preview-grid">
-                  <div>
-                    <dt>Rule ID</dt>
-                    <dd>{previewRule.rule_id}</dd>
-                  </div>
-                  <div>
-                    <dt>Rationale</dt>
-                    <dd>{previewRule.origin.rationale}</dd>
-                  </div>
-                  <div>
-                    <dt>Applicability</dt>
-                    <dd>{summarizeApplicability(previewRule.applicability)}</dd>
-                  </div>
-                  <div>
-                    <dt>Citation</dt>
-                    <dd>{previewRule.citation ? previewRule.citation.section_id : "None"}</dd>
-                  </div>
-                </dl>
-              </div>
-            ) : (
-              <div className="manual-preview-empty">
-                <p>
-                  Submit a Manual Rule to stamp the latest approved, human-authored
-                  entry here.
+                <p className="review-save-note">
+                  Manual rules are committed as approved entries with manual origin.
                 </p>
               </div>
-            )}
-          </section>
-        </aside>
+            </footer>
+          </form>
+        </div>
       </div>
     </div>
   );

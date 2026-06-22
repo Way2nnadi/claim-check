@@ -273,8 +273,8 @@ describe("CandidateRuleDetail", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Save Candidate Rule" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Approve Candidate Rule" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reject Candidate Rule" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
     expect(screen.getByText("Viewer access")).toBeInTheDocument();
   });
 
@@ -347,13 +347,9 @@ describe("CandidateRuleDetail", () => {
     await userEvent.type(screen.getByLabelText("Statement"), "Meals are capped at $80 per day.");
 
     expect(screen.getByText("Decision blockers")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Save Candidate Rule edits before approving or rejecting so the decision uses the current reviewed values.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve Candidate Rule" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reject Candidate Rule" })).toBeDisabled();
+    expect(screen.getByText("Save your edits first.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
   });
 
   it("requires rationale before approving and posts the approval decision", async () => {
@@ -404,15 +400,13 @@ describe("CandidateRuleDetail", () => {
     );
 
     await screen.findByDisplayValue("Meals are capped at $75 per day.");
-    await userEvent.click(screen.getByRole("button", { name: "Approve Candidate Rule" }));
-    await userEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    expect(
-      await screen.findByText("Enter approval rationale before moving this Candidate Rule into the Structured Policy Store."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Rationale is required.")).toBeInTheDocument();
 
-    await userEvent.type(screen.getByLabelText("Approval rationale"), "Citation verified and threshold confirmed.");
-    await userEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+    await userEvent.type(screen.getByLabelText("Rationale"), "Citation verified and threshold confirmed.");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -427,7 +421,7 @@ describe("CandidateRuleDetail", () => {
     });
 
     expect(await screen.findByText("Approved")).toBeInTheDocument();
-    expect(screen.getByText("Candidate Rule approved.")).toBeInTheDocument();
+    expect(screen.getByText("Approved.")).toBeInTheDocument();
     expect(onReviewResolved).toHaveBeenCalledWith("rule-meals-cap", "approved");
   });
 
@@ -464,7 +458,7 @@ describe("CandidateRuleDetail", () => {
     expect(
       screen.getByText("Resolve the Citation issue before approving this Candidate Rule."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve Candidate Rule" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
 
     const fetchValidationError = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/candidate-rules/rule-meals-cap" && (!init?.method || init.method === "GET")) {
@@ -497,9 +491,9 @@ describe("CandidateRuleDetail", () => {
     );
 
     await screen.findByDisplayValue("Meals are capped at $75 per day.");
-    await userEvent.click(screen.getByRole("button", { name: "Approve Candidate Rule" }));
-    await userEvent.type(screen.getByLabelText("Approval rationale"), "Citation verified.");
-    await userEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.type(screen.getByLabelText("Rationale"), "Citation verified.");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(
       await screen.findByText("Value error, Extracted Rule requires a Citation."),
@@ -553,18 +547,16 @@ describe("CandidateRuleDetail", () => {
     );
 
     await screen.findByDisplayValue("Meals are capped at $75 per day.");
-    await userEvent.click(screen.getByRole("button", { name: "Reject Candidate Rule" }));
-    await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reject" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    expect(
-      await screen.findByText("Enter a rejection reason before removing this Candidate Rule from the review queue."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Reason is required.")).toBeInTheDocument();
 
     await userEvent.type(
-      screen.getByLabelText("Rejection reason"),
+      screen.getByLabelText("Reason"),
       "This statement duplicates a stricter Rule already approved elsewhere.",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -579,7 +571,7 @@ describe("CandidateRuleDetail", () => {
     });
 
     expect(await screen.findByText("Rejected")).toBeInTheDocument();
-    expect(screen.getByText("Candidate Rule rejected.")).toBeInTheDocument();
+    expect(screen.getByText("Rejected.")).toBeInTheDocument();
     expect(onReviewResolved).toHaveBeenCalledWith("rule-meals-cap", "rejected");
   });
 });

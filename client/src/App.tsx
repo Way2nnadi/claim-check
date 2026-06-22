@@ -11,6 +11,7 @@ import CandidateRuleCatalog from "./CandidateRuleCatalog";
 import ExtractionRunCatalog from "./ExtractionRunCatalog";
 import ManualRulesPage from "./ManualRulesPage";
 import PolicyVersionCatalog from "./PolicyVersionCatalog";
+import AuditLogPage from "./AuditLogPage";
 import ThemeToggle from "./ThemeToggle";
 import { hasAnyRole } from "./permissions";
 import type { AuthenticatedPrincipal, Role } from "./types";
@@ -104,13 +105,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "manual-rules",
 		label: "Manual Rules",
 		kicker: "Manual Override",
-		actions: [
-			{
-				label: "Create Manual Rule",
-				allowedRoles: ["admin", "approver"],
-				unavailableBehavior: "disable",
-			},
-		],
+		actions: [],
 		ledger: ["Rationale matters because Citation may be absent for this path."],
 	},
 	{
@@ -460,6 +455,8 @@ export default function App() {
 						<PolicyVersionCatalog principal={principal} />
 					) : activeSection === "manual-rules" ? (
 						<ManualRulesPage principal={principal} />
+					) : activeSection === "audit" ? (
+						<AuditLogPage />
 					) : (
 						<div className="catalog-page content-enter">
 							<div className="ledger-grid">
