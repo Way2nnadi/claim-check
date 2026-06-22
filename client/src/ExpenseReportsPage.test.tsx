@@ -36,29 +36,50 @@ describe("ExpenseReportsPage", () => {
     vi.restoreAllMocks();
   });
 
-  function mockExpenseReportDetail(expenseReportId: string) {
+  function buildExpenseRows(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      employee_id: `emp-${String(index + 1).padStart(3, "0")}`,
+      expense_date: "2026-06-21",
+      expense_category: "meals",
+      amount: `${(index + 1) * 10}.00`,
+      currency: "USD",
+      country: "us",
+      travel_type: "domestic",
+      business_purpose: `Expense ${index + 1}`,
+      attendee_list: null,
+      manager_approval: true,
+      receipt_attached: true,
+      trip_id: null,
+    }));
+  }
+
+  function mockExpenseReportDetail(expenseReportId: string, rowCount = 1) {
+    const rows =
+      rowCount === 1
+        ? [
+            {
+              employee_id: "emp-001",
+              expense_date: "2026-06-21",
+              expense_category: "meals",
+              amount: "42.50",
+              currency: "USD",
+              country: "us",
+              travel_type: "domestic",
+              business_purpose: "Team dinner",
+              attendee_list: "Alice; Bob",
+              manager_approval: true,
+              receipt_attached: true,
+              trip_id: "trip-7",
+            },
+          ]
+        : buildExpenseRows(rowCount);
     return {
       expense_report_id: expenseReportId,
       imported_by: "admin-user",
       source_filename: "expenses.csv",
-      row_count: 1,
+      row_count: rowCount,
       created_at: "2026-06-22T11:00:00Z",
-      rows: [
-        {
-          employee_id: "emp-001",
-          expense_date: "2026-06-21",
-          expense_category: "meals",
-          amount: "42.50",
-          currency: "USD",
-          country: "us",
-          travel_type: "domestic",
-          business_purpose: "Team dinner",
-          attendee_list: "Alice; Bob",
-          manager_approval: true,
-          receipt_attached: true,
-          trip_id: "trip-7",
-        },
-      ],
+      rows,
     };
   }
 
@@ -235,6 +256,54 @@ describe("ExpenseReportsPage", () => {
       "/api/expense-reports/expense-report-1",
       expect.any(Object),
     );
+  });
+
+  it("paginates expense rows on the detail page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/expense-reports") {
+          return jsonResponse({
+            items: [
+              {
+                expense_report_id: "expense-report-1",
+                imported_by: "admin-user",
+                source_filename: "expenses.csv",
+                row_count: 25,
+                created_at: "2026-06-22T11:00:00Z",
+              },
+            ],
+          });
+        }
+        if (url === "/api/expense-reports/expense-report-1") {
+          return jsonResponse(mockExpenseReportDetail("expense-report-1", 25));
+        }
+        if (url === "/api/compiled-rule-sets") {
+          return jsonResponse({ items: [] });
+        }
+        if (
+          url === "/api/expense-reports/expense-report-1/compliance-evaluation-runs"
+        ) {
+          return jsonResponse({ expense_report_id: "expense-report-1", items: [] });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<ExpenseReportsPage principal={viewerPrincipal} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Open expense-report-1" }));
+
+    expect(await screen.findByText("1–10 of 25 rows")).toBeInTheDocument();
+    expect(screen.getByText("emp-001")).toBeInTheDocument();
+    expect(screen.getByText("emp-010")).toBeInTheDocument();
+    expect(screen.queryByText("emp-011")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Next page of rows" }));
+
+    expect(await screen.findByText("11–20 of 25 rows")).toBeInTheDocument();
+    expect(screen.getByText("emp-011")).toBeInTheDocument();
+    expect(screen.queryByText("emp-001")).not.toBeInTheDocument();
   });
 
   it("shows an empty state when no reports exist", async () => {

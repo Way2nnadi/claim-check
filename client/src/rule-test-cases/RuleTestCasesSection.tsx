@@ -35,13 +35,15 @@ function RuleTestId({ value, visible = 10 }: { value: string; visible?: number }
 
 function RuleTestRunCaseResultRow({
   result,
+  statement,
 }: {
   result: RuleTestRun["case_results"][number];
+  statement?: string;
 }) {
   return (
     <tr>
-      <td>
-        <RuleTestId value={result.rule_id} visible={12} />
+      <td className="rule-test-run-rule-cell" title={result.rule_id}>
+        {statement ?? <code className="rule-test-id">{result.rule_id}</code>}
       </td>
       <td>
         <StatusPill
@@ -115,8 +117,8 @@ function RuleTestCaseLedger({
             {showStatus ? <th scope="col">Status</th> : null}
             <th scope="col">Variant</th>
             <th scope="col">Expected</th>
-            <th scope="col">Category</th>
-            <th scope="col">Fixture</th>
+            <th scope="col" className="rule-test-category">Category</th>
+            <th scope="col" className="rule-test-fixture">Fixture</th>
             <th scope="col">Notes</th>
             {canDisable ? <th scope="col">Actions</th> : null}
           </tr>
@@ -197,7 +199,7 @@ function RuleTestCaseRow({
           variant={evaluationOutcomeTone(testCase.expected_outcome)}
         />
       </td>
-      <td>{testCase.expense_fixture.expense_category}</td>
+      <td className="rule-test-category">{testCase.expense_fixture.expense_category}</td>
       <td
         className="rule-test-fixture"
         title={formatFixtureDetail(testCase.expense_fixture)}
@@ -301,6 +303,10 @@ export default function RuleTestCasesSection({
   const filteredGroups = useMemo(
     () => filterRuleTestCaseGroups(ruleTestCaseGroups, statusFilter),
     [ruleTestCaseGroups, statusFilter],
+  );
+  const statementByRuleId = useMemo(
+    () => new Map(ruleTestCaseGroups.map((group) => [group.rule_id, group.statement])),
+    [ruleTestCaseGroups],
   );
   const showStatusColumn = statusFilter === "all" || ruleTestCaseDisabledCount > 0;
   const filterTabs = [
@@ -458,6 +464,7 @@ export default function RuleTestCasesSection({
                     <RuleTestRunCaseResultRow
                       key={result.rule_test_case_id}
                       result={result}
+                      statement={statementByRuleId.get(result.rule_id)}
                     />
                   ))}
                 </tbody>

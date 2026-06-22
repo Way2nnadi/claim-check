@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ApiError, fetchExpenseReport, fetchExpenseReports, importExpenseReportCsv } from "./api";
 import { hasAnyRole } from "./shared/permissions";
 import type { AuthenticatedPrincipal } from "./shared/auth/types";
@@ -9,8 +9,13 @@ import RecordPageHeader, {
 } from "./shared/ui/RecordPageHeader";
 import StatusPill from "./shared/ui/StatusPill";
 import { ExpenseReportPageIcon, RecordPageIcon } from "./shared/ui/PageIcons";
+import { ComplianceEvaluationSection } from "./compliance-evaluation-runs";
 import { formatDateTime } from "./shared/format/common";
 import { formatRelativeTime } from "./shared/format/relativeTime";
+import TablePagination, {
+  paginateItems,
+  TABLE_PAGE_SIZE,
+} from "./shared/ui/TablePagination";
 
 const REQUIRED_CSV_COLUMNS = [
 	"employee_id",
@@ -32,6 +37,7 @@ const OPTIONAL_CSV_COLUMNS = [
 
 interface ExpenseReportsPageProps {
 	principal: AuthenticatedPrincipal;
+	onOpenEvaluationRun?: (complianceEvaluationRunId: string) => void;
 }
 
 const ADMIN_ONLY_ROLES = ["admin"] as const;
@@ -103,7 +109,9 @@ function formatRowCount(count: number): string {
 
 interface ExpenseReportDetailProps {
 	report: ExpenseReport;
+	principal: AuthenticatedPrincipal;
 	onBack: () => void;
+	onOpenEvaluationRun?: (complianceEvaluationRunId: string) => void;
 }
 
 function ExpenseReportDetailLoading({ onBack }: { onBack: () => void }) {
@@ -146,7 +154,23 @@ function ExpenseReportDetailError({
 	);
 }
 
-function ExpenseReportDetail({ report, onBack }: ExpenseReportDetailProps) {
+function ExpenseReportDetail({
+	report,
+	principal,
+	onBack,
+	onOpenEvaluationRun,
+}: ExpenseReportDetailProps) {
+	const [rowsPage, setRowsPage] = useState(1);
+
+	useEffect(() => {
+		setRowsPage(1);
+	}, [report.expense_report_id]);
+
+	const paginatedRows = useMemo(
+		() => paginateItems(report.rows, rowsPage, TABLE_PAGE_SIZE),
+		[report.rows, rowsPage],
+	);
+
 	const propertyGroups: RecordPropertyGroup[] = [
 		{
 			title: "Import",
@@ -203,10 +227,16 @@ function ExpenseReportDetail({ report, onBack }: ExpenseReportDetailProps) {
 			/>
 
 			<h4 className="record-section-heading">Expense rows</h4>
-			<div className="db-table-wrap">
+			<div className="db-table-wrap expense-report-rows-wrap">
 				<table
+					id="expense-report-rows-panel"
 					className="db-table expense-report-rows-table"
 					aria-label="Expense rows"
+					aria-describedby={
+						paginatedRows.totalCount > TABLE_PAGE_SIZE
+							? "expense-report-rows-pagination-range"
+							: undefined
+					}
 				>
 					<thead>
 						<tr>
@@ -221,29 +251,47 @@ function ExpenseReportDetail({ report, onBack }: ExpenseReportDetailProps) {
 						</tr>
 					</thead>
 					<tbody>
-						{report.rows.map((row, index) => (
-							<tr
-								key={`${report.expense_report_id}:${row.employee_id}:${index}`}
-							>
-								<td className="db-mono">{row.employee_id}</td>
-								<td>{row.expense_date}</td>
-								<td>{row.expense_category}</td>
-								<td>{row.amount}</td>
-								<td>{row.currency}</td>
-								<td>{row.business_purpose ?? "Not set"}</td>
-								<td>{formatBoolean(row.manager_approval)}</td>
-								<td>{formatBoolean(row.receipt_attached)}</td>
-							</tr>
-						))}
+						{paginatedRows.items.map((row, index) => {
+							const rowIndex = paginatedRows.startIndex + index;
+							return (
+								<tr
+									key={`${report.expense_report_id}:${row.employee_id}:${rowIndex}`}
+								>
+									<td className="db-mono">{row.employee_id}</td>
+									<td>{row.expense_date}</td>
+									<td>{row.expense_category}</td>
+									<td>{row.amount}</td>
+									<td>{row.currency}</td>
+									<td>{row.business_purpose ?? "Not set"}</td>
+									<td>{formatBoolean(row.manager_approval)}</td>
+									<td>{formatBoolean(row.receipt_attached)}</td>
+								</tr>
+							);
+						})}
 					</tbody>
 				</table>
+				<TablePagination
+					page={paginatedRows.page}
+					pageSize={TABLE_PAGE_SIZE}
+					totalCount={paginatedRows.totalCount}
+					onPageChange={setRowsPage}
+					idPrefix="expense-report-rows-pagination"
+				/>
 			</div>
+
+			<ComplianceEvaluationSection
+				expenseReportId={report.expense_report_id}
+				rowCount={report.row_count}
+				principal={principal}
+				onOpenRun={onOpenEvaluationRun}
+			/>
 		</div>
 	);
 }
 
 export default function ExpenseReportsPage({
 	principal,
+	onOpenEvaluationRun,
 }: ExpenseReportsPageProps) {
 	const [reports, setReports] = useState<ExpenseReportSummary[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
@@ -416,7 +464,9 @@ export default function ExpenseReportsPage({
 		return (
 			<ExpenseReportDetail
 				report={selectedReport}
+				principal={principal}
 				onBack={() => setSelectedReportId(null)}
+				onOpenEvaluationRun={onOpenEvaluationRun}
 			/>
 		);
 	}

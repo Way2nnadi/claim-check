@@ -44,10 +44,8 @@
 	color: var(--ink) !important;
 	white-space: nowrap;
 	cursor: pointer;
-	transition:
-		background-color 120ms ease,
-		border-color 120ms ease,
-		color 120ms ease !important;
+	transition: background-color 120ms ease, border-color 120ms ease, color 120ms
+		ease !important;
 }
 
 .document-command:hover:not(:disabled),
@@ -628,9 +626,7 @@
 	line-height: 1.35;
 	white-space: nowrap;
 	cursor: pointer;
-	transition:
-		background-color 120ms ease,
-		color 120ms ease;
+	transition: background-color 120ms ease, color 120ms ease;
 }
 
 .notion-filter-tab:hover {
@@ -1372,8 +1368,16 @@ article.db-property {
 	gap: 0;
 }
 
-.document-detail .version-view .notion-filter-tabs + [role="tabpanel"] .version-ledger-flat,
-.document-detail .version-view .notion-filter-tabs + [role="tabpanel"] .version-ledger-empty {
+.document-detail
+	.version-view
+	.notion-filter-tabs
+	+ [role="tabpanel"]
+	.version-ledger-flat,
+.document-detail
+	.version-view
+	.notion-filter-tabs
+	+ [role="tabpanel"]
+	.version-ledger-empty {
 	border-top: none;
 	border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
@@ -1575,7 +1579,7 @@ article.db-property {
 }
 
 /* Extraction trigger — Notion property form */
-.document-detail .extraction-trigger {
+:is(.document-detail, .expense-report-detail) .extraction-trigger {
 	display: grid;
 	gap: 0.625rem;
 	padding: 0.5rem 0 0.75rem;
@@ -1584,7 +1588,7 @@ article.db-property {
 	box-shadow: none;
 }
 
-.document-detail .extraction-trigger-head h5 {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-head h5 {
 	margin: 0;
 	font-family: var(--font-body);
 	font-size: 0.8125rem;
@@ -1593,31 +1597,31 @@ article.db-property {
 	color: var(--ink);
 }
 
-.document-detail .extraction-trigger-empty {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-empty {
 	margin: 0;
 	font-size: 0.875rem;
 	font-style: normal;
 	color: var(--folio);
 }
 
-.document-detail .extraction-trigger-form {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-form {
 	display: block;
 }
 
-.document-detail .extraction-trigger-fields {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields {
 	display: grid;
 	grid-template-columns: minmax(6.5rem, 8.5rem) minmax(0, 1fr);
 	gap: 0.375rem 0.75rem;
 	align-items: center;
 }
 
-.document-detail .extraction-trigger-fields > label,
-.document-detail .extraction-trigger-fields > .searchable-picker {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields > label,
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields > .searchable-picker {
 	display: contents;
 }
 
-.document-detail .extraction-trigger-field-label,
-.document-detail .extraction-trigger-fields .searchable-picker-label {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-field-label,
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields .searchable-picker-label {
 	font-family: var(--font-body);
 	font-size: 0.8125rem;
 	font-weight: 400;
@@ -1626,30 +1630,37 @@ article.db-property {
 	color: var(--muted-ink);
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker-label {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields .searchable-picker-label {
 	margin: 0;
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker-control {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields .searchable-picker-control {
 	min-width: 0;
 	border: none;
 	box-shadow: none;
 	background: transparent;
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker-control:hover:not(:has(input:disabled)),
-.document-detail .extraction-trigger-fields .searchable-picker.open .searchable-picker-control,
-.document-detail .extraction-trigger-fields .searchable-picker-control:focus-within {
+:is(.document-detail, .expense-report-detail)
+	.extraction-trigger-fields
+	.searchable-picker-control:hover:not(:has(input:disabled)),
+:is(.document-detail, .expense-report-detail)
+	.extraction-trigger-fields
+	.searchable-picker.open
+	.searchable-picker-control,
+:is(.document-detail, .expense-report-detail)
+	.extraction-trigger-fields
+	.searchable-picker-control:focus-within {
 	border: none;
 	box-shadow: none;
 	background: transparent;
 }
 
-.document-detail .extraction-trigger-field-label {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-field-label {
 	display: block;
 }
 
-.document-detail .extraction-trigger-field-input {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-field-input {
 	width: 100%;
 	padding: 0.375rem 0.5rem;
 	border: 1px solid var(--line);
@@ -1661,21 +1672,21 @@ article.db-property {
 	transition: border-color 120ms ease, background-color 120ms ease;
 }
 
-.document-detail .extraction-trigger-field-input:hover:not(:disabled) {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-field-input:hover:not(:disabled) {
 	border-color: var(--folio);
 }
 
-.document-detail .extraction-trigger-field-input:focus {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-field-input:focus {
 	outline: none;
 	border-color: var(--phosphor);
 	background: var(--panel-raised);
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker-field {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields .searchable-picker-field {
 	display: contents;
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker-control input {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-fields .searchable-picker-control input {
 	padding: 0.375rem 2.25rem 0.375rem 0.5rem;
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
@@ -1684,33 +1695,43 @@ article.db-property {
 	transition: border-color 120ms ease, background-color 120ms ease;
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker.clearable .searchable-picker-control input {
+:is(.document-detail, .expense-report-detail)
+	.extraction-trigger-fields
+	.searchable-picker.clearable
+	.searchable-picker-control
+	input {
 	padding-right: 3.25rem;
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker-control input:hover:not(:disabled) {
+:is(.document-detail, .expense-report-detail)
+	.extraction-trigger-fields
+	.searchable-picker-control
+	input:hover:not(:disabled) {
 	border-color: var(--folio);
 }
 
-.document-detail .extraction-trigger-fields .searchable-picker-control input:focus {
+:is(.document-detail, .expense-report-detail)
+	.extraction-trigger-fields
+	.searchable-picker-control
+	input:focus {
 	outline: none;
 	border-color: var(--phosphor);
 	background: var(--panel-raised);
 	box-shadow: none;
 }
 
-.document-detail .extraction-trigger-actions {
+:is(.document-detail, .expense-report-detail) .extraction-trigger-actions {
 	display: flex;
 	justify-content: flex-end;
 	grid-column: 1 / -1;
 	padding: 0.25rem 0 0;
 }
 
-.document-detail .extraction-ledger-wrap {
+:is(.document-detail, .expense-report-detail) .extraction-ledger-wrap {
 	gap: 0.5rem;
 }
 
-.document-detail .extraction-ledger-wrap .db-table-wrap {
+:is(.document-detail, .expense-report-detail) .extraction-ledger-wrap .db-table-wrap {
 	margin-top: 0;
 }
 
@@ -1718,6 +1739,31 @@ article.db-property {
 	max-height: min(28rem, 62vh);
 	overflow: auto;
 	-webkit-overflow-scrolling: touch;
+}
+
+/* Full-page extraction catalog: grow the table into remaining viewport space. */
+.catalog-page:has(> .extraction-ledger-wrap) {
+	display: flex;
+	flex-direction: column;
+	min-height: calc(100dvh - 12rem);
+}
+
+.catalog-page:has(> .extraction-ledger-wrap) > .extraction-ledger-wrap {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.catalog-page:has(> .extraction-ledger-wrap) .extraction-run-table-scroll {
+	flex: 1 1 auto;
+	min-height: 0;
+	max-height: none;
+}
+
+:is(.document-detail, .expense-report-detail) .extraction-run-table-scroll {
+	max-height: min(28rem, 62vh);
+	flex: none;
 }
 
 .extraction-run-table {
@@ -1855,7 +1901,7 @@ article.db-property {
 	font-size: 0.8125rem;
 }
 
-.document-detail .extraction-empty.compact {
+:is(.document-detail, .expense-report-detail) .extraction-empty.compact {
 	padding: 0.75rem 0.625rem;
 	border: 1px solid var(--line);
 	border-top: none;
@@ -1864,12 +1910,11 @@ article.db-property {
 	text-align: left;
 }
 
-.document-detail .extraction-empty.compact p {
+:is(.document-detail, .expense-report-detail) .extraction-empty.compact p {
 	margin: 0;
 	font-size: 0.875rem;
 	color: var(--folio);
 }
-
 
 .document-detail .version-archive-form label {
 	font-size: 0.8125rem;
@@ -2030,10 +2075,8 @@ article.db-property {
 	font-family: inherit;
 	font-size: 0.875rem;
 	color: var(--ink);
-	transition:
-		border-color 120ms ease,
-		background-color 120ms ease,
-		box-shadow 120ms ease;
+	transition: border-color 120ms ease, background-color 120ms ease, box-shadow
+		120ms ease;
 }
 
 .notion-scope-panel .review-filter-grid input:hover:not(:disabled),
@@ -2256,9 +2299,7 @@ article.db-property {
 	border-radius: var(--radius-md);
 	background: var(--void);
 	cursor: pointer;
-	transition:
-		border-color 120ms ease,
-		background-color 120ms ease;
+	transition: border-color 120ms ease, background-color 120ms ease;
 }
 
 .expense-report-dropzone:hover {
@@ -2311,6 +2352,42 @@ article.db-property {
 
 .expense-report-permission-note {
 	margin: 0;
+}
+
+.expense-report-rows-wrap .table-pagination {
+	border-top: 1px solid var(--line);
+	background: var(--void);
+}
+
+.compliance-evaluation-runs-wrap .table-pagination {
+	border-top: 1px solid var(--line);
+	background: var(--void);
+}
+
+.table-pagination {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem 0.75rem;
+	padding: 0.5rem 0.75rem;
+}
+
+.table-pagination-range {
+	margin: 0;
+	font-size: 0.8125rem;
+	color: var(--muted-ink);
+}
+
+.table-pagination-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+}
+
+.table-pagination-button:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
 }
 
 /* Candidate rule detail — Notion property form */
@@ -2385,7 +2462,10 @@ article.db-property {
 
 .review-detail .review-detail-panel > .review-field + .review-field,
 .review-detail .review-detail-panel > .review-field-grid,
-.review-detail .review-detail-panel > .review-condition-row + .review-applicability-grid {
+.review-detail
+	.review-detail-panel
+	> .review-condition-row
+	+ .review-applicability-grid {
 	margin-top: 0;
 }
 
@@ -2439,10 +2519,8 @@ article.db-property {
 	font-family: var(--font-body);
 	font-size: 0.875rem;
 	cursor: text;
-	transition:
-		border-color 120ms ease,
-		background-color 120ms ease,
-		box-shadow 120ms ease;
+	transition: border-color 120ms ease, background-color 120ms ease, box-shadow
+		120ms ease;
 }
 
 .review-detail .review-field input::placeholder,
@@ -2484,13 +2562,13 @@ article.db-property {
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
 	background: var(--void);
-	transition:
-		border-color 120ms ease,
-		background-color 120ms ease,
-		box-shadow 120ms ease;
+	transition: border-color 120ms ease, background-color 120ms ease, box-shadow
+		120ms ease;
 }
 
-.review-detail .review-field .searchable-picker-control:hover:not(:has(input:disabled)) {
+.review-detail
+	.review-field
+	.searchable-picker-control:hover:not(:has(input:disabled)) {
 	border-color: var(--line-strong);
 	background: var(--void-deep);
 }
@@ -2501,7 +2579,11 @@ article.db-property {
 	box-shadow: 0 0 0 2px var(--phosphor-soft);
 }
 
-.review-detail .review-field .searchable-picker.mono .searchable-picker-control input {
+.review-detail
+	.review-field
+	.searchable-picker.mono
+	.searchable-picker-control
+	input {
 	padding: 0.4375rem 0.625rem;
 	font-family: var(--font-body);
 	font-size: 0.875rem;
@@ -2805,7 +2887,9 @@ article.db-property {
 	border-color: rgba(225, 98, 89, 0.45) !important;
 }
 
-.review-detail .record-page-utility-actions .document-command-danger:hover:not(:disabled) {
+.review-detail
+	.record-page-utility-actions
+	.document-command-danger:hover:not(:disabled) {
 	background: rgba(225, 98, 89, 0.1) !important;
 	border-color: rgba(225, 98, 89, 0.55) !important;
 }
@@ -2907,31 +2991,31 @@ article.db-property {
 }
 
 .rule-test-col-status {
-	width: 5.75rem;
+	width: 5.5rem;
 }
 
 .rule-test-col-variant {
-	width: 6.75rem;
+	width: 7.25rem;
 }
 
 .rule-test-col-expected {
-	width: 6.75rem;
+	width: 7.25rem;
 }
 
 .rule-test-col-category {
-	width: 5.5rem;
+	width: 7rem;
 }
 
 .rule-test-col-fixture {
-	width: auto;
+	width: 36%;
 }
 
 .rule-test-col-notes {
-	width: 12rem;
+	width: 8rem;
 }
 
 .rule-test-col-actions {
-	width: 5.5rem;
+	width: 5.25rem;
 }
 
 .rule-test-group-body + .rule-test-group-body .rule-test-group-header td {
@@ -3017,6 +3101,16 @@ article.db-property {
 .rule-test-table-wrap .db-table th {
 	padding-top: 0.4375rem;
 	padding-bottom: 0.4375rem;
+	padding-left: 0.5rem;
+	padding-right: 0.5rem;
+}
+
+.rule-test-case-ledger .rule-test-category {
+	padding-left: 1rem;
+}
+
+.rule-test-case-ledger .rule-test-fixture {
+	padding-right: 1rem;
 }
 
 .rule-test-id {
@@ -3034,11 +3128,12 @@ article.db-property {
 }
 
 .rule-test-row-notes {
+	width: auto;
 	vertical-align: middle;
+	color: var(--muted-ink);
 }
 
 .rule-test-row-actions {
-	width: 5.5rem;
 	vertical-align: middle;
 }
 
@@ -3127,4 +3222,64 @@ article.db-property {
 	justify-content: space-between;
 	gap: 0.5rem 0.75rem;
 	padding: 0.5rem 0.75rem;
+}
+
+.rule-test-run-rule-cell {
+	font-size: 0.8125rem;
+	line-height: 1.45;
+	color: var(--ink);
+	white-space: normal;
+}
+
+.compliance-evaluation-section {
+	margin-top: 1.5rem;
+}
+
+.compliance-evaluation-section-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.75rem;
+	margin-bottom: 0.75rem;
+}
+
+.compliance-evaluation-trigger {
+	margin-bottom: 1rem;
+}
+
+.compliance-evaluation-run-detail {
+	display: grid;
+	gap: 0.75rem;
+}
+
+.compliance-evaluation-outcomes-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.75rem 1rem;
+}
+
+.compliance-evaluation-outcomes-intro {
+	display: grid;
+	gap: 0.125rem;
+	min-width: 0;
+}
+
+.compliance-evaluation-outcomes-intro .record-section-heading {
+	margin: 0;
+}
+
+.compliance-evaluation-outcomes-actions {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	padding-top: 0.0625rem;
+}
+
+.compliance-evaluation-outcome-summary {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
 }

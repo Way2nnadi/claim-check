@@ -72,7 +72,7 @@ export function ExtractionRunPageIcon({ size = 16 }: IconProps) {
 		<IconShell size={size}>
 			<svg viewBox="0 0 16 16" fill="currentColor" width={size} height={size}>
 				<title>Extraction run</title>
-				<path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm-.75 2.5v4.19l3.53 2.06.75-1.28L8.75 8V5.5H7.25z" />
+				<path d="M3 1h7l3 3v6H3V1zm6 0v3h3L9 1zM11 8.5h2.5l-2 2 2 2H11v1.5L14.5 12 11 9.5V8.5z" />
 			</svg>
 		</IconShell>
 	);

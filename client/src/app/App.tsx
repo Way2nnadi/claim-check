@@ -1,4 +1,17 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import {
+	Blocks,
+	ClipboardCheck,
+	FileOutput,
+	FileText,
+	GitBranch,
+	LayoutDashboard,
+	PenLine,
+	Receipt,
+	ScrollText,
+	ShieldCheck,
+	type LucideIcon,
+} from "lucide-react";
 import {
 	ApiError,
 	clearStoredToken,
@@ -12,6 +25,7 @@ import { ExtractionRunCatalog } from "../extraction-runs";
 import { ManualRulesPage } from "../manual-rules";
 import { PolicyVersionCatalog } from "../policy-versions";
 import { CompiledRuleSetCatalog } from "../compiled-rule-sets";
+import { ComplianceEvaluationRunCatalog } from "../compliance-evaluation-runs";
 import { AuditLogPage } from "../audit";
 import { DashboardPage } from "../dashboard";
 import ThemeToggle from "../shared/ui/ThemeToggle";
@@ -24,6 +38,7 @@ type SectionId =
 	| "dashboard"
 	| "documents"
 	| "expense-reports"
+	| "evaluation-runs"
 	| "extraction-runs"
 	| "review"
 	| "policy-versions"
@@ -48,15 +63,15 @@ interface ShellSection {
 	id: SectionId;
 	label: string;
 	kicker: string;
-	icon: ReactNode;
+	icon: LucideIcon;
 	actions: readonly SectionAction[];
 	ledger: readonly string[];
 }
 
-function NavIcon({ children }: { children: ReactNode }) {
+function NavIcon({ icon: Icon }: { icon: LucideIcon }) {
 	return (
 		<span className="nav-link-icon" aria-hidden="true">
-			{children}
+			<Icon size={18} strokeWidth={1.75} />
 		</span>
 	);
 }
@@ -66,13 +81,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "dashboard",
 		label: "Dashboard",
 		kicker: "Front Desk",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M2 2h5v5H2V2zm7 0h5v5H9V2zM2 9h5v5H2V9zm7 0h5v5H9V9z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: LayoutDashboard,
 		actions: [],
 		ledger: [],
 	},
@@ -80,13 +89,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "documents",
 		label: "Documents",
 		kicker: "Source Intake",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M3 1h7l3 3v11H3V1zm6 0v3h3L9 1zM5 7h6v1H5V7zm0 3h6v1H5v-1zm0 3h4v1H5v-1z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: FileText,
 		actions: [],
 		ledger: [
 			"Preserve Citation fidelity before any Candidate Rule enters review.",
@@ -96,29 +99,27 @@ const shellSections: readonly ShellSection[] = [
 		id: "expense-reports",
 		label: "Expense Reports",
 		kicker: "Expense Intake",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M2 3h12v10H2V3zm1.5 1.5v7h9v-7h-9zM5 6h6v1H5V6zm0 3h4v1H5V9z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: Receipt,
 		actions: [],
 		ledger: [
 			"Imported rows become the expense facts compliance checks run against.",
 		],
 	},
 	{
+		id: "evaluation-runs",
+		label: "Evaluation Runs",
+		kicker: "Compliance Batch",
+		icon: ShieldCheck,
+		actions: [],
+		ledger: [
+			"Batch compliance checks against imported Expense Reports using pinned Compiled Rule Sets.",
+		],
+	},
+	{
 		id: "extraction-runs",
 		label: "Extraction Runs",
 		kicker: "Machine Dossier",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M2 3h12v2H2V3zm0 4h8v2H2V7zm0 4h10v2H2v-2z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: FileOutput,
 		actions: [],
 		ledger: [
 			"Failed runs surface validation detail so editors can retry with corrected configuration.",
@@ -128,13 +129,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "review",
 		label: "Review Rules",
 		kicker: "Approval Desk",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M6.5 11.5L3 8l1-1 2.5 2.5L12 4l1 1-6.5 6.5z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: ClipboardCheck,
 		actions: [],
 		ledger: ["Preserve an auditable rationale before publication."],
 	},
@@ -142,13 +137,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "policy-versions",
 		label: "Policy Versions",
 		kicker: "Version Ledger",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M4 2h8v2H4V2zm-1 4h10v8H3V6zm2 2v1h6V8H5zm0 3v1h4v-1H5z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: GitBranch,
 		actions: [],
 		ledger: ["Change summaries explain why a Policy Version was published."],
 	},
@@ -156,13 +145,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "compliance",
 		label: "Compliance",
 		kicker: "Rule Compiler",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M2 4h12v8H2V4zm1 1v6h10V5H3zm2 1h6v1H5V6zm0 2h4v1H5V8z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: Blocks,
 		actions: [],
 		ledger: [
 			"Compiled Rule Sets are immutable artifacts pinned to one Policy Version.",
@@ -172,13 +155,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "manual-rules",
 		label: "Manual Rules",
 		kicker: "Manual Override",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M11.5 1l3.5 3.5-8 8H3.5V9.5l8-8zM10 2.5L4 8.5v1.5H5.5L11.5 4 10 2.5z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: PenLine,
 		actions: [],
 		ledger: ["Rationale matters because Citation may be absent for this path."],
 	},
@@ -186,13 +163,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "audit",
 		label: "Audit",
 		kicker: "Trace Archive",
-		icon: (
-			<NavIcon>
-				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
-					<path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM7.25 4v4.5l3.5 2-.75 1.2-4-2.3V4h1.25z" />
-				</svg>
-			</NavIcon>
-		),
+		icon: ScrollText,
 		actions: [],
 		ledger: ["Immutable record of what changed and who recorded it."],
 	},
@@ -246,6 +217,9 @@ export default function App() {
 	);
 	const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
 	const [reviewExtractionRunId, setReviewExtractionRunId] = useState<
+		string | null
+	>(null);
+	const [selectedEvaluationRunId, setSelectedEvaluationRunId] = useState<
 		string | null
 	>(null);
 	const [customToken, setCustomToken] = useState("");
@@ -449,11 +423,14 @@ export default function App() {
 										if (section.id === "review") {
 											setReviewExtractionRunId(null);
 										}
+										if (section.id === "evaluation-runs") {
+											setSelectedEvaluationRunId(null);
+										}
 										setActiveSection(section.id);
 									}}
 									tabIndex={sidebarOpen ? undefined : -1}
 								>
-									{section.icon}
+									<NavIcon icon={section.icon} />
 									<span>{section.label}</span>
 								</button>
 							</li>
@@ -532,7 +509,18 @@ export default function App() {
 					{activeSection === "documents" ? (
 						<DocumentCatalog principal={principal} />
 					) : activeSection === "expense-reports" ? (
-						<ExpenseReportsPage principal={principal} />
+						<ExpenseReportsPage
+							principal={principal}
+							onOpenEvaluationRun={(complianceEvaluationRunId) => {
+								setSelectedEvaluationRunId(complianceEvaluationRunId);
+								setActiveSection("evaluation-runs");
+							}}
+						/>
+					) : activeSection === "evaluation-runs" ? (
+						<ComplianceEvaluationRunCatalog
+							principal={principal}
+							initialRunId={selectedEvaluationRunId}
+						/>
 					) : activeSection === "dashboard" ? (
 						<DashboardPage
 							onOpenSection={(section) => {
