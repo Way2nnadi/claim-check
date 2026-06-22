@@ -4,21 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Policy Nexus · Terminal</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Orbitron:wght@400;500;600;700&family=Share+Tech+Mono&family=Syne:wght@500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
     <script>
       (function () {
-        var stored = localStorage.getItem("policy-nexus-theme");
-        var theme =
-          stored === "light" || stored === "dark"
-            ? stored
-            : window.matchMedia("(prefers-color-scheme: light)").matches
-              ? "light"
-              : "dark";
+        var stored = null;
+        try {
+          stored = localStorage.getItem("policy-nexus-theme");
+        } catch (error) {
+          stored = null;
+        }
+        var theme = stored === "light" || stored === "dark" ? stored : "light";
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;
       })();

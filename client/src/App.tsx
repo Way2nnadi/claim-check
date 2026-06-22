@@ -12,12 +12,14 @@ import ExtractionRunCatalog from "./ExtractionRunCatalog";
 import ManualRulesPage from "./ManualRulesPage";
 import PolicyVersionCatalog from "./PolicyVersionCatalog";
 import AuditLogPage from "./AuditLogPage";
+import DashboardPage from "./DashboardPage";
 import ThemeToggle from "./ThemeToggle";
 import { hasAnyRole } from "./permissions";
 import type { AuthenticatedPrincipal, Role } from "./types";
 
 type AuthStatus = "booting" | "signed_out" | "authenticating" | "authenticated";
 type SectionId =
+	| "dashboard"
 	| "documents"
 	| "extraction-runs"
 	| "review"
@@ -71,6 +73,13 @@ const personaOptions: readonly PersonaOption[] = [
 ];
 
 const shellSections: readonly ShellSection[] = [
+	{
+		id: "dashboard",
+		label: "Dashboard",
+		kicker: "Front Desk",
+		actions: [],
+		ledger: ["Review pending Candidate Rules, Policy Versions, and recent Extraction Runs in one place."],
+	},
 	{
 		id: "documents",
 		label: "Documents",
@@ -139,7 +148,7 @@ export default function App() {
 	const [principal, setPrincipal] = useState<AuthenticatedPrincipal | null>(
 		null,
 	);
-	const [activeSection, setActiveSection] = useState<SectionId>("documents");
+	const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
 	const [reviewExtractionRunId, setReviewExtractionRunId] = useState<
 		string | null
 	>(null);
@@ -196,7 +205,7 @@ export default function App() {
 			setStoredToken(nextToken);
 			setPrincipal(nextPrincipal);
 			setCustomToken("");
-			setActiveSection("documents");
+			setActiveSection("dashboard");
 			setStatus("authenticated");
 		} catch (error: unknown) {
 			clearStoredToken();
@@ -436,6 +445,19 @@ export default function App() {
 					) : null}
 					{activeSection === "documents" ? (
 						<DocumentCatalog principal={principal} />
+					) : activeSection === "dashboard" ? (
+						<DashboardPage
+							onOpenSection={(section) => {
+								if (section === "review") {
+									setReviewExtractionRunId(null);
+								}
+								setActiveSection(section);
+							}}
+							onOpenRun={(extractionRunId) => {
+								setReviewExtractionRunId(extractionRunId);
+								setActiveSection("review");
+							}}
+						/>
 					) : activeSection === "extraction-runs" ? (
 						<ExtractionRunCatalog
 							onOpenRun={(extractionRunId) => {

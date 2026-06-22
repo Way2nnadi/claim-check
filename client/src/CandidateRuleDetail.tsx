@@ -989,7 +989,9 @@ export default function CandidateRuleDetail({
             <span
               className={`review-qa-count${review.qa_flags.length > 0 ? " flagged" : " clear"}`}
             >
-              {review.qa_flags.length} QA
+              {review.qa_flags.length > 0
+                ? `${review.qa_flags.length} QA flag${review.qa_flags.length === 1 ? "" : "s"}`
+                : "QA clear"}
             </span>
           </div>
         </div>
