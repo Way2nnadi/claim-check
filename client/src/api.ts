@@ -1,6 +1,10 @@
 import type {
   AuthenticatedPrincipal,
+  CandidateRuleApprovalRequest,
+  CandidateRuleApprovalResponse,
   CandidateRuleFilters,
+  CandidateRuleRejectionRequest,
+  CandidateRuleRejectionResponse,
   CandidateRuleReview,
   CandidateRuleReviewListResponse,
   CandidateRuleReviewUpdateRequest,
@@ -312,6 +316,32 @@ export function updateCandidateRule(
     `/api/candidate-rules/${encodeURIComponent(candidateRuleId)}`,
     {
       method: "PATCH",
+      body: JSON.stringify(request),
+    },
+  );
+}
+
+export function approveCandidateRule(
+  candidateRuleId: string,
+  request: CandidateRuleApprovalRequest,
+): Promise<CandidateRuleApprovalResponse> {
+  return apiRequest<CandidateRuleApprovalResponse>(
+    `/api/candidate-rules/${encodeURIComponent(candidateRuleId)}/approvals`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
+}
+
+export function rejectCandidateRule(
+  candidateRuleId: string,
+  request: CandidateRuleRejectionRequest,
+): Promise<CandidateRuleRejectionResponse> {
+  return apiRequest<CandidateRuleRejectionResponse>(
+    `/api/candidate-rules/${encodeURIComponent(candidateRuleId)}/rejections`,
+    {
+      method: "POST",
       body: JSON.stringify(request),
     },
   );

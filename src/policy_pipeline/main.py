@@ -171,7 +171,7 @@ def create_app() -> FastAPI:
         return principal
 
     class CandidateRuleApprovalRequest(BaseModel):
-        rationale: str
+        rationale: str = Field(min_length=1)
 
     class CandidateRuleApprovalResponse(BaseModel):
         candidate_rule_id: str

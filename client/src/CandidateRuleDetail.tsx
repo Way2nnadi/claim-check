@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import {
   ApiError,
+  approveCandidateRule,
   fetchCandidateRule,
   fetchDocumentSections,
+  rejectCandidateRule,
   updateCandidateRule,
 } from "./api";
 import {
@@ -41,9 +43,14 @@ interface CandidateRuleDetailProps {
   onBack?: () => void;
   backLabel?: string;
   onReviewChange?: (review: CandidateRuleReview) => void;
+  onReviewResolved?: (
+    candidateRuleId: string,
+    outcome: "approved" | "rejected",
+  ) => void;
 }
 
 type DetailStatus = "loading" | "ready" | "not_found" | "error";
+type DecisionMode = "approve" | "reject";
 
 interface ScopeDraft {
   country: string;
@@ -93,6 +100,8 @@ interface ReviewFieldProps {
 }
 
 const EDITOR_ROLES = ["admin", "approver"] as const;
+const QUEUE_LIFECYCLE_STATES = new Set(["extracted", "in_review"]);
+const APPROVAL_BLOCKING_QA_CODES = new Set(["unresolvable_citation"]);
 
 const ENFORCEABILITY_OPTIONS: readonly EnforceabilityClass[] = [
   "enforceable",
@@ -359,6 +368,37 @@ function countDifferences(review: CandidateRuleReview, draft: RuleDraft): number
   }
 
   return count;
+}
+
+function approvalBlockersFor(review: CandidateRuleReview, draft: RuleDraft): string[] {
+  const blockers = new Set<string>();
+  const normalizedStatement = normalizeStatement(draft.statement);
+  const condition = buildConditionFromDraft(draft.condition);
+  const currentCitation = review.current_rule.citation;
+
+  if (normalizedStatement.length === 0) {
+    blockers.add("Add a Rule statement before approval.");
+  }
+
+  if (draft.enforceability_class === "enforceable" && condition === null) {
+    blockers.add("Complete the machine-checkable condition before approval.");
+  }
+
+  if (draft.enforceability_class !== "enforceable" && condition !== null) {
+    blockers.add("Remove the machine-checkable condition before approval.");
+  }
+
+  if (currentCitation === null) {
+    blockers.add("Resolve the Citation issue before approving this Candidate Rule.");
+  }
+
+  for (const flag of review.qa_flags) {
+    if (APPROVAL_BLOCKING_QA_CODES.has(flag.code)) {
+      blockers.add("Resolve the Citation issue before approving this Candidate Rule.");
+    }
+  }
+
+  return [...blockers];
 }
 
 function normalizeStatement(value: string): string {
@@ -648,6 +688,7 @@ export default function CandidateRuleDetail({
   onBack,
   backLabel = "Clear selection",
   onReviewChange,
+  onReviewResolved,
 }: CandidateRuleDetailProps) {
   const [status, setStatus] = useState<DetailStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -655,6 +696,10 @@ export default function CandidateRuleDetail({
   const [review, setReview] = useState<CandidateRuleReview | null>(null);
   const [draft, setDraft] = useState<RuleDraft | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const [decisionMode, setDecisionMode] = useState<DecisionMode | null>(null);
+  const [decisionComment, setDecisionComment] = useState("");
+  const [decisionError, setDecisionError] = useState<string | null>(null);
   const [sections, setSections] = useState<DocumentSection[]>([]);
   const [sectionsStatus, setSectionsStatus] = useState<"idle" | "loading" | "ready" | "error">(
     "idle",
@@ -679,6 +724,10 @@ export default function CandidateRuleDetail({
     setSectionsOpen(false);
     setSectionFilter("");
     setShowFullSection(false);
+    setIsResolving(false);
+    setDecisionMode(null);
+    setDecisionComment("");
+    setDecisionError(null);
 
     try {
       const response = await fetchCandidateRule(candidateRuleId);
@@ -742,6 +791,8 @@ export default function CandidateRuleDetail({
     sections.find((section) => section.section_id === selectedSectionId) ?? null;
   const viewingCitedSection =
     Boolean(citation && selectedSection && selectedSection.section_id === citation.section_id);
+  const approvalBlockers =
+    review && draft ? approvalBlockersFor(review, draft) : [];
 
   function clearFeedback(): void {
     if (errorMessage !== null) {
@@ -757,6 +808,19 @@ export default function CandidateRuleDetail({
     setDraft(nextDraft);
   }
 
+  function openDecisionModal(mode: DecisionMode): void {
+    clearFeedback();
+    setDecisionMode(mode);
+    setDecisionComment("");
+    setDecisionError(null);
+  }
+
+  function closeDecisionModal(): void {
+    setDecisionMode(null);
+    setDecisionComment("");
+    setDecisionError(null);
+  }
+
   function handleSectionSelect(sectionId: string): void {
     setSelectedSectionId(sectionId);
     setShowFullSection(false);
@@ -765,7 +829,7 @@ export default function CandidateRuleDetail({
 
   async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!review || !draft || !canEdit || unsavedChangeCount === 0) {
+    if (!review || !draft || !canEdit || isResolving || unsavedChangeCount === 0) {
       return;
     }
 
@@ -785,6 +849,63 @@ export default function CandidateRuleDetail({
       );
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleResolveReview(): Promise<void> {
+    if (!review || decisionMode === null || !canEdit || isSaving) {
+      return;
+    }
+
+    const trimmedComment = decisionComment.trim();
+    if (!trimmedComment) {
+      setDecisionError(
+        decisionMode === "approve"
+          ? "Enter approval rationale before moving this Candidate Rule into the Structured Policy Store."
+          : "Enter a rejection reason before removing this Candidate Rule from the review queue.",
+      );
+      return;
+    }
+
+    setIsResolving(true);
+    setDecisionError(null);
+    setErrorMessage(null);
+    setSaveMessage(null);
+
+    try {
+      if (decisionMode === "approve") {
+        await approveCandidateRule(candidateRuleId, {
+          rationale: trimmedComment,
+        });
+      } else {
+        await rejectCandidateRule(candidateRuleId, {
+          reason: trimmedComment,
+        });
+      }
+
+      const updatedReview = await fetchCandidateRule(candidateRuleId);
+      setReview(updatedReview);
+      setDraft(createRuleDraft(updatedReview.current_rule));
+      onReviewChange?.(updatedReview);
+      setSaveMessage(
+        decisionMode === "approve"
+          ? "Candidate Rule approved."
+          : "Candidate Rule rejected.",
+      );
+      const outcome = decisionMode === "approve" ? "approved" : "rejected";
+      closeDecisionModal();
+      onReviewResolved?.(candidateRuleId, outcome);
+    } catch (error: unknown) {
+      setErrorMessage(
+        describeCandidateRuleError(
+          error,
+          decisionMode === "approve"
+            ? "Unable to approve Candidate Rule."
+            : "Unable to reject Candidate Rule.",
+        ),
+      );
+    } finally {
+      setIsResolving(false);
     }
   }
 
@@ -835,7 +956,13 @@ export default function CandidateRuleDetail({
   const lifecycleClass = lifecycleStateClassName(review.lifecycle_state);
   const extractedCondition = review.extracted_rule.condition;
   const extractedApplicability = review.extracted_rule.applicability;
-  const saveDisabled = !canEdit || isSaving || unsavedChangeCount === 0;
+  const canResolve =
+    canEdit && QUEUE_LIFECYCLE_STATES.has(review.lifecycle_state);
+  const saveDisabled =
+    !canEdit || isSaving || isResolving || unsavedChangeCount === 0;
+  const approveDisabled =
+    !canResolve || isSaving || isResolving || approvalBlockers.length > 0;
+  const rejectDisabled = !canResolve || isSaving || isResolving;
   const hasCommittedEdits = review.committed_rule !== null;
 
   const pageTitle = citation
@@ -881,430 +1008,557 @@ export default function CandidateRuleDetail({
       </header>
 
       <div className="review-detail-body">
-      {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
-      {saveMessage ? <p className="review-save-banner">{saveMessage}</p> : null}
+        {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
+        {saveMessage ? <p className="review-save-banner">{saveMessage}</p> : null}
 
-      <div className="review-detail-workspace">
-        <QaFlagsBanner flags={review.qa_flags} />
+        <div className="review-detail-workspace">
+          <QaFlagsBanner flags={review.qa_flags} />
 
-        <form className="review-edit-form" onSubmit={handleSave}>
-          <section className="review-detail-panel reveal">
-            <ReviewField
-              label="Statement"
-              extractedValue={review.extracted_rule.statement}
-              changed={draft.statement.trim() !== review.extracted_rule.statement}
-              inputId="candidate-rule-statement"
-            >
-              <textarea
-                id="candidate-rule-statement"
-                value={draft.statement}
-                disabled={!canEdit || isSaving}
-                rows={4}
-                onChange={(event) =>
-                  updateDraftState({
-                    ...draft,
-                    statement: event.target.value,
-                  })
-                }
-              />
-            </ReviewField>
+          <form className="review-edit-form" onSubmit={handleSave}>
+            <section className="review-detail-panel reveal">
+              <ReviewField
+                label="Statement"
+                extractedValue={review.extracted_rule.statement}
+                changed={draft.statement.trim() !== review.extracted_rule.statement}
+                inputId="candidate-rule-statement"
+              >
+                <textarea
+                  id="candidate-rule-statement"
+                  value={draft.statement}
+                  disabled={!canEdit || isSaving}
+                  rows={4}
+                  onChange={(event) =>
+                    updateDraftState({
+                      ...draft,
+                      statement: event.target.value,
+                    })
+                  }
+                />
+              </ReviewField>
 
-            <ReviewField
-              label="Enforceability"
-              extractedValue={formatEnforceabilityClass(review.extracted_rule.enforceability_class)}
-              changed={draft.enforceability_class !== review.extracted_rule.enforceability_class}
-              inputId="candidate-rule-enforceability"
-              description={
-                showEnforceabilityHint
-                  ? "If you switch away from enforceable, clear the machine-checkable condition before saving."
-                  : undefined
-              }
-            >
-              <SearchablePicker
-                label="Enforceability class"
+              <ReviewField
+                label="Enforceability"
+                extractedValue={formatEnforceabilityClass(review.extracted_rule.enforceability_class)}
+                changed={draft.enforceability_class !== review.extracted_rule.enforceability_class}
                 inputId="candidate-rule-enforceability"
-                hideLabel
-                value={draft.enforceability_class}
-                options={ENFORCEABILITY_PICKER_OPTIONS}
-                placeholder="Select enforceability class"
-                emptyMessage="No matching classes"
-                disabled={!canEdit || isSaving}
-                mono
-                showAllOnOpen
-                onChange={(nextValue) =>
-                  updateDraftState({
-                    ...draft,
-                    enforceability_class: nextValue as EnforceabilityClass,
-                  })
+                description={
+                  showEnforceabilityHint
+                    ? "If you switch away from enforceable, clear the machine-checkable condition before saving."
+                    : undefined
                 }
-              />
-            </ReviewField>
-          </section>
-
-          {citation ? (
-            <CitationStrip
-              citation={citation}
-              currentStatement={draft.statement}
-              sections={sections}
-              sectionsStatus={sectionsStatus}
-              sectionsError={sectionsError}
-              selectedSection={selectedSection}
-              viewingCitedSection={viewingCitedSection}
-              showFullSection={showFullSection}
-              sectionsOpen={sectionsOpen}
-              sectionFilter={sectionFilter}
-              sourceBodyRef={sourceBodyRef}
-              onToggleContext={() => setShowFullSection((current) => !current)}
-              onBrowseSections={() => setSectionsOpen(true)}
-              onSectionFilterChange={setSectionFilter}
-              onSectionSelect={handleSectionSelect}
-              onCloseSections={() => setSectionsOpen(false)}
-            />
-          ) : (
-            <p className="review-citation-empty reveal">No source linked for this rule.</p>
-          )}
-
-          <section
-            className="review-detail-panel reveal"
-            style={{ "--reveal-delay": "40ms" } as CSSProperties}
-          >
-            <h4>Scope</h4>
-            <div className="review-field-grid cols-2">
-              {SCOPE_FIELDS.map((field) => (
-                <ReviewField
-                  key={field.key}
-                  label={field.label}
-                  extractedValue={displayValue(review.extracted_rule.scope[field.key])}
-                  changed={
-                    normalizeOptionalString(draft.scope[field.key]) !==
-                    review.extracted_rule.scope[field.key]
-                  }
-                  showWasLine={
-                    normalizeOptionalString(draft.scope[field.key]) !==
-                      review.extracted_rule.scope[field.key] &&
-                    hasExtractedBaseline(review.extracted_rule.scope[field.key])
-                  }
-                  inputId={`candidate-rule-${field.key}`}
-                >
-                  <input
-                    id={`candidate-rule-${field.key}`}
-                    value={draft.scope[field.key]}
-                    disabled={!canEdit || isSaving}
-                    spellCheck={false}
-                    placeholder={field.placeholder}
-                    onChange={(event) =>
-                      updateDraftState({
-                        ...draft,
-                        scope: {
-                          ...draft.scope,
-                          [field.key]: event.target.value,
-                        },
-                      })
-                    }
-                  />
-                </ReviewField>
-              ))}
-            </div>
-          </section>
-
-          <section
-            className="review-detail-panel reveal"
-            style={{ "--reveal-delay": "80ms" } as CSSProperties}
-          >
-            <h4>Machine-checkable shape</h4>
-            <div className="review-field-grid cols-3 review-condition-row">
-              <ReviewField
-                label="Field"
-                extractedValue={displayValue(extractedCondition?.field)}
-                changed={draft.condition.field.trim() !== (extractedCondition?.field ?? "")}
-                showWasLine={
-                  draft.condition.field.trim() !== (extractedCondition?.field ?? "") &&
-                  hasExtractedBaseline(extractedCondition?.field)
-                }
-                inputId="candidate-rule-condition-field"
-              >
-                <input
-                  id="candidate-rule-condition-field"
-                  value={draft.condition.field}
-                  disabled={!canEdit || isSaving}
-                  spellCheck={false}
-                  placeholder="meal.amount"
-                  onChange={(event) =>
-                    updateDraftState({
-                      ...draft,
-                      condition: {
-                        ...draft.condition,
-                        field: event.target.value,
-                      },
-                    })
-                  }
-                />
-              </ReviewField>
-
-              <ReviewField
-                label="Operator"
-                extractedValue={displayValue(extractedCondition?.operator)}
-                changed={draft.condition.operator.trim() !== (extractedCondition?.operator ?? "")}
-                showWasLine={
-                  draft.condition.operator.trim() !== (extractedCondition?.operator ?? "") &&
-                  hasExtractedBaseline(extractedCondition?.operator)
-                }
-                inputId="candidate-rule-condition-operator"
-              >
-                <input
-                  id="candidate-rule-condition-operator"
-                  value={draft.condition.operator}
-                  disabled={!canEdit || isSaving}
-                  spellCheck={false}
-                  placeholder="<="
-                  onChange={(event) =>
-                    updateDraftState({
-                      ...draft,
-                      condition: {
-                        ...draft.condition,
-                        operator: event.target.value,
-                      },
-                    })
-                  }
-                />
-              </ReviewField>
-
-              <ReviewField
-                label="Value"
-                extractedValue={displayValue(extractedCondition?.value)}
-                changed={draft.condition.value.trim() !== (extractedCondition?.value ?? "")}
-                showWasLine={
-                  draft.condition.value.trim() !== (extractedCondition?.value ?? "") &&
-                  hasExtractedBaseline(extractedCondition?.value)
-                }
-                inputId="candidate-rule-condition-value"
-              >
-                <input
-                  id="candidate-rule-condition-value"
-                  value={draft.condition.value}
-                  disabled={!canEdit || isSaving}
-                  spellCheck={false}
-                  placeholder="75"
-                  onChange={(event) =>
-                    updateDraftState({
-                      ...draft,
-                      condition: {
-                        ...draft.condition,
-                        value: event.target.value,
-                      },
-                    })
-                  }
-                />
-              </ReviewField>
-            </div>
-
-            <div className="review-field-grid cols-2 review-applicability-grid">
-              <ReviewField
-                label="Aggregation period"
-                extractedValue={formatAggregationPeriod(extractedApplicability?.aggregation_period ?? null)}
-                changed={
-                  draft.applicability.aggregation_period !==
-                  (extractedApplicability?.aggregation_period ?? "")
-                }
-                showWasLine={
-                  draft.applicability.aggregation_period !==
-                    (extractedApplicability?.aggregation_period ?? "") &&
-                  hasExtractedBaseline(extractedApplicability?.aggregation_period)
-                }
-                inputId="candidate-rule-aggregation-period"
               >
                 <SearchablePicker
-                  label="Aggregation period"
-                  inputId="candidate-rule-aggregation-period"
+                  label="Enforceability class"
+                  inputId="candidate-rule-enforceability"
                   hideLabel
-                  value={draft.applicability.aggregation_period}
-                  options={AGGREGATION_PERIOD_PICKER_OPTIONS}
-                  placeholder="Select aggregation period"
-                  emptyMessage="No matching periods"
+                  value={draft.enforceability_class}
+                  options={ENFORCEABILITY_PICKER_OPTIONS}
+                  placeholder="Select enforceability class"
+                  emptyMessage="No matching classes"
                   disabled={!canEdit || isSaving}
                   mono
                   showAllOnOpen
                   onChange={(nextValue) =>
                     updateDraftState({
                       ...draft,
-                      applicability: {
-                        ...draft.applicability,
-                        aggregation_period: nextValue as AggregationPeriod | "",
-                      },
+                      enforceability_class: nextValue as EnforceabilityClass,
                     })
                   }
                 />
               </ReviewField>
+            </section>
 
-              <ReviewField
-                label="Unit"
-                extractedValue={displayValue(extractedApplicability?.unit)}
-                changed={draft.applicability.unit.trim() !== (extractedApplicability?.unit ?? "")}
-                showWasLine={
-                  draft.applicability.unit.trim() !== (extractedApplicability?.unit ?? "") &&
-                  hasExtractedBaseline(extractedApplicability?.unit)
-                }
-                inputId="candidate-rule-applicability-unit"
+            {citation ? (
+              <CitationStrip
+                citation={citation}
+                currentStatement={draft.statement}
+                sections={sections}
+                sectionsStatus={sectionsStatus}
+                sectionsError={sectionsError}
+                selectedSection={selectedSection}
+                viewingCitedSection={viewingCitedSection}
+                showFullSection={showFullSection}
+                sectionsOpen={sectionsOpen}
+                sectionFilter={sectionFilter}
+                sourceBodyRef={sourceBodyRef}
+                onToggleContext={() => setShowFullSection((current) => !current)}
+                onBrowseSections={() => setSectionsOpen(true)}
+                onSectionFilterChange={setSectionFilter}
+                onSectionSelect={handleSectionSelect}
+                onCloseSections={() => setSectionsOpen(false)}
+              />
+            ) : (
+              <p className="review-citation-empty reveal">No source linked for this rule.</p>
+            )}
+
+            <section
+              className="review-detail-panel reveal"
+              style={{ "--reveal-delay": "40ms" } as CSSProperties}
+            >
+              <h4>Scope</h4>
+              <div className="review-field-grid cols-2">
+                {SCOPE_FIELDS.map((field) => (
+                  <ReviewField
+                    key={field.key}
+                    label={field.label}
+                    extractedValue={displayValue(review.extracted_rule.scope[field.key])}
+                    changed={
+                      normalizeOptionalString(draft.scope[field.key]) !==
+                      review.extracted_rule.scope[field.key]
+                    }
+                    showWasLine={
+                      normalizeOptionalString(draft.scope[field.key]) !==
+                        review.extracted_rule.scope[field.key] &&
+                      hasExtractedBaseline(review.extracted_rule.scope[field.key])
+                    }
+                    inputId={`candidate-rule-${field.key}`}
+                  >
+                    <input
+                      id={`candidate-rule-${field.key}`}
+                      value={draft.scope[field.key]}
+                      disabled={!canEdit || isSaving}
+                      spellCheck={false}
+                      placeholder={field.placeholder}
+                      onChange={(event) =>
+                        updateDraftState({
+                          ...draft,
+                          scope: {
+                            ...draft.scope,
+                            [field.key]: event.target.value,
+                          },
+                        })
+                      }
+                    />
+                  </ReviewField>
+                ))}
+              </div>
+            </section>
+
+            <section
+              className="review-detail-panel reveal"
+              style={{ "--reveal-delay": "80ms" } as CSSProperties}
+            >
+              <h4>Machine-checkable shape</h4>
+              <div className="review-field-grid cols-3 review-condition-row">
+                <ReviewField
+                  label="Field"
+                  extractedValue={displayValue(extractedCondition?.field)}
+                  changed={draft.condition.field.trim() !== (extractedCondition?.field ?? "")}
+                  showWasLine={
+                    draft.condition.field.trim() !== (extractedCondition?.field ?? "") &&
+                    hasExtractedBaseline(extractedCondition?.field)
+                  }
+                  inputId="candidate-rule-condition-field"
+                >
+                  <input
+                    id="candidate-rule-condition-field"
+                    value={draft.condition.field}
+                    disabled={!canEdit || isSaving}
+                    spellCheck={false}
+                    placeholder="meal.amount"
+                    onChange={(event) =>
+                      updateDraftState({
+                        ...draft,
+                        condition: {
+                          ...draft.condition,
+                          field: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </ReviewField>
+
+                <ReviewField
+                  label="Operator"
+                  extractedValue={displayValue(extractedCondition?.operator)}
+                  changed={draft.condition.operator.trim() !== (extractedCondition?.operator ?? "")}
+                  showWasLine={
+                    draft.condition.operator.trim() !== (extractedCondition?.operator ?? "") &&
+                    hasExtractedBaseline(extractedCondition?.operator)
+                  }
+                  inputId="candidate-rule-condition-operator"
+                >
+                  <input
+                    id="candidate-rule-condition-operator"
+                    value={draft.condition.operator}
+                    disabled={!canEdit || isSaving}
+                    spellCheck={false}
+                    placeholder="<="
+                    onChange={(event) =>
+                      updateDraftState({
+                        ...draft,
+                        condition: {
+                          ...draft.condition,
+                          operator: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </ReviewField>
+
+                <ReviewField
+                  label="Value"
+                  extractedValue={displayValue(extractedCondition?.value)}
+                  changed={draft.condition.value.trim() !== (extractedCondition?.value ?? "")}
+                  showWasLine={
+                    draft.condition.value.trim() !== (extractedCondition?.value ?? "") &&
+                    hasExtractedBaseline(extractedCondition?.value)
+                  }
+                  inputId="candidate-rule-condition-value"
+                >
+                  <input
+                    id="candidate-rule-condition-value"
+                    value={draft.condition.value}
+                    disabled={!canEdit || isSaving}
+                    spellCheck={false}
+                    placeholder="75"
+                    onChange={(event) =>
+                      updateDraftState({
+                        ...draft,
+                        condition: {
+                          ...draft.condition,
+                          value: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </ReviewField>
+              </div>
+
+              <div className="review-field-grid cols-2 review-applicability-grid">
+                <ReviewField
+                  label="Aggregation period"
+                  extractedValue={formatAggregationPeriod(extractedApplicability?.aggregation_period ?? null)}
+                  changed={
+                    draft.applicability.aggregation_period !==
+                    (extractedApplicability?.aggregation_period ?? "")
+                  }
+                  showWasLine={
+                    draft.applicability.aggregation_period !==
+                      (extractedApplicability?.aggregation_period ?? "") &&
+                    hasExtractedBaseline(extractedApplicability?.aggregation_period)
+                  }
+                  inputId="candidate-rule-aggregation-period"
+                >
+                  <SearchablePicker
+                    label="Aggregation period"
+                    inputId="candidate-rule-aggregation-period"
+                    hideLabel
+                    value={draft.applicability.aggregation_period}
+                    options={AGGREGATION_PERIOD_PICKER_OPTIONS}
+                    placeholder="Select aggregation period"
+                    emptyMessage="No matching periods"
+                    disabled={!canEdit || isSaving}
+                    mono
+                    showAllOnOpen
+                    onChange={(nextValue) =>
+                      updateDraftState({
+                        ...draft,
+                        applicability: {
+                          ...draft.applicability,
+                          aggregation_period: nextValue as AggregationPeriod | "",
+                        },
+                      })
+                    }
+                  />
+                </ReviewField>
+
+                <ReviewField
+                  label="Unit"
+                  extractedValue={displayValue(extractedApplicability?.unit)}
+                  changed={draft.applicability.unit.trim() !== (extractedApplicability?.unit ?? "")}
+                  showWasLine={
+                    draft.applicability.unit.trim() !== (extractedApplicability?.unit ?? "") &&
+                    hasExtractedBaseline(extractedApplicability?.unit)
+                  }
+                  inputId="candidate-rule-applicability-unit"
+                >
+                  <input
+                    id="candidate-rule-applicability-unit"
+                    value={draft.applicability.unit}
+                    disabled={!canEdit || isSaving}
+                    spellCheck={false}
+                    placeholder="money"
+                    onChange={(event) =>
+                      updateDraftState({
+                        ...draft,
+                        applicability: {
+                          ...draft.applicability,
+                          unit: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </ReviewField>
+
+                <ReviewField
+                  label="Currency"
+                  extractedValue={displayValue(extractedApplicability?.currency)}
+                  changed={
+                    normalizeCurrencyForSave(draft.applicability.currency) !==
+                    extractedApplicability?.currency
+                  }
+                  showWasLine={
+                    normalizeCurrencyForSave(draft.applicability.currency) !==
+                      extractedApplicability?.currency &&
+                    hasExtractedBaseline(extractedApplicability?.currency)
+                  }
+                  inputId="candidate-rule-applicability-currency"
+                  description="3-letter ISO code (e.g. USD)."
+                >
+                  <input
+                    id="candidate-rule-applicability-currency"
+                    value={draft.applicability.currency}
+                    disabled={!canEdit || isSaving}
+                    spellCheck={false}
+                    placeholder="USD"
+                    maxLength={3}
+                    autoCapitalize="characters"
+                    onChange={(event) =>
+                      updateDraftState({
+                        ...draft,
+                        applicability: {
+                          ...draft.applicability,
+                          currency: normalizeCurrencyInput(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </ReviewField>
+
+                <ReviewField
+                  label="Limit basis"
+                  extractedValue={displayValue(extractedApplicability?.limit_basis)}
+                  changed={
+                    normalizeOptionalString(draft.applicability.limit_basis) !==
+                    extractedApplicability?.limit_basis
+                  }
+                  showWasLine={
+                    normalizeOptionalString(draft.applicability.limit_basis) !==
+                      extractedApplicability?.limit_basis &&
+                    hasExtractedBaseline(extractedApplicability?.limit_basis)
+                  }
+                  inputId="candidate-rule-applicability-limit-basis"
+                >
+                  <input
+                    id="candidate-rule-applicability-limit-basis"
+                    value={draft.applicability.limit_basis}
+                    disabled={!canEdit || isSaving}
+                    spellCheck={false}
+                    placeholder="per employee"
+                    onChange={(event) =>
+                      updateDraftState({
+                        ...draft,
+                        applicability: {
+                          ...draft.applicability,
+                          limit_basis: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </ReviewField>
+              </div>
+            </section>
+
+            {approvalBlockers.length > 0 ? (
+              <section
+                className="review-approval-blockers reveal"
+                aria-label="Approval blockers"
+                style={{ "--reveal-delay": "140ms" } as CSSProperties}
               >
-                <input
-                  id="candidate-rule-applicability-unit"
-                  value={draft.applicability.unit}
-                  disabled={!canEdit || isSaving}
-                  spellCheck={false}
-                  placeholder="money"
-                  onChange={(event) =>
-                    updateDraftState({
-                      ...draft,
-                      applicability: {
-                        ...draft.applicability,
-                        unit: event.target.value,
-                      },
-                    })
-                  }
-                />
-              </ReviewField>
-
-              <ReviewField
-                label="Currency"
-                extractedValue={displayValue(extractedApplicability?.currency)}
-                changed={
-                  normalizeCurrencyForSave(draft.applicability.currency) !==
-                  extractedApplicability?.currency
-                }
-                showWasLine={
-                  normalizeCurrencyForSave(draft.applicability.currency) !==
-                    extractedApplicability?.currency &&
-                  hasExtractedBaseline(extractedApplicability?.currency)
-                }
-                inputId="candidate-rule-applicability-currency"
-                description="3-letter ISO code (e.g. USD)."
-              >
-                <input
-                  id="candidate-rule-applicability-currency"
-                  value={draft.applicability.currency}
-                  disabled={!canEdit || isSaving}
-                  spellCheck={false}
-                  placeholder="USD"
-                  maxLength={3}
-                  autoCapitalize="characters"
-                  onChange={(event) =>
-                    updateDraftState({
-                      ...draft,
-                      applicability: {
-                        ...draft.applicability,
-                        currency: normalizeCurrencyInput(event.target.value),
-                      },
-                    })
-                  }
-                />
-              </ReviewField>
-
-              <ReviewField
-                label="Limit basis"
-                extractedValue={displayValue(extractedApplicability?.limit_basis)}
-                changed={
-                  normalizeOptionalString(draft.applicability.limit_basis) !==
-                  extractedApplicability?.limit_basis
-                }
-                showWasLine={
-                  normalizeOptionalString(draft.applicability.limit_basis) !==
-                    extractedApplicability?.limit_basis &&
-                  hasExtractedBaseline(extractedApplicability?.limit_basis)
-                }
-                inputId="candidate-rule-applicability-limit-basis"
-              >
-                <input
-                  id="candidate-rule-applicability-limit-basis"
-                  value={draft.applicability.limit_basis}
-                  disabled={!canEdit || isSaving}
-                  spellCheck={false}
-                  placeholder="per employee"
-                  onChange={(event) =>
-                    updateDraftState({
-                      ...draft,
-                      applicability: {
-                        ...draft.applicability,
-                        limit_basis: event.target.value,
-                      },
-                    })
-                  }
-                />
-              </ReviewField>
-            </div>
-          </section>
-
-          <footer
-            className="review-save-rail reveal"
-            style={{ "--reveal-delay": "160ms" } as CSSProperties}
-          >
-            <div>
-              <span className="review-save-kicker">
-                {canEdit ? "Approver access" : "Viewer access"}
-              </span>
-              <p className="review-save-note">
-                {canEdit
-                  ? "Saving preserves the extracted Rule and records the reviewed values as the current Candidate Rule."
-                  : "Viewer role can inspect extracted and current values but cannot save Candidate Rule edits."}
-              </p>
-            </div>
-            <button type="submit" className="review-save-button" disabled={saveDisabled}>
-              {isSaving ? "Saving…" : "Save Candidate Rule"}
-            </button>
-          </footer>
-
-          <details className="review-detail-meta reveal" style={{ "--reveal-delay": "180ms" } as CSSProperties}>
-            <summary>Audit & provenance</summary>
-            <div className="review-detail-meta-body">
-              <dl className="review-detail-grid compact">
-                <div>
-                  <dt>Extraction run</dt>
-                  <dd>{rule.origin.extraction_run_id ?? "—"}</dd>
+                <div className="review-approval-blockers-head">
+                  <span className="review-save-kicker">Approval blockers</span>
+                  <p className="review-save-note">
+                    Resolve these issues before moving this Candidate Rule into the Structured Policy Store.
+                  </p>
                 </div>
-                <div>
-                  <dt>Principal</dt>
-                  <dd>{principal.subject}</dd>
-                </div>
-                {citation ? (
-                  <>
-                    <div>
-                      <dt>Document</dt>
-                      <dd>{citation.document_id}</dd>
-                    </div>
-                    <div>
-                      <dt>Version</dt>
-                      <dd>{shortenId(citation.document_version_id)}</dd>
+                <ul className="review-approval-blockers-list">
+                  {approvalBlockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            <footer
+              className="review-save-rail reveal"
+              style={{ "--reveal-delay": "160ms" } as CSSProperties}
+            >
+              <div>
+                <span className="review-save-kicker">
+                  {canEdit ? "Approver access" : "Viewer access"}
+                </span>
+                <p className="review-save-note">
+                  {canEdit
+                    ? "Saving preserves the extracted Rule, while approve and reject record an explicit decision for the current Candidate Rule."
+                    : "Viewer role can inspect extracted and current values but cannot save or decide Candidate Rules."}
+                </p>
+              </div>
+              <div className="review-save-actions">
+                <button
+                  type="button"
+                  className="review-secondary-button"
+                  disabled={approveDisabled}
+                  onClick={() => openDecisionModal("approve")}
+                >
+                  Approve Candidate Rule
+                </button>
+                <button
+                  type="button"
+                  className="review-secondary-button review-danger-button"
+                  disabled={rejectDisabled}
+                  onClick={() => openDecisionModal("reject")}
+                >
+                  Reject Candidate Rule
+                </button>
+                <button type="submit" className="review-save-button" disabled={saveDisabled}>
+                  {isSaving ? "Saving…" : "Save Candidate Rule"}
+                </button>
+              </div>
+            </footer>
+
+            <details className="review-detail-meta reveal" style={{ "--reveal-delay": "180ms" } as CSSProperties}>
+              <summary>Audit & provenance</summary>
+              <div className="review-detail-meta-body">
+                <dl className="review-detail-grid compact">
+                  <div>
+                    <dt>Extraction run</dt>
+                    <dd>{rule.origin.extraction_run_id ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Principal</dt>
+                    <dd>{principal.subject}</dd>
+                  </div>
+                  {citation ? (
+                    <>
+                      <div>
+                        <dt>Document</dt>
+                        <dd>{citation.document_id}</dd>
+                      </div>
+                      <div>
+                        <dt>Version</dt>
+                        <dd>{shortenId(citation.document_version_id)}</dd>
+                      </div>
+                      <div className="review-detail-span">
+                        <dt>Citation span</dt>
+                        <dd>
+                          {citation.section_id} · chars {citation.start_char}–{citation.end_char}
+                        </dd>
+                      </div>
+                    </>
+                  ) : null}
+                </dl>
+                <p className="review-detail-note">
+                  {hasCommittedEdits
+                    ? "Committed edits remain separate from the extracted Candidate Rule for auditability."
+                    : "No committed edits yet. Saving will preserve the extracted Rule and create a reviewed value set."}
+                </p>
+                {hasCommittedEdits ? (
+                  <dl className="review-detail-grid compact">
+                    <div className="review-detail-span">
+                      <dt>Extracted statement</dt>
+                      <dd>{review.extracted_rule.statement}</dd>
                     </div>
                     <div className="review-detail-span">
-                      <dt>Citation span</dt>
-                      <dd>
-                        {citation.section_id} · chars {citation.start_char}–{citation.end_char}
-                      </dd>
+                      <dt>Current statement</dt>
+                      <dd>{rule.statement}</dd>
                     </div>
-                  </>
+                  </dl>
                 ) : null}
-              </dl>
-              <p className="review-detail-note">
-                {hasCommittedEdits
-                  ? "Committed edits remain separate from the extracted Candidate Rule for auditability."
-                  : "No committed edits yet. Saving will preserve the extracted Rule and create a reviewed value set."}
+              </div>
+            </details>
+          </form>
+        </div>
+      </div>
+
+      {decisionMode ? (
+        <div className="review-decision-backdrop" role="presentation">
+          <div
+            className="review-decision-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              decisionMode === "approve"
+                ? "Approve Candidate Rule"
+                : "Reject Candidate Rule"
+            }
+          >
+            <div className="review-decision-head">
+              <span className="review-save-kicker">
+                {decisionMode === "approve" ? "Approval record" : "Rejection record"}
+              </span>
+              <h4>
+                {decisionMode === "approve"
+                  ? "Approve Candidate Rule"
+                  : "Reject Candidate Rule"}
+              </h4>
+              <p>
+                {decisionMode === "approve"
+                  ? "Capture the rationale that justifies publishing this Candidate Rule into the Structured Policy Store."
+                  : "Capture why this Candidate Rule should leave the current filtered queue."}
               </p>
-              {hasCommittedEdits ? (
-                <dl className="review-detail-grid compact">
-                  <div className="review-detail-span">
-                    <dt>Extracted statement</dt>
-                    <dd>{review.extracted_rule.statement}</dd>
-                  </div>
-                  <div className="review-detail-span">
-                    <dt>Current statement</dt>
-                    <dd>{rule.statement}</dd>
-                  </div>
-                </dl>
-              ) : null}
             </div>
-          </details>
-        </form>
-      </div>
-      </div>
+
+            <label
+              className="review-decision-field"
+              htmlFor={
+                decisionMode === "approve"
+                  ? "candidate-rule-approval-rationale"
+                  : "candidate-rule-rejection-reason"
+              }
+            >
+              {decisionMode === "approve" ? "Approval rationale" : "Rejection reason"}
+              <textarea
+                id={
+                  decisionMode === "approve"
+                    ? "candidate-rule-approval-rationale"
+                    : "candidate-rule-rejection-reason"
+                }
+                value={decisionComment}
+                rows={4}
+                disabled={isResolving}
+                onChange={(event) => {
+                  setDecisionComment(event.target.value);
+                  if (decisionError !== null) {
+                    setDecisionError(null);
+                  }
+                }}
+              />
+            </label>
+
+            {decisionError ? <p className="error-banner">{decisionError}</p> : null}
+
+            <div className="review-decision-actions">
+              <button
+                type="button"
+                className="review-secondary-button"
+                disabled={isResolving}
+                onClick={closeDecisionModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={
+                  decisionMode === "approve"
+                    ? "review-save-button"
+                    : "review-save-button review-danger-button"
+                }
+                disabled={isResolving}
+                onClick={() => void handleResolveReview()}
+              >
+                {isResolving
+                  ? decisionMode === "approve"
+                    ? "Approving…"
+                    : "Rejecting…"
+                  : decisionMode === "approve"
+                    ? "Confirm approval"
+                    : "Confirm rejection"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

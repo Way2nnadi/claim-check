@@ -352,6 +352,31 @@ async def test_approver_rejects_candidate_rule_and_invalid_transition_is_rejecte
 
 
 @pytest.mark.anyio
+async def test_candidate_rule_approval_requires_rationale(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+    _seed_candidate_rule(database_url)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        approval_response = await client.post(
+            "/candidate-rules/rule-123/approvals",
+            headers={"Authorization": "Bearer approver-token"},
+            json={"rationale": ""},
+        )
+
+    assert approval_response.status_code == 422
+    detail = approval_response.json()["detail"][0]
+    assert detail["loc"] == ["body", "rationale"]
+
+
+@pytest.mark.anyio
 async def test_approval_persists_current_committed_values_for_candidate_rule(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
