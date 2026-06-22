@@ -36,6 +36,11 @@ import type {
 
 export const SESSION_STORAGE_TOKEN_KEY = "policy-pipeline.auth.token";
 
+interface ValidationErrorDetail {
+  loc?: Array<string | number>;
+  msg?: string;
+}
+
 export class ApiError extends Error {
   status: number;
   payload: unknown;
@@ -95,7 +100,7 @@ async function apiErrorFromResponse(response: Response): Promise<ApiError> {
   let payload: unknown = null;
   try {
     payload = (await response.json()) as {
-      detail?: string | Array<{ loc?: Array<string | number>; msg?: string }>;
+      detail?: string | ValidationErrorDetail[];
     };
     if (
       typeof payload === "object" &&
@@ -112,11 +117,11 @@ async function apiErrorFromResponse(response: Response): Promise<ApiError> {
       Array.isArray(payload.detail) &&
       payload.detail.length > 0
     ) {
-      detail = payload.detail
+      detail = (payload.detail as ValidationErrorDetail[])
         .map((item) => {
           const message = item.msg?.replace(/^Value error,\s*/u, "").trim();
           const path = item.loc
-            ?.filter((segment) => segment !== "body")
+            ?.filter((segment: string | number) => segment !== "body")
             .join(".");
           if (path && message) {
             return `${path}: ${message}`;
