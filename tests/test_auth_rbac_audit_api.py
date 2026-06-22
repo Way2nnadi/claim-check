@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import httpx
 import pytest
@@ -189,9 +190,14 @@ async def test_cors_preflight_allows_vite_dev_origin(
 
 
 @pytest.mark.anyio
-async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_event(
+@pytest.mark.parametrize(
+    "browse_token",
+    ["admin-token", "approver-token", "viewer-token"],
+)
+async def test_admin_approver_and_viewer_can_browse_audit_events_with_timestamps(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    browse_token: str,
 ) -> None:
     database_path = tmp_path / "policy-pipeline.db"
     database_url = f"sqlite+pysqlite:///{database_path}"
@@ -214,7 +220,7 @@ async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_e
 
         audit_response = await client.get(
             "/audit-events",
-            headers={"Authorization": "Bearer viewer-token"},
+            headers={"Authorization": f"Bearer {browse_token}"},
             params={"entity_type": "candidate_rule", "entity_id": "rule-123"},
         )
 
@@ -226,18 +232,20 @@ async def test_approver_records_candidate_rule_approval_and_viewer_reads_audit_e
     }
 
     assert audit_response.status_code == 200
-    assert audit_response.json() == {
-        "items": [
-            {
-                "action": "candidate_rule.approved",
-                "actor_subject": "approver-user",
-                "actor_roles": ["approver"],
-                "entity_id": "rule-123",
-                "entity_type": "candidate_rule",
-                "payload": {"rationale": "Citation verified by finance."},
-            }
-        ]
+    payload = audit_response.json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0] == {
+        "action": "candidate_rule.approved",
+        "actor_subject": "approver-user",
+        "actor_roles": ["approver"],
+        "entity_id": "rule-123",
+        "entity_type": "candidate_rule",
+        "payload": {"rationale": "Citation verified by finance."},
+        "occurred_at": payload["items"][0]["occurred_at"],
     }
+    assert datetime.fromisoformat(
+        payload["items"][0]["occurred_at"].replace("Z", "+00:00")
+    )
 
 
 @pytest.mark.anyio
