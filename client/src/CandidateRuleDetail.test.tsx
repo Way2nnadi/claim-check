@@ -273,6 +273,8 @@ describe("CandidateRuleDetail", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Save Candidate Rule" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve Candidate Rule" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject Candidate Rule" })).toBeDisabled();
     expect(screen.getByText("Viewer access")).toBeInTheDocument();
   });
 
@@ -318,5 +320,266 @@ describe("CandidateRuleDetail", () => {
         "Guidance and subjective Candidate Rules must not include a machine-checkable condition.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("blocks approval and rejection while Candidate Rule edits are unsaved", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/candidate-rules/rule-meals-cap") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => buildReview(),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CandidateRuleDetail
+        candidateRuleId="rule-meals-cap"
+        principal={approverPrincipal}
+        onBack={() => undefined}
+      />,
+    );
+
+    await screen.findByDisplayValue("Meals are capped at $75 per day.");
+    await userEvent.clear(screen.getByLabelText("Statement"));
+    await userEvent.type(screen.getByLabelText("Statement"), "Meals are capped at $80 per day.");
+
+    expect(screen.getByText("Decision blockers")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Save Candidate Rule edits before approving or rejecting so the decision uses the current reviewed values.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve Candidate Rule" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject Candidate Rule" })).toBeDisabled();
+  });
+
+  it("requires rationale before approving and posts the approval decision", async () => {
+    const approvedReview = buildReview({
+      lifecycle_state: "approved",
+      current_rule: {
+        ...buildReview().current_rule,
+        lifecycle_state: "approved",
+      },
+      committed_rule: {
+        ...buildReview().current_rule,
+        lifecycle_state: "approved",
+      },
+    });
+
+    let approved = false;
+    const onReviewResolved = vi.fn();
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/candidate-rules/rule-meals-cap" && (!init?.method || init.method === "GET")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => (approved ? approvedReview : buildReview()),
+        });
+      }
+      if (url === "/api/candidate-rules/rule-meals-cap/approvals" && init?.method === "POST") {
+        approved = true;
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: async () => ({
+            candidate_rule_id: "rule-meals-cap",
+            status: "approved",
+            recorded_by: "approver-user",
+          }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CandidateRuleDetail
+        candidateRuleId="rule-meals-cap"
+        principal={approverPrincipal}
+        onBack={() => undefined}
+        onReviewResolved={onReviewResolved}
+      />,
+    );
+
+    await screen.findByDisplayValue("Meals are capped at $75 per day.");
+    await userEvent.click(screen.getByRole("button", { name: "Approve Candidate Rule" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+
+    expect(
+      await screen.findByText("Enter approval rationale before moving this Candidate Rule into the Structured Policy Store."),
+    ).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Approval rationale"), "Citation verified and threshold confirmed.");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/candidate-rules/rule-meals-cap/approvals",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            rationale: "Citation verified and threshold confirmed.",
+          }),
+        }),
+      );
+    });
+
+    expect(await screen.findByText("Approved")).toBeInTheDocument();
+    expect(screen.getByText("Candidate Rule approved.")).toBeInTheDocument();
+    expect(onReviewResolved).toHaveBeenCalledWith("rule-meals-cap", "approved");
+  });
+
+  it("surfaces approval blockers before submission and preserves backend errors after submission", async () => {
+    const blockedReview = buildReview({
+      qa_flags: [
+        {
+          code: "unresolvable_citation",
+          detail: "Candidate Rule Citation quote could not be resolved: Meals are capped at $75 per day.",
+        },
+      ],
+    });
+    const fetchBlockedReview = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/candidate-rules/rule-meals-cap") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => blockedReview,
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchBlockedReview);
+
+    const { unmount } = render(
+      <CandidateRuleDetail
+        candidateRuleId="rule-meals-cap"
+        principal={approverPrincipal}
+        onBack={() => undefined}
+      />,
+    );
+
+    await screen.findByDisplayValue("Meals are capped at $75 per day.");
+    expect(screen.getByText("Approval blockers")).toBeInTheDocument();
+    expect(
+      screen.getByText("Resolve the Citation issue before approving this Candidate Rule."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve Candidate Rule" })).toBeDisabled();
+
+    const fetchValidationError = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/candidate-rules/rule-meals-cap" && (!init?.method || init.method === "GET")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => buildReview(),
+        });
+      }
+      if (url === "/api/candidate-rules/rule-meals-cap/approvals" && init?.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: async () => ({
+            detail: "Value error, Extracted Rule requires a Citation.",
+          }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchValidationError);
+
+    unmount();
+
+    render(
+      <CandidateRuleDetail
+        candidateRuleId="rule-meals-cap"
+        principal={approverPrincipal}
+        onBack={() => undefined}
+      />,
+    );
+
+    await screen.findByDisplayValue("Meals are capped at $75 per day.");
+    await userEvent.click(screen.getByRole("button", { name: "Approve Candidate Rule" }));
+    await userEvent.type(screen.getByLabelText("Approval rationale"), "Citation verified.");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+
+    expect(
+      await screen.findByText("Value error, Extracted Rule requires a Citation."),
+    ).toBeInTheDocument();
+  });
+
+  it("requires a rejection reason before rejecting a Candidate Rule", async () => {
+    const rejectedReview = buildReview({
+      lifecycle_state: "rejected",
+      current_rule: {
+        ...buildReview().current_rule,
+        lifecycle_state: "rejected",
+      },
+      committed_rule: {
+        ...buildReview().current_rule,
+        lifecycle_state: "rejected",
+      },
+    });
+
+    let rejected = false;
+    const onReviewResolved = vi.fn();
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/candidate-rules/rule-meals-cap" && (!init?.method || init.method === "GET")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => (rejected ? rejectedReview : buildReview()),
+        });
+      }
+      if (url === "/api/candidate-rules/rule-meals-cap/rejections" && init?.method === "POST") {
+        rejected = true;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            candidate_rule_id: "rule-meals-cap",
+            status: "rejected",
+            recorded_by: "approver-user",
+          }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CandidateRuleDetail
+        candidateRuleId="rule-meals-cap"
+        principal={approverPrincipal}
+        onBack={() => undefined}
+        onReviewResolved={onReviewResolved}
+      />,
+    );
+
+    await screen.findByDisplayValue("Meals are capped at $75 per day.");
+    await userEvent.click(screen.getByRole("button", { name: "Reject Candidate Rule" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
+
+    expect(
+      await screen.findByText("Enter a rejection reason before removing this Candidate Rule from the review queue."),
+    ).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByLabelText("Rejection reason"),
+      "This statement duplicates a stricter Rule already approved elsewhere.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/candidate-rules/rule-meals-cap/rejections",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            reason: "This statement duplicates a stricter Rule already approved elsewhere.",
+          }),
+        }),
+      );
+    });
+
+    expect(await screen.findByText("Rejected")).toBeInTheDocument();
+    expect(screen.getByText("Candidate Rule rejected.")).toBeInTheDocument();
+    expect(onReviewResolved).toHaveBeenCalledWith("rule-meals-cap", "rejected");
   });
 });

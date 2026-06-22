@@ -255,6 +255,52 @@ describe("apiRequest", () => {
     );
   });
 
+  it("posts candidate rule approvals with JSON bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidate_rule_id: "rule-123", status: "approved" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { approveCandidateRule } = await import("./api");
+    await approveCandidateRule("rule-123", {
+      rationale: "Citation verified and threshold confirmed.",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/candidate-rules/rule-123/approvals",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          rationale: "Citation verified and threshold confirmed.",
+        }),
+      }),
+    );
+  });
+
+  it("posts candidate rule rejections with JSON bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidate_rule_id: "rule-123", status: "rejected" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rejectCandidateRule } = await import("./api");
+    await rejectCandidateRule("rule-123", {
+      reason: "This statement duplicates a stricter Rule already approved elsewhere.",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/candidate-rules/rule-123/rejections",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          reason: "This statement duplicates a stricter Rule already approved elsewhere.",
+        }),
+      }),
+    );
+  });
+
   it("posts extraction run create requests with JSON bodies", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

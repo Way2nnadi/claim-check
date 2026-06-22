@@ -298,3 +298,23 @@ export interface CandidateRuleReviewUpdateRequest {
   applicability?: Applicability | null;
   exceptions?: RuleException[];
 }
+
+export interface CandidateRuleApprovalRequest {
+  rationale: string;
+}
+
+export interface CandidateRuleApprovalResponse {
+  candidate_rule_id: string;
+  status: string;
+  recorded_by: string;
+}
+
+export interface CandidateRuleRejectionRequest {
+  reason: string;
+}
+
+export interface CandidateRuleRejectionResponse {
+  candidate_rule_id: string;
+  status: string;
+  recorded_by: string;
+}
