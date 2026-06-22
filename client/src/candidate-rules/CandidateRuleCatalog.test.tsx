@@ -290,7 +290,8 @@ describe("CandidateRuleCatalog", () => {
 
     expect(await screen.findByText(/Meals are capped at \$75 per day/)).toBeInTheDocument();
     expect(screen.getByText("expense-policy")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show all rules" })).toBeInTheDocument();
+    expect(screen.getByText("extract-expense-v1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -373,7 +374,7 @@ describe("CandidateRuleCatalog", () => {
     await userEvent.click(screen.getByText("Scope filters"));
     const documentInput = screen.getByRole("combobox", { name: "Document" });
     await userEvent.type(documentInput, "expense-policy");
-    await userEvent.type(screen.getByLabelText("Document version id"), "docv-expense-v1");
+    await userEvent.type(screen.getByLabelText("Document version"), "docv-expense-v1");
     await userEvent.click(screen.getByRole("button", { name: "Apply scope" }));
 
     await waitFor(() => {
@@ -498,7 +499,7 @@ describe("CandidateRuleCatalog", () => {
 
     expect(await screen.findByText("Unchanged")).toBeInTheDocument();
     expect(screen.getByText("Changed")).toBeInTheDocument();
-    expect(screen.getByText("1 low-risk Candidate Rule available for batch approval")).toBeInTheDocument();
+    expect(screen.getByText("1 low-risk rule ready for batch approval")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-meals-cap" }));
     expect(screen.getByRole("checkbox", { name: "Select Candidate Rule rule-lodging-cap" })).toBeDisabled();
@@ -536,7 +537,7 @@ describe("CandidateRuleCatalog", () => {
     await screen.findByText(/Meals are capped at \$75 per day/);
     expect(screen.getByRole("checkbox", { name: "Select all low-risk visible Candidate Rules" })).toBeDisabled();
     expect(
-      screen.getByText("Viewer role can inspect queue deltas but cannot approve Candidate Rules"),
+      screen.getByText("Viewers can inspect the queue but cannot approve rules"),
     ).toBeInTheDocument();
   });
 

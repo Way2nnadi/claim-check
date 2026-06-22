@@ -11,6 +11,7 @@ from policy_pipeline.expense_reports import (
     ExpenseReportImportErrorResponse,
     ExpenseReportImportValidationError,
     ExpenseReportListResponse,
+    get_expense_report,
     import_expense_report,
     list_expense_reports,
     validate_expense_report_upload_filename,
@@ -30,6 +31,25 @@ def list_expense_report_catalog(
 ) -> ExpenseReportListResponse:
     del principal
     return ExpenseReportListResponse(items=list_expense_reports(session))
+
+
+@router.get("/expense-reports/{expense_report_id}", response_model=ExpenseReport)
+def get_expense_report_detail(
+    expense_report_id: str,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_roles(Role.ADMIN, Role.APPROVER, Role.VIEWER)),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+) -> ExpenseReport:
+    del principal
+    expense_report = get_expense_report(session, expense_report_id=expense_report_id)
+    if expense_report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Expense Report was not found.",
+        )
+    return expense_report
 
 
 @router.post(

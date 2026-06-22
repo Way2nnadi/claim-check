@@ -1,6 +1,7 @@
 from policy_pipeline.shared.database import (
     AuditEventRecord,
     Base,
+    CompiledRuleSetRecord,
     DocumentSectionEmbeddingRecord,
     DocumentSectionRecord,
     DocumentVersionRecord,
@@ -18,6 +19,7 @@ from policy_pipeline.shared.database import (
 __all__ = [
     "AuditEventRecord",
     "Base",
+    "CompiledRuleSetRecord",
     "DocumentSectionEmbeddingRecord",
     "DocumentSectionRecord",
     "DocumentVersionRecord",

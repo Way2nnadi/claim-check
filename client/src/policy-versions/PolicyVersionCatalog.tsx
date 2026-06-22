@@ -8,11 +8,25 @@ import type { CSSProperties } from "react";
 import { hasAnyRole } from "../shared/permissions";
 import { describePolicyVersionError, describeRuleOrigin, formatEffectiveWindow, formatRuleCount, latestPolicyVersionId, summarizeApplicability, summarizeRuleScope } from "./format";
 import type { AuthenticatedPrincipal, Role } from "../shared/auth/types";
+import {
+  compilePolicyVersion,
+  fetchCompiledRuleSetsForPolicyVersion,
+} from "../compiled-rule-sets/api";
+import type { CompiledRuleEntry, CompiledRuleSet } from "../compiled-rule-sets/types";
+import {
+  compileStatusVariant,
+  describeCompiledRuleSetError,
+  formatCompileStatus,
+  summarizeCompileCounts,
+} from "../compiled-rule-sets/format";
 
 import PublishPolicyVersionDrawer, {
   type PublishedPolicyVersionResult,
 } from "./PublishPolicyVersionDrawer";
 import Breadcrumbs from "../shared/ui/Breadcrumbs";
+import RecordPageHeader, { type RecordPropertyGroup } from "../shared/ui/RecordPageHeader";
+import StatusPill from "../shared/ui/StatusPill";
+import { PolicyVersionPageIcon, RecordPageIcon } from "../shared/ui/PageIcons";
 
 interface PolicyVersionCatalogProps {
   principal: AuthenticatedPrincipal;
@@ -23,10 +37,12 @@ type DetailStatus = "loading" | "ready" | "error" | "not_found";
 
 interface PolicyVersionDetailProps {
   policyVersionId: string;
+  principal: AuthenticatedPrincipal;
   onBack: () => void;
 }
 
 const PUBLISH_ALLOWED_ROLES: readonly Role[] = ["admin", "approver"];
+const COMPILE_ALLOWED_ROLES: readonly Role[] = ["admin"];
 
 function shortenId(value: string, visible = 8): string {
   if (value.length <= visible * 2 + 1) {
@@ -75,16 +91,30 @@ function ruleDetailsEntries(rule: Rule): Array<{ label: string; value: string }>
   return entries;
 }
 
-function PolicyRuleCard({ rule }: { rule: Rule }) {
+function PolicyRuleCard({
+  rule,
+  compileEntry,
+}: {
+  rule: Rule;
+  compileEntry?: CompiledRuleEntry;
+}) {
   const details = ruleDetailsEntries(rule);
 
   return (
     <article className="policy-rule-card">
       <header className="policy-rule-head">
         <h4 className="policy-rule-statement">{rule.statement}</h4>
-        <span className={`review-enforceability ${rule.enforceability_class}`}>
-          {formatEnforceabilityClass(rule.enforceability_class)}
-        </span>
+        <div className="policy-rule-badges">
+          <span className={`review-enforceability ${rule.enforceability_class}`}>
+            {formatEnforceabilityClass(rule.enforceability_class)}
+          </span>
+          {compileEntry ? (
+            <StatusPill
+              label={formatCompileStatus(compileEntry.status)}
+              variant={compileStatusVariant(compileEntry.status)}
+            />
+          ) : null}
+        </div>
       </header>
 
       <p className="policy-rule-meta-line">
@@ -108,14 +138,18 @@ function PolicyRuleCard({ rule }: { rule: Rule }) {
       {details.length > 1 ? (
         <details className="policy-rule-details">
           <summary>Details</summary>
-          <dl className="policy-rule-details-grid">
-            {details.map((entry) => (
-              <div key={entry.label}>
-                <dt>{entry.label}</dt>
-                <dd>{entry.value}</dd>
-              </div>
-            ))}
-          </dl>
+          <div className="db-table-wrap policy-rule-details-table-wrap">
+            <table className="db-table policy-rule-details-table" aria-label="Rule details">
+              <tbody>
+                {details.map((entry) => (
+                  <tr key={entry.label}>
+                    <th scope="row">{entry.label}</th>
+                    <td className="db-mono">{entry.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </details>
       ) : null}
 
@@ -137,26 +171,37 @@ function PolicyRuleCard({ rule }: { rule: Rule }) {
 
 function PolicyVersionDetail({
   policyVersionId,
+  principal,
   onBack,
 }: PolicyVersionDetailProps) {
   const [status, setStatus] = useState<DetailStatus>("loading");
   const [snapshot, setSnapshot] = useState<PolicyVersionSnapshot | null>(null);
+  const [compiledRuleSet, setCompiledRuleSet] = useState<CompiledRuleSet | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [compileError, setCompileError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
+
+  const canCompile = hasAnyRole(principal, COMPILE_ALLOWED_ROLES);
 
   useEffect(() => {
     let cancelled = false;
 
     setStatus("loading");
     setErrorMessage(null);
+    setCompiledRuleSet(null);
 
-    void fetchPolicyVersion(policyVersionId)
-      .then((response) => {
+    void Promise.all([
+      fetchPolicyVersion(policyVersionId),
+      fetchCompiledRuleSetsForPolicyVersion(policyVersionId),
+    ])
+      .then(([policyVersion, compiledRuleSets]) => {
         if (cancelled) {
           return;
         }
-        setSnapshot(response);
+        setSnapshot(policyVersion);
+        setCompiledRuleSet(compiledRuleSets.items[0] ?? null);
         setStatus("ready");
       })
       .catch((error: unknown) => {
@@ -189,6 +234,26 @@ function PolicyVersionDetail({
     } finally {
       setIsDownloading(false);
     }
+  }
+
+  async function handleCompile(): Promise<void> {
+    setIsCompiling(true);
+    setCompileError(null);
+
+    try {
+      const nextCompiledRuleSet = await compilePolicyVersion(policyVersionId);
+      setCompiledRuleSet(nextCompiledRuleSet);
+    } catch (error: unknown) {
+      setCompileError(
+        describeCompiledRuleSetError(error, "Unable to compile this Policy Version."),
+      );
+    } finally {
+      setIsCompiling(false);
+    }
+  }
+
+  function compileStatusForRule(ruleId: string): CompiledRuleEntry | undefined {
+    return compiledRuleSet?.entries.find((entry) => entry.rule_id === ruleId);
   }
 
   if (status === "loading") {
@@ -231,22 +296,98 @@ function PolicyVersionDetail({
 
   return (
     <div className="policy-version-detail content-enter">
-      <Breadcrumbs
-        items={[
-          { label: "Policy Versions", onClick: onBack },
-          { label: snapshot.policy_version_id },
-        ]}
-      />
-      <header className="policy-version-detail-head">
-        <div className="policy-version-detail-head-row">
-          <div className="policy-version-detail-intro">
-            <h3>{snapshot.policy_version_id}</h3>
-            <p className="policy-version-detail-lede">{snapshot.change_summary}</p>
-            <p className="catalog-scope policy-version-detail-meta">
-              {formatRuleCount(snapshot.rules.length)} · {snapshot.published_by}
-            </p>
-          </div>
-          <div className="policy-version-detail-actions">
+      <RecordPageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              {
+                label: "Policy Versions",
+                icon: <PolicyVersionPageIcon size={14} />,
+                onClick: onBack,
+              },
+              {
+                label: snapshot.policy_version_id,
+                icon: <PolicyVersionPageIcon size={14} />,
+              },
+            ]}
+          />
+        }
+        icon={
+          <RecordPageIcon icon={<PolicyVersionPageIcon size={22} />} />
+        }
+        title={snapshot.policy_version_id}
+        subtitle={snapshot.change_summary}
+        recordId={snapshot.policy_version_id}
+        propertyGroups={
+          [
+            {
+              title: "Publication",
+              properties: [
+                {
+                  label: "Published by",
+                  value: snapshot.published_by,
+                },
+                {
+                  label: "Status",
+                  value: <StatusPill label="Published" variant="success" />,
+                },
+                {
+                  label: "Rules",
+                  value: formatRuleCount(snapshot.rules.length),
+                },
+              ],
+            },
+            {
+              title: "Compile",
+              properties: [
+                {
+                  label: "Status",
+                  value: compiledRuleSet ? (
+                    <StatusPill label="Compiled" variant="success" />
+                  ) : (
+                    <StatusPill label="Not compiled" variant="neutral" />
+                  ),
+                },
+                ...(compiledRuleSet
+                  ? [
+                      {
+                        label: "Summary",
+                        value: summarizeCompileCounts(compiledRuleSet.summary),
+                      },
+                      {
+                        label: "Artifact",
+                        value: (
+                          <code
+                            className="db-mono"
+                            title={compiledRuleSet.compiled_rule_set_id}
+                          >
+                            {shortenId(compiledRuleSet.compiled_rule_set_id)}
+                          </code>
+                        ),
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ] satisfies RecordPropertyGroup[]
+        }
+        propertyLayout="stacked"
+        actions={
+          <>
+            {canCompile ? (
+              <button
+                type="button"
+                className="document-command"
+                onClick={() => void handleCompile()}
+                disabled={isCompiling}
+              >
+                {isCompiling
+                  ? "Compiling…"
+                  : compiledRuleSet
+                    ? "Re-open compile"
+                    : "Compile Rule Set"}
+              </button>
+            ) : null}
             <button
               type="button"
               className="document-command document-command-accent"
@@ -255,11 +396,52 @@ function PolicyVersionDetail({
             >
               {isDownloading ? "Exporting…" : "Export JSON"}
             </button>
-          </div>
-        </div>
-        {downloadError ? <p className="error-banner">{downloadError}</p> : null}
-      </header>
+          </>
+        }
+      />
+      {compileError ? <p className="error-banner">{compileError}</p> : null}
+      {downloadError ? <p className="error-banner">{downloadError}</p> : null}
 
+      {compiledRuleSet ? (
+        <>
+          <h4 className="record-section-heading">Compile summary</h4>
+          <div className="db-table-wrap">
+            <table className="db-table" aria-label="Compiled rule status">
+              <thead>
+                <tr>
+                  <th scope="col">Rule</th>
+                  <th scope="col">Statement</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compiledRuleSet.entries.map((entry) => (
+                  <tr key={entry.rule_id}>
+                    <td className="db-mono">{entry.rule_id}</td>
+                    <td>{entry.source_rule.statement}</td>
+                    <td>
+                      <StatusPill
+                        label={formatCompileStatus(entry.status)}
+                        variant={compileStatusVariant(entry.status)}
+                      />
+                    </td>
+                    <td>
+                      {entry.skip_reason ??
+                        entry.error_reason ??
+                        (entry.compiled_rule
+                          ? `${entry.compiled_rule.condition.field} ${entry.compiled_rule.condition.operator} ${entry.compiled_rule.condition.value}`
+                          : "—")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+
+      <h4 className="record-section-heading">Published rules</h4>
       <section className="policy-version-rule-stage reveal">
         {snapshot.rules.length === 0 ? (
           <p className="review-detail-empty">No rules in this version.</p>
@@ -271,7 +453,10 @@ function PolicyVersionDetail({
                   className="reveal"
                   style={{ "--reveal-delay": `${50 + index * 55}ms` } as CSSProperties}
                 >
-                  <PolicyRuleCard rule={rule} />
+                  <PolicyRuleCard
+                    rule={rule}
+                    compileEntry={compileStatusForRule(rule.rule_id)}
+                  />
                 </div>
               </li>
             ))}
@@ -360,6 +545,7 @@ export default function PolicyVersionCatalog({ principal }: PolicyVersionCatalog
     return (
       <PolicyVersionDetail
         policyVersionId={selectedPolicyVersionId}
+        principal={principal}
         onBack={() => setSelectedPolicyVersionId(null)}
       />
     );
@@ -424,20 +610,17 @@ export default function PolicyVersionCatalog({ principal }: PolicyVersionCatalog
                 </thead>
                 <tbody>
                   {policyVersions.map((version) => (
-                    <tr
-                      key={version.policy_version_id}
-                      tabIndex={0}
-                      role="button"
-                      aria-label={`Open ${version.policy_version_id}`}
-                      onClick={() => setSelectedPolicyVersionId(version.policy_version_id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setSelectedPolicyVersionId(version.policy_version_id);
-                        }
-                      }}
-                    >
-                      <td className="db-mono">{version.policy_version_id}</td>
+                    <tr key={version.policy_version_id}>
+                      <td className="db-mono">
+                        <button
+                          type="button"
+                          className="db-row-button"
+                          aria-label={`Open ${version.policy_version_id}`}
+                          onClick={() => setSelectedPolicyVersionId(version.policy_version_id)}
+                        >
+                          {version.policy_version_id}
+                        </button>
+                      </td>
                       <td>{version.change_summary}</td>
                       <td>{formatPolicyVersionDate(version.created_at)}</td>
                       <td>{formatRuleCount(version.rule_count)}</td>

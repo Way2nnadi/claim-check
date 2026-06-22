@@ -149,6 +149,14 @@ export interface ExpenseReportRow {
   trip_id: string | null;
 }
 
+export interface ExpenseReportSummary {
+  expense_report_id: string;
+  imported_by: string;
+  source_filename: string;
+  row_count: number;
+  created_at: string;
+}
+
 export interface ExpenseReport {
   expense_report_id: string;
   imported_by: string;
@@ -159,7 +167,7 @@ export interface ExpenseReport {
 }
 
 export interface ExpenseReportListResponse {
-  items: ExpenseReport[];
+  items: ExpenseReportSummary[];
 }
 
 export interface ExpenseReportImportRowError {

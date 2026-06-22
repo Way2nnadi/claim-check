@@ -36,6 +36,32 @@ describe("ExpenseReportsPage", () => {
     vi.restoreAllMocks();
   });
 
+  function mockExpenseReportDetail(expenseReportId: string) {
+    return {
+      expense_report_id: expenseReportId,
+      imported_by: "admin-user",
+      source_filename: "expenses.csv",
+      row_count: 1,
+      created_at: "2026-06-22T11:00:00Z",
+      rows: [
+        {
+          employee_id: "emp-001",
+          expense_date: "2026-06-21",
+          expense_category: "meals",
+          amount: "42.50",
+          currency: "USD",
+          country: "us",
+          travel_type: "domestic",
+          business_purpose: "Team dinner",
+          attendee_list: "Alice; Bob",
+          manager_approval: true,
+          receipt_attached: true,
+          trip_id: "trip-7",
+        },
+      ],
+    };
+  }
+
   it("uploads a valid CSV for admins and prepends the imported Expense Report", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/expense-reports" && (!init?.method || init.method === "GET")) {
@@ -72,7 +98,7 @@ describe("ExpenseReportsPage", () => {
 
     render(<ExpenseReportsPage principal={adminPrincipal} />);
 
-    expect(await screen.findByText("No Expense Reports imported yet.")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Expense Report CSV")).toBeInTheDocument();
 
     const file = new File(
       [
@@ -83,13 +109,13 @@ describe("ExpenseReportsPage", () => {
     );
 
     await userEvent.upload(screen.getByLabelText("Expense Report CSV"), file);
-    await userEvent.click(screen.getByRole("button", { name: "Import Expense Report" }));
+    await userEvent.click(screen.getByRole("button", { name: "Import report" }));
 
-    expect(await screen.findByText("expense-report-1")).toBeInTheDocument();
-    expect(screen.getByText("expenses.csv")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "expense-report-1" })).toBeInTheDocument();
+    expect(screen.getAllByText("expenses.csv").length).toBeGreaterThan(0);
     expect(screen.getByText("Team dinner")).toBeInTheDocument();
     expect(screen.getByText("USD")).toBeInTheDocument();
-    expect(screen.queryByText("No Expense Reports imported yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No reports yet")).not.toBeInTheDocument();
   });
 
   it("surfaces file and row validation errors returned by the import API", async () => {
@@ -118,7 +144,7 @@ describe("ExpenseReportsPage", () => {
 
     render(<ExpenseReportsPage principal={adminPrincipal} />);
 
-    await screen.findByText("No Expense Reports imported yet.");
+    await screen.findByLabelText("Expense Report CSV");
 
     const file = new File(
       ["employee_id,expense_date,expense_category,amount\nemp-001,2026-06-21,meals,\n"],
@@ -127,10 +153,10 @@ describe("ExpenseReportsPage", () => {
     );
 
     await userEvent.upload(screen.getByLabelText("Expense Report CSV"), file);
-    await userEvent.click(screen.getByRole("button", { name: "Import Expense Report" }));
+    await userEvent.click(screen.getByRole("button", { name: "Import report" }));
 
     expect(await screen.findByText("Missing required columns: currency.")).toBeInTheDocument();
-    expect(screen.getByText("Row 2")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("amount is required.")).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -152,25 +178,14 @@ describe("ExpenseReportsPage", () => {
                 source_filename: "expenses.csv",
                 row_count: 1,
                 created_at: "2026-06-22T11:00:00Z",
-                rows: [
-                  {
-                    employee_id: "emp-001",
-                    expense_date: "2026-06-21",
-                    expense_category: "meals",
-                    amount: "42.50",
-                    currency: "USD",
-                    country: null,
-                    travel_type: null,
-                    business_purpose: null,
-                    attendee_list: null,
-                    manager_approval: null,
-                    receipt_attached: null,
-                    trip_id: null,
-                  },
-                ],
               },
             ],
           });
+        }
+        if (url === "/api/expense-reports/expense-report-1") {
+          return jsonResponse(
+            mockExpenseReportDetail("expense-report-1"),
+          );
         }
         return Promise.reject(new Error(`Unexpected fetch: ${url}`));
       }),
@@ -179,12 +194,67 @@ describe("ExpenseReportsPage", () => {
     render(<ExpenseReportsPage principal={viewerPrincipal} />);
 
     expect(await screen.findByText("expense-report-1")).toBeInTheDocument();
-    expect(screen.getByText("Viewer access")).toBeInTheDocument();
-    expect(screen.getByLabelText("Expense Report CSV")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Import Expense Report" })).toBeDisabled();
+    expect(screen.getByText("View-only — admin role required to import.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Expense Report CSV")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import" })).not.toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText("Imported by admin-user")).toBeInTheDocument();
+      expect(screen.getByText("admin-user")).toBeInTheDocument();
     });
+  });
+
+  it("loads expense report detail when a catalog row is opened", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/expense-reports") {
+        return jsonResponse({
+          items: [
+            {
+              expense_report_id: "expense-report-1",
+              imported_by: "admin-user",
+              source_filename: "expenses.csv",
+              row_count: 1,
+              created_at: "2026-06-22T11:00:00Z",
+            },
+          ],
+        });
+      }
+      if (url === "/api/expense-reports/expense-report-1") {
+        return jsonResponse(mockExpenseReportDetail("expense-report-1"));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ExpenseReportsPage principal={viewerPrincipal} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Open expense-report-1" }));
+
+    expect(await screen.findByRole("heading", { name: "expense-report-1" })).toBeInTheDocument();
+    expect(screen.getByText("Team dinner")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/expense-reports/expense-report-1",
+      expect.any(Object),
+    );
+  });
+
+  it("shows an empty state when no reports exist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/expense-reports") {
+          return jsonResponse({ items: [] });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<ExpenseReportsPage principal={viewerPrincipal} />);
+
+    expect(await screen.findByText("No reports yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "An administrator must import CSV files before reports appear here.",
+      ),
+    ).toBeInTheDocument();
   });
 });

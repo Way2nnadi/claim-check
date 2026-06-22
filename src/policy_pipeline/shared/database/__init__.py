@@ -1,4 +1,5 @@
 from policy_pipeline.audit.records import AuditEventRecord
+from policy_pipeline.compiled_rule_sets.records import CompiledRuleSetRecord
 from policy_pipeline.expense_report_records import ExpenseReportRecord
 from policy_pipeline.extraction.records import (
     ExtractionRunRecord,
@@ -17,6 +18,7 @@ from policy_pipeline.shared.database.base import Base, VectorType, clear_databas
 __all__ = [
     "AuditEventRecord",
     "Base",
+    "CompiledRuleSetRecord",
     "DocumentSectionEmbeddingRecord",
     "DocumentSectionRecord",
     "DocumentVersionRecord",

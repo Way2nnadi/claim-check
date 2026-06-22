@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DocumentDetail from "./DocumentDetail";
@@ -47,7 +47,7 @@ describe("DocumentDetail", () => {
     render(<DocumentDetail documentId="expense-policy" onBack={() => undefined} />);
 
     expect(await screen.findByText("docv-expense-v2")).toBeInTheDocument();
-    expect(screen.getByText("Uploaded")).toBeInTheDocument();
+    expect(screen.getByText("expense-policy-v2.pdf")).toBeInTheDocument();
     expect(screen.queryByText("docv-expense-v1")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: /Archived/i }));
@@ -143,8 +143,11 @@ describe("DocumentDetail", () => {
 
     render(<DocumentDetail documentId="missing-policy" onBack={() => undefined} />);
 
-    expect(await screen.findByRole("heading", { name: "Document not found" })).toBeInTheDocument();
-    expect(screen.getByRole("code")).toHaveTextContent("missing-policy");
+    const notFound = (await screen.findByRole("heading", { name: "Document not found" })).closest(
+      ".document-not-found",
+    );
+    expect(notFound).not.toBeNull();
+    expect(within(notFound as HTMLElement).getByText("missing-policy")).toBeInTheDocument();
   });
 
   it("shows the upload drawer for admins and hides it for viewers", async () => {

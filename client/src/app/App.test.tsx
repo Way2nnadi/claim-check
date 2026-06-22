@@ -84,6 +84,11 @@ function createAppFetchMock(
         items: [],
       });
     }
+    if (url === "/api/compiled-rule-sets") {
+      return jsonResponse({
+        items: [],
+      });
+    }
 
     return Promise.reject(new Error(`Unexpected fetch: ${url}`));
   });
@@ -282,15 +287,17 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Dashboard" });
     await userEvent.click(screen.getByRole("button", { name: "Audit" }));
 
-    expect(await screen.findByRole("heading", { name: "Audit log" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Audit" })).toBeInTheDocument();
     expect(screen.getByText("approver-user")).toBeInTheDocument();
     expect(screen.getByText("Citation verified by finance.")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("Code filters"));
-    await userEvent.selectOptions(screen.getByLabelText("Entity type"), "candidate_rule");
+    await userEvent.click(screen.getByText("Scope filters"));
+    const entityTypeInput = screen.getByRole("combobox", { name: "Entity type" });
+    await userEvent.click(entityTypeInput);
+    await userEvent.click(screen.getByRole("option", { name: "Candidate Rule" }));
     await userEvent.clear(screen.getByLabelText("Entity id"));
     await userEvent.type(screen.getByLabelText("Entity id"), "rule-404");
-    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply scope" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -595,6 +602,6 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Expense Reports" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import Expense Report" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import CSV" })).toBeInTheDocument();
   });
 });

@@ -7,20 +7,37 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 
-export interface SearchablePickerOption {
-  value: string;
+export interface SearchablePickerOption<T extends string = string> {
+  value: T;
   label: string;
   secondary?: string | null;
   meta?: string | null;
+  icon?: ReactNode;
 }
 
-interface SearchablePickerProps {
+function PickerChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`searchable-picker-chevron${open ? " open" : ""}`}
+      viewBox="0 0 16 16"
+      width={14}
+      height={14}
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M4.5 6L8 9.5 11.5 6" />
+    </svg>
+  );
+}
+
+interface SearchablePickerProps<T extends string = string> {
   label: string;
-  value: string;
-  options: SearchablePickerOption[];
+  value: T;
+  options: readonly SearchablePickerOption<T>[] | SearchablePickerOption<T>[];
   placeholder?: string;
   emptyMessage?: string;
   disabled?: boolean;
@@ -30,7 +47,7 @@ interface SearchablePickerProps {
   hideLabel?: boolean;
   inputId?: string;
   showAllOnOpen?: boolean;
-  onChange: (value: string) => void;
+  onChange: (value: T) => void;
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
@@ -41,22 +58,22 @@ interface MenuPosition {
   width: number;
 }
 
-function optionSearchText(option: SearchablePickerOption): string {
+function optionSearchText<T extends string>(option: SearchablePickerOption<T>): string {
   return [option.value, option.label, option.secondary, option.meta]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 }
 
-function resolvePickerQuery(
+function resolvePickerQuery<T extends string>(
   query: string,
-  options: SearchablePickerOption[],
+  options: readonly SearchablePickerOption<T>[] | SearchablePickerOption<T>[],
   allowFreeText: boolean,
-  currentValue: string,
-): string {
+  currentValue: T,
+): T {
   const trimmed = query.trim();
   if (!trimmed) {
-    return allowFreeText ? "" : currentValue;
+    return allowFreeText ? ("" as T) : currentValue;
   }
 
   const lowered = trimmed.toLowerCase();
@@ -71,14 +88,14 @@ function resolvePickerQuery(
   }
 
   if (allowFreeText) {
-    return trimmed;
+    return trimmed as T;
   }
 
   const partial = options.find((option) => optionSearchText(option).includes(lowered));
   return partial?.value ?? currentValue;
 }
 
-export default function SearchablePicker({
+export default function SearchablePicker<T extends string = string>({
   label,
   value,
   options,
@@ -94,12 +111,12 @@ export default function SearchablePicker({
   onChange,
   isOpen: controlledOpen,
   onOpenChange,
-}: SearchablePickerProps) {
+}: SearchablePickerProps<T>) {
   const fieldId = useId();
   const inputId = inputIdProp ?? `${fieldId}-input`;
   const listboxId = `${fieldId}-listbox`;
   const rootRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const controlRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [internalOpen, setInternalOpen] = useState(false);
@@ -172,7 +189,7 @@ export default function SearchablePicker({
       return;
     }
     updateMenuPosition();
-  }, [isOpen, updateMenuPosition, filteredOptions.length]);
+  }, [isOpen, updateMenuPosition]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -202,7 +219,7 @@ export default function SearchablePicker({
         return;
       }
 
-      const currentQuery = inputRef.current?.value ?? query;
+      const currentQuery = inputRef.current?.value ?? "";
       onChange(resolvePickerQuery(currentQuery, options, allowFreeText, value));
       setOpen(false);
     }
@@ -219,17 +236,14 @@ export default function SearchablePicker({
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [allowFreeText, isOpen, onChange, options, query, setOpen, value]);
-
-  useEffect(() => {
-    setHighlightIndex(0);
-  }, [query]);
+  }, [allowFreeText, isOpen, onChange, options, setOpen, value]);
 
   function openPicker(): void {
     if (disabled) {
       return;
     }
     setQuery(showAllOnOpen ? "" : closedDisplayValue);
+    setHighlightIndex(0);
     setOpen(true);
   }
 
@@ -238,7 +252,7 @@ export default function SearchablePicker({
     setOpen(false);
   }
 
-  function selectOption(optionValue: string): void {
+  function selectOption(optionValue: T): void {
     onChange(optionValue);
     setOpen(false);
   }
@@ -274,11 +288,13 @@ export default function SearchablePicker({
   const menu =
     isOpen && menuPosition
       ? createPortal(
-          <ul
+          <div
             ref={menuRef}
             id={listboxId}
             className="searchable-picker-menu"
+            // biome-ignore lint/a11y/useSemanticElements: popup list for combobox input
             role="listbox"
+            tabIndex={-1}
             aria-label={`${label} options`}
             style={{
               top: menuPosition.top,
@@ -288,46 +304,55 @@ export default function SearchablePicker({
             onMouseDown={(event) => event.preventDefault()}
           >
             {filteredOptions.length === 0 ? (
-              <li className="searchable-picker-empty">{emptyMessage}</li>
+              <div className="searchable-picker-empty">{emptyMessage}</div>
             ) : (
               filteredOptions.map((option, index) => {
                 const isSelected = value === option.value;
                 const isHighlighted = index === highlightIndex;
 
                 return (
-                  <li key={option.value} role="presentation">
-                    <button
-                      id={`${listboxId}-${option.value}`}
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      className={`searchable-picker-option${isSelected ? " selected" : ""}${
-                        isHighlighted ? " highlighted" : ""
-                      }`}
-                      onMouseEnter={() => setHighlightIndex(index)}
-                      onClick={() => selectOption(option.value)}
-                    >
-                      <span className="searchable-picker-option-copy">
-                        <span
-                          className={`searchable-picker-option-title${mono ? " mono" : ""}`}
-                        >
-                          {option.label}
-                        </span>
-                        {option.secondary ? (
-                          <span className="searchable-picker-option-secondary">
-                            {option.secondary}
-                          </span>
-                        ) : null}
+                  <div
+                    key={option.value}
+                    id={`${listboxId}-${option.value}`}
+                    // biome-ignore lint/a11y/useSemanticElements: combobox option target for activedescendant
+                    role="option"
+                    aria-selected={isSelected}
+                    tabIndex={-1}
+                    className={`searchable-picker-option${isSelected ? " selected" : ""}${
+                      isHighlighted ? " highlighted" : ""
+                    }`}
+                    onMouseEnter={() => setHighlightIndex(index)}
+                    onClick={() => selectOption(option.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        selectOption(option.value);
+                      }
+                    }}
+                  >
+                    {option.icon ? (
+                      <span className="searchable-picker-option-icon">{option.icon}</span>
+                    ) : null}
+                    <span className="searchable-picker-option-copy">
+                      <span
+                        className={`searchable-picker-option-title${mono ? " mono" : ""}`}
+                      >
+                        {option.label}
                       </span>
-                      {option.meta ? (
-                        <span className="searchable-picker-option-meta">{option.meta}</span>
+                      {option.secondary ? (
+                        <span className="searchable-picker-option-secondary">
+                          {option.secondary}
+                        </span>
                       ) : null}
-                    </button>
-                  </li>
+                    </span>
+                    {option.meta ? (
+                      <span className="searchable-picker-option-meta">{option.meta}</span>
+                    ) : null}
+                  </div>
                 );
               })
             )}
-          </ul>,
+          </div>,
           document.body,
         )
       : null;
@@ -337,8 +362,8 @@ export default function SearchablePicker({
       <div
         ref={rootRef}
         className={`searchable-picker${isOpen ? " open" : ""}${value ? " has-value" : ""}${
-          mono ? " mono" : ""
-        }${disabled ? " disabled" : ""}`}
+          clearable ? " clearable" : ""
+        }${mono ? " mono" : ""}${disabled ? " disabled" : ""}`}
       >
         <div className="searchable-picker-field">
           {hideLabel ? null : (
@@ -369,8 +394,9 @@ export default function SearchablePicker({
               onChange={(event) => {
                 const nextQuery = event.target.value;
                 setQuery(nextQuery);
+                setHighlightIndex(0);
                 if (allowFreeText) {
-                  onChange(nextQuery);
+                  onChange(nextQuery as T);
                 }
                 if (!isOpen) {
                   setOpen(true);
@@ -394,40 +420,44 @@ export default function SearchablePicker({
               }}
               onKeyDown={handleInputKeyDown}
             />
-            {clearable && value ? (
+            <div className="searchable-picker-actions">
+              {clearable && value ? (
+                <button
+                  type="button"
+                  className="searchable-picker-clear"
+                  aria-label={`Clear ${label}`}
+                  disabled={disabled}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onChange("" as T);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                >
+                  <svg viewBox="0 0 16 16" width={14} height={14} fill="currentColor" aria-hidden="true">
+                    <path d="M4.22 3.22a.75.75 0 0 1 1.06 0L8 5.94l2.72-2.72a.75.75 0 1 1 1.06 1.06L9.06 7l2.72 2.72a.75.75 0 1 1-1.06 1.06L8 8.06l-2.72 2.72a.75.75 0 1 1-1.06-1.06L6.94 7 4.22 4.28a.75.75 0 0 1 0-1.06z" />
+                  </svg>
+                </button>
+              ) : null}
               <button
                 type="button"
-                className="searchable-picker-clear"
-                aria-label={`Clear ${label}`}
+                className="searchable-picker-toggle"
+                aria-label={isOpen ? `Close ${label} list` : `Open ${label} list`}
+                aria-expanded={isOpen}
+                aria-controls={listboxId}
                 disabled={disabled}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
-                  onChange("");
-                  setQuery("");
-                  setOpen(false);
+                  if (isOpen) {
+                    closePicker();
+                  } else {
+                    openPicker();
+                  }
                 }}
               >
-                ×
+                <PickerChevron open={isOpen} />
               </button>
-            ) : null}
-            <button
-              type="button"
-              className="searchable-picker-toggle"
-              aria-label={isOpen ? `Close ${label} list` : `Open ${label} list`}
-              aria-expanded={isOpen}
-              aria-controls={listboxId}
-              disabled={disabled}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                if (isOpen) {
-                  closePicker();
-                } else {
-                  openPicker();
-                }
-              }}
-            >
-              {isOpen ? "▴" : "▾"}
-            </button>
+            </div>
           </div>
           {!isOpen && selectedOption?.secondary ? (
             <span className="searchable-picker-sublabel">{selectedOption.secondary}</span>

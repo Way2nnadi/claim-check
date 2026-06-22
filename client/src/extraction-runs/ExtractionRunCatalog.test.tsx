@@ -77,8 +77,8 @@ describe("ExtractionRunCatalog", () => {
     expect(screen.getAllByText("docv-expense-v1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(
-      screen.getByText("Structured extraction output did not pass validation."),
-    ).toBeInTheDocument();
+      screen.queryByText("Structured extraction output did not pass validation."),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /All/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: /Completed/i })).toHaveTextContent("1");
     expect(screen.getByRole("tab", { name: /Failed/i })).toHaveTextContent("1");
@@ -178,7 +178,7 @@ describe("ExtractionRunCatalog", () => {
     await screen.findByText("No Extraction Runs have been recorded yet.");
     await userEvent.click(screen.getByText("Scope filters"));
     await userEvent.type(screen.getByLabelText("Document"), "expense-policy");
-    await userEvent.type(screen.getByLabelText("Document version id"), "docv-expense-v1");
+    await userEvent.type(screen.getByLabelText("Document version"), "docv-expense-v1");
     await userEvent.click(screen.getByRole("button", { name: "Apply scope" }));
 
     await waitFor(() => {

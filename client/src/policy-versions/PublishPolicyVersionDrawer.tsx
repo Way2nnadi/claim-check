@@ -174,7 +174,7 @@ export default function PublishPolicyVersionDrawer({
             <div className="policy-version-publish-actions">
               <button
                 type="submit"
-                className="reingestion-submit"
+                className="document-command document-command-accent"
                 disabled={isPublishing}
               >
                 {isPublishing ? "Publishing…" : "Publish"}

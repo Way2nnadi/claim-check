@@ -165,7 +165,7 @@ export default function NewDocumentVersionDrawer({
             <div className="register-document-actions">
               <button
                 type="submit"
-                className="version-upload-submit"
+                className="document-command document-command-accent"
                 disabled={
                   !selectedFile || isUploading || Boolean(uploadError && !selectedFile)
                 }

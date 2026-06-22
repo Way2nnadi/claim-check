@@ -23,11 +23,10 @@ export default function CandidateRuleDecisionModal({
 			: "candidate-rule-rejection-reason";
 
 	return (
-		<div className="review-decision-backdrop" role="presentation">
-			<div
+		<div className="review-decision-backdrop">
+			<dialog
 				className="review-decision-dialog"
-				role="dialog"
-				aria-modal="true"
+				open
 				aria-label={mode === "approve" ? "Approve rule" : "Reject rule"}
 			>
 				<div className="review-decision-head">
@@ -50,7 +49,7 @@ export default function CandidateRuleDecisionModal({
 				<div className="review-decision-actions">
 					<button
 						type="button"
-						className="review-secondary-button"
+						className="document-command"
 						disabled={isResolving}
 						onClick={onCancel}
 					>
@@ -60,8 +59,8 @@ export default function CandidateRuleDecisionModal({
 						type="button"
 						className={
 							mode === "approve"
-								? "review-save-button"
-								: "review-save-button review-danger-button"
+								? "document-command document-command-accent"
+								: "document-command document-command-danger"
 						}
 						disabled={isResolving}
 						onClick={onConfirm}
@@ -73,7 +72,7 @@ export default function CandidateRuleDecisionModal({
 							: "Confirm"}
 					</button>
 				</div>
-			</div>
+			</dialog>
 		</div>
 	);
 }

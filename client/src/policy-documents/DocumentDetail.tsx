@@ -5,12 +5,22 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type { CSSProperties } from "react";
 import { ApiError } from "../shared/api/client";
+import { shortenId } from "../shared/format/common";
 
 import NewDocumentVersionDrawer from "./NewDocumentVersionDrawer";
 
 import ReingestionDrawer from "../reingestion/ReingestionDrawer";
 import VersionExtractionRuns from "./VersionExtractionRuns";
 import Breadcrumbs from "../shared/ui/Breadcrumbs";
+import RecordPageHeader, {
+  type RecordPropertyGroup,
+} from "../shared/ui/RecordPageHeader";
+import RecordPropertyRow, {
+  type RecordProperty,
+} from "../shared/ui/RecordPropertyRow";
+import StatusPill from "../shared/ui/StatusPill";
+import FilterTabs from "../shared/ui/FilterTabs";
+import { DocumentPageIcon, RecordPageIcon } from "../shared/ui/PageIcons";
 
 type DetailStatus = "loading" | "ready" | "not_found" | "error";
 
@@ -212,46 +222,121 @@ export default function DocumentDetail({
   const showAdminActions = canUpload && (status === "ready" || status === "not_found");
   const showReingestion = showAdminActions && status === "ready";
 
+  const latestVersion = versions.find((version) => version.document_version_id === latestVersionId);
+  const lastUpdated =
+    summary?.latest_uploaded_at ?? latestVersion?.created_at ?? undefined;
+
+  const headerPropertyGroups: RecordPropertyGroup[] = [
+    {
+      title: "Version ledger",
+      properties: [
+        {
+          label: "Versions",
+          value: summary
+            ? `${summary.active_version_count} active · ${summary.version_count} total`
+            : `${activeVersions.length} active`,
+        },
+        {
+          label: "Latest version",
+          value: latestVersionId ? (
+            <code className="db-mono" title={latestVersionId}>
+              {shortenId(latestVersionId)}
+            </code>
+          ) : null,
+          empty: !latestVersionId,
+        },
+        {
+          label: "Archive status",
+          value: summary?.has_deleted_versions ? (
+            <StatusPill label="Has archived versions" variant="warning" />
+          ) : (
+            <StatusPill label="All active" variant="success" />
+          ),
+        },
+      ],
+    },
+    {
+      title: "Document",
+      properties: [
+        {
+          label: "Document ID",
+          value: <code className="db-mono">{documentId}</code>,
+        },
+        {
+          label: "Latest upload",
+          value: lastUpdated ? formatUploadDate(lastUpdated) : null,
+          empty: !lastUpdated,
+        },
+      ],
+    },
+  ];
+
+  const headerMeta = showAdminActions ? (
+    <p className="document-detail-action-note">
+      Upload a new file to version this document, or re-ingest to refresh extracted rules.
+    </p>
+  ) : canUpload ? null : (
+    <p className="document-detail-action-note">View-only — admin role required to upload or re-ingest.</p>
+  );
+
+  const headerActions = showAdminActions ? (
+    <>
+      <button
+        type="button"
+        className={`document-command${uploadDrawerOpen ? " active" : ""}`}
+        aria-expanded={uploadDrawerOpen}
+        aria-controls="new-document-version-drawer"
+        onClick={() => {
+          setUploadSuccess(null);
+          setUploadDrawerOpen(true);
+        }}
+      >
+        New version
+      </button>
+      {showReingestion ? (
+        <button
+          type="button"
+          className="document-command document-command-accent"
+          onClick={() => setReingestionOpen(true)}
+        >
+          Re-ingest
+        </button>
+      ) : null}
+    </>
+  ) : undefined;
+
   return (
     <div className="document-detail content-enter">
-      <Breadcrumbs
-        items={[
-          { label: "Documents", onClick: onBack },
-          { label: formatDocumentTitle(documentId) },
-        ]}
+      <RecordPageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              {
+                label: "Documents",
+                icon: <DocumentPageIcon size={14} />,
+                onClick: onBack,
+              },
+              {
+                label: formatDocumentTitle(documentId),
+                icon: <DocumentPageIcon size={14} />,
+              },
+            ]}
+          />
+        }
+        icon={
+          <RecordPageIcon
+            icon={<DocumentPageIcon size={28} />}
+          />
+        }
+        title={formatDocumentTitle(documentId)}
+        subtitle={documentId}
+        lastUpdated={lastUpdated}
+        recordId={documentId}
+        propertyGroups={headerPropertyGroups}
+        propertyLayout="stacked"
+        meta={headerMeta}
+        actions={headerActions}
       />
-      <header className="document-detail-head">
-        <div className="document-detail-head-row">
-          {showAdminActions ? (
-            <div className="document-detail-commands">
-              <button
-                type="button"
-                className={`document-command${uploadDrawerOpen ? " active" : ""}`}
-                aria-expanded={uploadDrawerOpen}
-                aria-controls="new-document-version-drawer"
-                onClick={() => {
-                  setUploadSuccess(null);
-                  setUploadDrawerOpen(true);
-                }}
-              >
-                New version
-              </button>
-              {showReingestion ? (
-                <button
-                  type="button"
-                  className="document-command document-command-accent"
-                  onClick={() => setReingestionOpen(true)}
-                >
-                  Re-ingest
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        <div className="document-detail-intro">
-          <h3>{formatDocumentTitle(documentId)}</h3>
-        </div>
-      </header>
 
       <NewDocumentVersionDrawer
         documentId={documentId}
@@ -290,33 +375,20 @@ export default function DocumentDetail({
       ) : null}
 
       {status === "ready" ? (
-        <>
-          <div className="version-toolbar reveal">
-            <div
-              className="catalog-tabs"
-              role="tablist"
-              aria-label="Filter by version status"
-            >
-              {VERSION_TABS.map((tab) => {
-                const isSelected = versionTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    id={`document-version-tab-${tab.id}`}
-                    className={`catalog-tab${isSelected ? " active" : ""}`}
-                    aria-selected={isSelected}
-                    aria-controls="document-version-panel"
-                    onClick={() => setVersionTab(tab.id)}
-                  >
-                    <span>{tab.label}</span>
-                    <span className="catalog-tab-count">{versionTabCounts[tab.id]}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        <div className="version-view reveal">
+          <h4 className="record-section-heading">Document versions</h4>
+          <FilterTabs
+            tabs={VERSION_TABS.map((tab) => ({
+              id: tab.id,
+              label: tab.label,
+              count: versionTabCounts[tab.id],
+            }))}
+            activeTabId={versionTab}
+            onTabChange={(tabId) => setVersionTab(tabId as VersionTab)}
+            ariaLabel="Filter by version status"
+            idPrefix="document-version-tab"
+            panelId="document-version-panel"
+          />
 
           <div
             id="document-version-panel"
@@ -330,7 +402,7 @@ export default function DocumentDetail({
                   : "No archived Document Versions on file."}
               </p>
             ) : (
-              <ol className="version-ledger" aria-label={`Document Versions for ${documentId}`}>
+              <ol className="version-ledger-flat" aria-label={`Document Versions for ${documentId}`}>
                 {displayedVersions.map((version, index) => {
               const isArchived = Boolean(version.deleted_at);
               const isLatest = version.document_version_id === latestVersionId;
@@ -338,58 +410,96 @@ export default function DocumentDetail({
               const isDownloading = downloadingVersionId === version.document_version_id;
               const isArchiveFormOpen = archivingVersionId === version.document_version_id;
               const archiveError = archiveErrors[version.document_version_id];
+              const versionProperties: RecordProperty[] = [
+                {
+                  label: "Format",
+                  value: formatContentTypeLabel(version.content_type),
+                },
+                {
+                  label: "Size",
+                  value: formatBytes(version.size_bytes),
+                },
+                {
+                  label: "Uploaded",
+                  value: (
+                    <time dateTime={version.created_at}>
+                      {formatUploadDate(version.created_at)}
+                    </time>
+                  ),
+                },
+                {
+                  label: "Version ID",
+                  value: (
+                    <code className="db-mono" title={version.document_version_id}>
+                      {version.document_version_id}
+                    </code>
+                  ),
+                },
+              ];
+              if (isArchived && version.deleted_at) {
+                versionProperties.push({
+                  label: "Archived",
+                  value: new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
+                    new Date(version.deleted_at),
+                  ),
+                });
+              }
 
               return (
-                <li key={version.document_version_id}>
-                  <article
-                    className={`version-row reveal${isArchived ? " deleted" : ""}${
-                      isLatest && !isArchived ? " latest" : ""
-                    }`}
-                    style={{ "--reveal-delay": `${60 + index * 55}ms` } as CSSProperties}
-                  >
-                    <div className="version-row-main">
-                      <div className="version-row-head">
-                        <code>{version.document_version_id}</code>
-                        <span className="version-format">{formatContentTypeLabel(version.content_type)}</span>
+                <li
+                  key={version.document_version_id}
+                  className={`version-flat-row reveal${isArchived ? " deleted" : ""}${
+                    isLatest && !isArchived ? " latest" : ""
+                  }`}
+                  style={{ "--reveal-delay": `${60 + index * 55}ms` } as CSSProperties}
+                >
+                  <div className="version-flat-head">
+                    <div className="version-flat-main">
+                      <p className="version-flat-title">{version.filename}</p>
+                    </div>
+                    <div className="version-flat-side">
+                      <div className="version-flat-badges">
                         {isLatest && !isArchived ? (
-                          <span className="version-badge">Latest</span>
+                          <StatusPill label="Latest" variant="success" />
                         ) : null}
                       </div>
-                      <p className="version-filename">{version.filename}</p>
-                      <dl className="version-meta-grid">
-                        <div>
-                          <dt>Uploaded</dt>
-                          <dd>
-                            <time dateTime={version.created_at}>
-                              {formatUploadDate(version.created_at)}
-                            </time>
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Size</dt>
-                          <dd>{formatBytes(version.size_bytes)}</dd>
-                        </div>
-                        <div>
-                          <dt>Checksum</dt>
-                          <dd>{version.sha256.slice(0, 12)}…</dd>
-                        </div>
-                        {isArchived && version.deleted_at ? (
-                          <div>
-                            <dt>Archived on</dt>
-                            <dd>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(version.deleted_at))}</dd>
-                          </div>
+                      <div className="version-flat-actions">
+                        <button
+                          type="button"
+                          className="db-link"
+                          disabled={isArchived || isDownloading}
+                          onClick={() => void handleDownload(version)}
+                        >
+                          {isDownloading ? "Retrieving…" : "Retrieve source"}
+                        </button>
+                        {canUpload && !isArchived ? (
+                          <button
+                            type="button"
+                            className="db-link db-link-danger"
+                            disabled={isArchiveFormOpen || isArchiving}
+                            onClick={() => openArchiveForm(version.document_version_id)}
+                          >
+                            Strike from register
+                          </button>
                         ) : null}
-                      </dl>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="version-flat-body">
+                      <RecordPropertyRow
+                        properties={versionProperties}
+                        layout="stacked"
+                      />
                       {version.deletion_reason ? (
                         <p className="version-deletion">{version.deletion_reason}</p>
                       ) : null}
-                      {downloadError ? <p className="version-download-error">{downloadError}</p> : null}
-                      <VersionExtractionRuns
-                        documentId={version.document_id}
-                        documentVersionId={version.document_version_id}
-                        isArchived={isArchived}
-                        canTrigger={canUpload}
-                      />
+                      {downloadError ? (
+                        <p className="version-download-error">{downloadError}</p>
+                      ) : null}
+                      {isArchived ? (
+                        <p className="version-download-note">Source unavailable for archived versions</p>
+                      ) : null}
                       {isArchiveFormOpen ? (
                         <form
                           className="version-archive-form"
@@ -419,14 +529,14 @@ export default function DocumentDetail({
                           <div className="version-archive-actions">
                             <button
                               type="submit"
-                              className="version-archive-confirm"
+                              className="document-command document-command-accent"
                               disabled={isArchiving}
                             >
                               {isArchiving ? "Archiving…" : "Confirm archive"}
                             </button>
                             <button
                               type="button"
-                              className="version-archive-cancel"
+                              className="document-command"
                               disabled={isArchiving}
                               onClick={closeArchiveForm}
                             >
@@ -440,39 +550,20 @@ export default function DocumentDetail({
                           ) : null}
                         </form>
                       ) : null}
+                      <VersionExtractionRuns
+                        documentId={version.document_id}
+                        documentVersionId={version.document_version_id}
+                        isArchived={isArchived}
+                        canTrigger={canUpload}
+                      />
                     </div>
-
-                    <div className="version-row-actions">
-                      <button
-                        type="button"
-                        className="version-download"
-                        disabled={isArchived || isDownloading}
-                        onClick={() => void handleDownload(version)}
-                      >
-                        {isDownloading ? "Retrieving…" : "Retrieve source"}
-                      </button>
-                      {canUpload && !isArchived ? (
-                        <button
-                          type="button"
-                          className="version-archive-trigger"
-                          disabled={isArchiveFormOpen || isArchiving}
-                          onClick={() => openArchiveForm(version.document_version_id)}
-                        >
-                          Strike from register
-                        </button>
-                      ) : null}
-                      {isArchived ? (
-                        <p className="version-download-note">Source unavailable for archived versions</p>
-                      ) : null}
-                    </div>
-                  </article>
                 </li>
               );
             })}
               </ol>
             )}
           </div>
-        </>
+        </div>
       ) : null}
     </div>
   );

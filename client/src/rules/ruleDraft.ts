@@ -25,8 +25,17 @@ export interface ApplicabilityDraft {
 }
 
 export interface ExceptionDraft {
+	clientKey: string;
 	description: string;
 	required_evidence: string;
+}
+
+export function createExceptionDraft(): ExceptionDraft {
+	return {
+		clientKey: crypto.randomUUID(),
+		description: "",
+		required_evidence: "",
+	};
 }
 
 export interface RuleDraft {
@@ -184,10 +193,11 @@ export function createRuleDraft(rule: CandidateRuleValue): RuleDraft {
 		exceptions:
 			rule.exceptions.length > 0
 				? rule.exceptions.map((exception) => ({
+						clientKey: crypto.randomUUID(),
 						description: exception.description,
 						required_evidence: exception.required_evidence.join("\n"),
 					}))
-				: [{ description: "", required_evidence: "" }],
+				: [createExceptionDraft()],
 	};
 }
 
@@ -216,7 +226,7 @@ export function createEmptyManualRuleDraft(): ManualRuleDraft {
 			currency: "",
 			limit_basis: "",
 		},
-		exceptions: [{ description: "", required_evidence: "" }],
+		exceptions: [createExceptionDraft()],
 		citation: {
 			document_id: "",
 			document_version_id: "",
@@ -666,7 +676,7 @@ export function updateScopeField(
 export function updateExceptionField(
 	draft: RuleDraft,
 	index: number,
-	key: keyof ExceptionDraft,
+	key: "description" | "required_evidence",
 	value: string,
 ): RuleDraft {
 	return {
@@ -680,7 +690,7 @@ export function updateExceptionField(
 export function addExceptionToDraft(draft: RuleDraft): RuleDraft {
 	return {
 		...draft,
-		exceptions: [...draft.exceptions, { description: "", required_evidence: "" }],
+		exceptions: [...draft.exceptions, createExceptionDraft()],
 	};
 }
 
@@ -692,7 +702,7 @@ export function removeExceptionFromDraft(
 		...draft,
 		exceptions:
 			draft.exceptions.length === 1
-				? [{ description: "", required_evidence: "" }]
+				? [createExceptionDraft()]
 				: draft.exceptions.filter((_, exceptionIndex) => exceptionIndex !== index),
 	};
 }

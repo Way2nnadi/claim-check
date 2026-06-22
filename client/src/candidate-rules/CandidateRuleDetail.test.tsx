@@ -175,7 +175,7 @@ describe("CandidateRuleDetail", () => {
     await userEvent.clear(screen.getByLabelText("Value"));
     await userEvent.type(screen.getByLabelText("Value"), "80");
 
-    expect(screen.getAllByText("Was").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Previously").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: "Save Candidate Rule" }));
 
@@ -245,7 +245,7 @@ describe("CandidateRuleDetail", () => {
     await userEvent.type(currencyInput, "100");
 
     expect(currencyInput).toHaveValue("");
-    expect(screen.queryByText("Was")).not.toBeInTheDocument();
+    expect(screen.queryByText("Previously")).not.toBeInTheDocument();
   });
 
   it("disables save controls for viewers", async () => {
@@ -274,10 +274,10 @@ describe("CandidateRuleDetail", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Save Candidate Rule" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
-    expect(screen.getByText("Viewer access")).toBeInTheDocument();
+    expect(await screen.findByText("Read-only access")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Candidate Rule" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
   });
 
   it("surfaces validation errors from the API", async () => {
@@ -348,7 +348,7 @@ describe("CandidateRuleDetail", () => {
     await userEvent.clear(screen.getByLabelText("Statement"));
     await userEvent.type(screen.getByLabelText("Statement"), "Meals are capped at $80 per day.");
 
-    expect(screen.getByText("Decision blockers")).toBeInTheDocument();
+    expect(screen.getByText("Save edits before deciding.")).toBeInTheDocument();
     expect(screen.getByText("Save your edits first.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
@@ -456,7 +456,9 @@ describe("CandidateRuleDetail", () => {
     );
 
     await screen.findByDisplayValue("Meals are capped at $75 per day.");
-    expect(screen.getByText("Approval blockers")).toBeInTheDocument();
+    expect(
+      screen.getByText("Resolve these issues before approving this Candidate Rule."),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("Resolve the Citation issue before approving this Candidate Rule."),
     ).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import { formatDocumentTitle } from "./format";
 import type { PolicyDocumentSummary } from "./types";
 import SearchablePicker from "../shared/ui/SearchablePicker";
+import { DocumentPageIcon } from "../shared/ui/PageIcons";
 
 interface DocumentFilterPickerProps {
   label?: string;
@@ -29,6 +30,7 @@ export default function DocumentFilterPicker({
       options={documents.map((document) => ({
         value: document.document_id,
         label: formatDocumentTitle(document.document_id),
+        icon: <DocumentPageIcon size={14} />,
         meta:
           document.version_count > 1 ? `${document.version_count} versions` : undefined,
       }))}

@@ -10,6 +10,7 @@ const baseRule: CandidateRuleValue = {
 	origin: {
 		source_type: "extracted",
 		extraction_run_id: "extract-1",
+		rationale: null,
 	},
 	scope: {
 		country: null,

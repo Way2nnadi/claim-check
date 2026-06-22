@@ -2,9 +2,20 @@ import type { CandidateRuleReview } from "./types";
 import { formatEnforceabilityClass, formatLifecycleState } from "../rules/format";
 import { useRef } from "react";
 import type { KeyboardEvent } from "react";
-import { PRIMARY_REVIEW_TABS, enforceabilityClassName, formatReingestionDiffCategory, lifecycleStateClassName, reingestionDiffCategoryClassName, truncateStatement, type LifecycleTabId } from "./format";
+import {
+	PRIMARY_REVIEW_TABS,
+	formatReingestionDiffCategory,
+	truncateStatement,
+	type LifecycleTabId,
+} from "./format";
 import { catalogApproveDisabled, catalogRejectDisabled, canEditCandidateRules } from "./decisions";
 import type { AuthenticatedPrincipal } from "../shared/auth/types";
+import StatusPill, {
+	enforceabilityToPillVariant,
+	lifecycleToPillVariant,
+	type StatusPillVariant,
+} from "../shared/ui/StatusPill";
+import FilterTabs from "../shared/ui/FilterTabs";
 
 interface CandidateRuleLedgerProps {
 	allReviews: CandidateRuleReview[];
@@ -59,6 +70,21 @@ function RejectIcon() {
 	);
 }
 
+function reingestionDiffToPillVariant(
+	category: CandidateRuleReview["reingestion_diff_category"],
+): StatusPillVariant {
+	if (category === "changed") {
+		return "warning";
+	}
+	if (category === "added") {
+		return "success";
+	}
+	if (category === "removed") {
+		return "danger";
+	}
+	return "neutral";
+}
+
 function EditIcon() {
 	return (
 		<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -103,7 +129,7 @@ export default function CandidateRuleLedger({
 	onClearCandidateRuleSelections,
 	onBulkApprove,
 }: CandidateRuleLedgerProps) {
-	const reviewRowRefs = useRef<Array<HTMLElement | null>>([]);
+	const reviewRowRefs = useRef<Array<HTMLButtonElement | null>>([]);
 	const canEdit = canEditCandidateRules(principal);
 	const selectableCount = selectableCandidateRuleIds.size;
 	const selectedCount = [...selectedCandidateRuleIds].filter((candidateRuleId) =>
@@ -117,9 +143,8 @@ export default function CandidateRuleLedger({
 	}
 
 	function handleReviewRowKeyDown(
-		event: KeyboardEvent<HTMLElement>,
+		event: KeyboardEvent<HTMLButtonElement>,
 		index: number,
-		candidateRuleId: string,
 	): void {
 		if (event.target !== event.currentTarget) {
 			return;
@@ -148,11 +173,6 @@ export default function CandidateRuleLedger({
 			focusReviewRow(reviews.length - 1);
 			return;
 		}
-
-		if (event.key === "Enter" || event.key === " ") {
-			event.preventDefault();
-			onOpenReview(candidateRuleId);
-		}
 	}
 
 	if (allReviews.length === 0) {
@@ -167,37 +187,20 @@ export default function CandidateRuleLedger({
 	return (
 		<div className="extraction-ledger-wrap review-ledger-wrap">
 			<div className="review-ledger-head">
-				<p className="catalog-scope">{scopeLabel}</p>
+				<p className="review-ledger-scope">{scopeLabel}</p>
 
-				<div
-					className="catalog-tabs"
-					role="tablist"
-					aria-label="Filter by lifecycle state"
-				>
-					{PRIMARY_REVIEW_TABS.map((tab) => {
-						const isSelected = lifecycleTab === tab.id;
-						const count = tabCounts[tab.id];
-
-						return (
-							<button
-								key={tab.id}
-								type="button"
-								role="tab"
-								id={`review-lifecycle-tab-${tab.id}`}
-								className={`catalog-tab${isSelected ? " active" : ""}`}
-								data-tab-id={tab.id}
-								aria-selected={isSelected}
-								aria-controls="review-rule-panel"
-								onClick={() => onLifecycleTabChange(tab.id)}
-							>
-								<span>{tab.label}</span>
-								{count !== undefined ? (
-									<span className="catalog-tab-count">{count}</span>
-								) : null}
-							</button>
-						);
-					})}
-				</div>
+				<FilterTabs
+					tabs={PRIMARY_REVIEW_TABS.map((tab) => ({
+						id: tab.id,
+						label: tab.label,
+						count: tabCounts[tab.id],
+					}))}
+					activeTabId={lifecycleTab}
+					onTabChange={(tabId) => onLifecycleTabChange(tabId as LifecycleTabId)}
+					ariaLabel="Filter by lifecycle state"
+					idPrefix="review-lifecycle-tab"
+					panelId="review-rule-panel"
+				/>
 			</div>
 
 			{reviews.length === 0 ? (
@@ -230,7 +233,7 @@ export default function CandidateRuleLedger({
 									disabled={selectableCount === 0}
 									onChange={onToggleAllCandidateRuleSelections}
 								/>
-								<span>
+								<span className="review-rule-selection-label">
 									{selectedCount > 0
 										? `${selectedCount} selected`
 										: "Select low-risk visible rules"}
@@ -239,16 +242,16 @@ export default function CandidateRuleLedger({
 							<span className="review-rule-selection-hint">
 								{canBulkApprove
 									? selectableCount > 0
-										? `${selectableCount} low-risk Candidate Rule${selectableCount === 1 ? "" : "s"} available for batch approval`
-										: "No low-risk Candidate Rules are available in this view"
-									: "Viewer role can inspect queue deltas but cannot approve Candidate Rules"}
+										? `${selectableCount} low-risk rule${selectableCount === 1 ? "" : "s"} ready for batch approval`
+										: "No low-risk rules in this view"
+									: "Viewers can inspect the queue but cannot approve rules"}
 							</span>
 						</div>
 						{selectedCount > 0 ? (
 							<div className="review-rule-selection-actions">
 								<button
 									type="button"
-									className="review-secondary-button compact"
+									className="document-command"
 									disabled={isBulkApproving}
 									onClick={onClearCandidateRuleSelections}
 								>
@@ -256,7 +259,7 @@ export default function CandidateRuleLedger({
 								</button>
 								<button
 									type="button"
-									className="review-save-button compact"
+									className="document-command document-command-accent"
 									disabled={bulkApproveDisabled}
 									onClick={onBulkApprove}
 								>
@@ -268,10 +271,6 @@ export default function CandidateRuleLedger({
 					{reviews.map((review, index) => {
 						const rule = review.current_rule;
 						const qaCount = review.qa_flags.length;
-						const lifecycleClass = lifecycleStateClassName(review.lifecycle_state);
-						const enforceabilityClass = enforceabilityClassName(
-							rule.enforceability_class,
-						);
 						const statement = truncateStatement(rule.statement, 160);
 						const approveDisabled = catalogApproveDisabled(review, canEdit);
 						const rejectDisabled = catalogRejectDisabled(review, canEdit);
@@ -284,20 +283,8 @@ export default function CandidateRuleLedger({
 
 						return (
 							<li key={review.candidate_rule_id}>
-								<article
-									ref={(node) => {
-										reviewRowRefs.current[index] = node;
-									}}
-									className={`review-row reveal lifecycle-${lifecycleClass}${isSelected ? " selected" : ""}`}
-									tabIndex={0}
-									aria-label={`Open Candidate Rule ${review.candidate_rule_id}`}
-									onKeyDown={(event) =>
-										handleReviewRowKeyDown(
-											event,
-											index,
-											review.candidate_rule_id,
-										)
-									}
+								<div
+									className={`review-row reveal${isSelected ? " selected" : ""}`}
 								>
 									<label className="review-rule-checkbox">
 										<input
@@ -313,6 +300,56 @@ export default function CandidateRuleLedger({
 											Select Candidate Rule {review.candidate_rule_id}
 										</span>
 									</label>
+									<button
+										type="button"
+										ref={(node) => {
+											reviewRowRefs.current[index] = node;
+										}}
+										className="review-row-open"
+										aria-label={`Open Candidate Rule ${review.candidate_rule_id}`}
+										onClick={() => onOpenReview(review.candidate_rule_id)}
+										onKeyDown={(event) =>
+											handleReviewRowKeyDown(event, index)
+										}
+									>
+										<p className="review-statement">{statement}</p>
+										<div className="review-row-meta">
+											{review.reingestion_diff_category ? (
+												<StatusPill
+													label={formatReingestionDiffCategory(
+														review.reingestion_diff_category,
+													)}
+													variant={reingestionDiffToPillVariant(
+														review.reingestion_diff_category,
+													)}
+												/>
+											) : null}
+											<StatusPill
+												label={formatLifecycleState(review.lifecycle_state)}
+												variant={lifecycleToPillVariant(review.lifecycle_state)}
+											/>
+											<StatusPill
+												label={formatEnforceabilityClass(rule.enforceability_class)}
+												variant={enforceabilityToPillVariant(
+													rule.enforceability_class,
+												)}
+											/>
+											{rule.scope.expense_category ? (
+												<StatusPill
+													label={rule.scope.expense_category}
+													variant="neutral"
+												/>
+											) : null}
+											<StatusPill
+												label={
+													qaCount > 0
+														? `${qaCount} QA flag${qaCount === 1 ? "" : "s"}`
+														: "QA clear"
+												}
+												variant={qaCount > 0 ? "warning" : "neutral"}
+											/>
+										</div>
+									</button>
 									{canEdit ? (
 										<div className="review-row-actions">
 											<button
@@ -343,44 +380,7 @@ export default function CandidateRuleLedger({
 											</button>
 										</div>
 									) : null}
-									<p className="review-statement">{statement}</p>
-									<div className="review-row-head">
-										<div className="review-row-idline">
-											{review.reingestion_diff_category ? (
-												<span
-													className={`review-diff-badge ${reingestionDiffCategoryClassName(
-														review.reingestion_diff_category,
-													)}`}
-												>
-													{formatReingestionDiffCategory(
-														review.reingestion_diff_category,
-													)}
-												</span>
-											) : null}
-											<span className={`review-lifecycle ${lifecycleClass}`}>
-												{formatLifecycleState(review.lifecycle_state)}
-											</span>
-											<span
-												className={`review-enforceability ${enforceabilityClass}`}
-											>
-												{formatEnforceabilityClass(rule.enforceability_class)}
-											</span>
-											{rule.scope.expense_category ? (
-												<span className="review-rule-category">
-													{rule.scope.expense_category}
-												</span>
-											) : null}
-											<span
-												className={`review-qa-count${qaCount > 0 ? " flagged" : " clear"}`}
-												aria-label={`${qaCount} QA flag${qaCount === 1 ? "" : "s"}`}
-											>
-												{qaCount > 0
-													? `${qaCount} QA flag${qaCount === 1 ? "" : "s"}`
-													: "QA clear"}
-											</span>
-										</div>
-									</div>
-								</article>
+								</div>
 							</li>
 						);
 					})}

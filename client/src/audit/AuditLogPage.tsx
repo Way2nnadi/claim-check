@@ -2,8 +2,9 @@ import type { AuditEvent, AuditEventFilters } from "./types";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { fetchAuditEvents } from "./api";
 
+import EntityTypeFilterPicker from "./EntityTypeFilterPicker";
+import { shortenId } from "../shared/format/common";
 import {
-  AUDIT_ENTITY_TYPE_OPTIONS,
   describeAuditError,
   formatAuditAction,
   formatAuditEntityType,
@@ -99,16 +100,9 @@ export default function AuditLogPage() {
 
   return (
     <div className="catalog-page audit-page">
-      <header className="catalog-head audit-head">
-        <h3>Audit log</h3>
-        <p className="audit-lede">
-          Browse immutable system events.
-        </p>
-      </header>
-
       <section className="db-properties" aria-label="Audit overview">
         <article className="db-property">
-          <span className="db-property-label">Events in scope</span>
+          <span className="db-property-label">Events</span>
           <span className="db-property-value">
             {status === "loading" ? "…" : events.length}
           </span>
@@ -120,16 +114,16 @@ export default function AuditLogPage() {
           </span>
         </article>
         <article className="db-property">
-          <span className="db-property-label">Entity classes</span>
+          <span className="db-property-label">Entity types</span>
           <span className="db-property-value">
             {status === "loading" ? "…" : uniqueEntityTypeCount}
           </span>
         </article>
       </section>
 
-      <details className="review-scope-panel audit-filter-panel">
+      <details className="review-scope-panel notion-scope-panel audit-filter-panel">
         <summary>
-          Code filters
+          Scope filters
           {activeFilterCount > 0 ? (
             <span className="review-scope-panel-badge">
               {activeFilterCount} active
@@ -138,26 +132,15 @@ export default function AuditLogPage() {
         </summary>
         <form className="review-scope-form audit-filter" onSubmit={handleFilterSubmit}>
           <div className="review-filter-grid audit-filter-grid">
-            <label htmlFor="audit-entity-type">
-              Entity type
-              <select
-                id="audit-entity-type"
-                name="audit-entity-type"
-                value={filterDraft.entityType}
-                onChange={(event) =>
-                  setFilterDraft((current) => ({
-                    ...current,
-                    entityType: event.target.value,
-                  }))
-                }
-              >
-                {AUDIT_ENTITY_TYPE_OPTIONS.map((option) => (
-                  <option key={option.value || "all"} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <EntityTypeFilterPicker
+              value={filterDraft.entityType}
+              onChange={(entityType) =>
+                setFilterDraft((current) => ({
+                  ...current,
+                  entityType,
+                }))
+              }
+            />
 
             <label htmlFor="audit-entity-id">
               Entity id
@@ -178,40 +161,39 @@ export default function AuditLogPage() {
           </div>
 
           <div className="review-filter-actions">
-            <button type="submit" className="review-filter-apply">
-              Apply filters
+            <button type="submit" className="document-command document-command-accent">
+              Apply scope
             </button>
             <button
               type="button"
-              className="review-filter-clear"
+              className="document-command"
               disabled={!filtersApplied && !filterDraft.entityType && !filterDraft.entityId}
               onClick={handleClearFilters}
             >
-              Clear filters
+              Clear scope
             </button>
             <p className="audit-filter-active">
               {filtersApplied
                 ? `Scoped to ${formatAuditEntityType(
                     appliedFilters.entityType ?? "entity",
                   )}${appliedFilters.entityId ? ` · ${appliedFilters.entityId}` : ""}`
-                : "Showing the full audit ledger."}
+                : "All events"}
             </p>
           </div>
         </form>
       </details>
 
       <section className="catalog-stage">
-        <div className="catalog-header">
-          <p className="catalog-count">
-            {status === "loading"
-              ? "Synchronizing audit ledger…"
-              : `${events.length} event${events.length === 1 ? "" : "s"} loaded`}
+        {status === "loading" ? (
+          <p className="catalog-status">
+            <span className="catalog-status-rule" aria-hidden="true" />
+            Loading…
           </p>
-        </div>
+        ) : null}
 
         {status === "error" ? (
           <div className="review-empty" role="alert">
-            <h4>Audit ledger unavailable</h4>
+            <h4>Unable to load audit events</h4>
             <p>{errorMessage}</p>
           </div>
         ) : null}
@@ -226,8 +208,8 @@ export default function AuditLogPage() {
         ) : null}
 
         {events.length > 0 ? (
-          <div className="audit-table-wrap">
-            <table className="audit-table">
+          <div className="db-table-wrap">
+            <table className="db-table audit-events-table" aria-label="Audit events">
               <thead>
                 <tr>
                   <th scope="col">Timestamp</th>
@@ -241,44 +223,27 @@ export default function AuditLogPage() {
                 {events.map((event) => (
                   <tr key={`${event.occurred_at}-${event.action}-${event.entity_id}`}>
                     <td>
-                      <time
-                        className="audit-timestamp"
-                        dateTime={event.occurred_at}
-                      >
+                      <time dateTime={event.occurred_at}>
                         {formatAuditTimestamp(event.occurred_at)}
                       </time>
                     </td>
                     <td>
-                      <div className="audit-actor">
-                        <span className="audit-actor-subject">
-                          {event.actor_subject}
-                        </span>
-                        <span className="audit-actor-roles">
-                          {event.actor_roles.join(" · ")}
-                        </span>
-                      </div>
+                      <span className="db-primary">{event.actor_subject}</span>
+                      <span className="db-secondary">{event.actor_roles.join(" · ")}</span>
                     </td>
                     <td>
-                      <div className="audit-action-cell">
-                        <span className="audit-action-label">
-                          {formatAuditAction(event.action)}
-                        </span>
-                        <code>{event.action}</code>
-                      </div>
+                      <span className="db-primary">{formatAuditAction(event.action)}</span>
+                      <span className="db-secondary db-mono">{event.action}</span>
                     </td>
                     <td>
-                      <div className="audit-entity-cell">
-                        <span className="audit-entity-type">
-                          {formatAuditEntityType(event.entity_type)}
-                        </span>
-                        <code>{event.entity_id}</code>
-                      </div>
+                      <span className="db-primary">
+                        {formatAuditEntityType(event.entity_type)}
+                      </span>
+                      <span className="db-secondary db-mono" title={event.entity_id}>
+                        {shortenId(event.entity_id)}
+                      </span>
                     </td>
-                    <td>
-                      <p className="audit-payload-summary">
-                        {summarizeAuditPayload(event)}
-                      </p>
-                    </td>
+                    <td>{summarizeAuditPayload(event)}</td>
                   </tr>
                 ))}
               </tbody>

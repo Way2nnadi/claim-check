@@ -15,6 +15,27 @@ interface VersionExtractionRunsProps {
 
 type RunStatus = "idle" | "loading" | "ready" | "error";
 
+function ExtractionChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`version-extraction-chevron${open ? " open" : ""}`}
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M6 4l4 4-4 4"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function VersionExtractionRuns({
   documentId,
   documentVersionId,
@@ -62,6 +83,8 @@ export default function VersionExtractionRuns({
       ? `${runs.length} extraction run${runs.length === 1 ? "" : "s"}`
       : "Extraction runs";
 
+  const toggleLabel = expanded ? "Collapse extraction runs" : "Expand extraction runs";
+
   const showTrigger = canTrigger && !isArchived;
 
   return (
@@ -71,17 +94,18 @@ export default function VersionExtractionRuns({
         id={`extraction-${documentVersionId}`}
         className={`version-extraction-toggle${expanded ? " open" : ""}`}
         aria-expanded={expanded}
+        aria-label={toggleLabel}
         onClick={handleToggle}
       >
+        <ExtractionChevron open={expanded} />
         <span className="version-extraction-toggle-label">{countLabel}</span>
-        <span className="version-extraction-toggle-hint">{expanded ? "Collapse" : "Expand"}</span>
       </button>
 
       {expanded ? (
         <div className="version-extraction-body reveal">
           {isArchived ? (
             <p className="version-extraction-note">
-              Archived versions retain Extraction Run history even when source files are unavailable.
+              Archived versions retain extraction run history even when source files are unavailable.
             </p>
           ) : null}
 
@@ -102,7 +126,7 @@ export default function VersionExtractionRuns({
           {status === "ready" ? (
             <ExtractionRunLedger
               runs={runs}
-              emptyMessage="No Extraction Runs have been executed against this Document Version yet."
+              emptyMessage="No extraction runs yet."
             />
           ) : null}
         </div>

@@ -180,7 +180,7 @@ export function resolveReviewEmptyHint(context: ReviewEmptyContext): string | nu
   }
 
   if (context.scopeFilterCount > 0 || context.extractionRunId) {
-    return "Adjust scope filters or choose Show all rules if you expected to see pending work.";
+    return "Adjust scope filters or clear filters if you expected to see pending work.";
   }
 
   return "Extracted Rules appear here after an Extraction Run completes.";

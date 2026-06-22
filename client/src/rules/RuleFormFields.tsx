@@ -1,8 +1,8 @@
 import { formatEnforceabilityClass } from "./format";
 import type { AggregationPeriod, Applicability, CandidateRuleValue, EnforceabilityClass, RuleCondition } from "./types";
 import type { CSSProperties, ComponentType, ReactNode } from "react";
-import { AGGREGATION_PERIOD_PICKER_OPTIONS, ENFORCEABILITY_PICKER_OPTIONS, OPERATOR_PICKER_OPTIONS, SCOPE_FIELDS, displayValue, formatAggregationPeriod, hasExtractedBaseline, normalizeCurrencyForSave, normalizeCurrencyInput, normalizeOptionalString, type RuleDraft, type ValidationErrors } from "./ruleDraft";
-import SearchablePicker from "../shared/ui/SearchablePicker";
+import { AGGREGATION_PERIOD_PICKER_OPTIONS, ENFORCEABILITY_PICKER_OPTIONS, OPERATOR_PICKER_OPTIONS, SCOPE_FIELDS, addExceptionToDraft, displayValue, formatAggregationPeriod, hasExtractedBaseline, normalizeCurrencyForSave, normalizeCurrencyInput, normalizeOptionalString, removeExceptionFromDraft, updateExceptionField, type RuleDraft, type ValidationErrors } from "./ruleDraft";
+import SearchablePicker, { type SearchablePickerOption } from "../shared/ui/SearchablePicker";
 
 export interface RuleFormFieldWrapperProps {
 	label: string;
@@ -70,32 +70,15 @@ export function RuleFormFields({
 		key: "description" | "required_evidence",
 		value: string,
 	): void {
-		updateDraft({
-			...draft,
-			exceptions: draft.exceptions.map((exception, exceptionIndex) =>
-				exceptionIndex === index ? { ...exception, [key]: value } : exception,
-			),
-		});
+		updateDraft(updateExceptionField(draft, index, key, value));
 	}
 
 	function addException(): void {
-		updateDraft({
-			...draft,
-			exceptions: [
-				...draft.exceptions,
-				{ description: "", required_evidence: "" },
-			],
-		});
+		updateDraft(addExceptionToDraft(draft));
 	}
 
 	function removeException(index: number): void {
-		updateDraft({
-			...draft,
-			exceptions:
-				draft.exceptions.length === 1
-					? [{ description: "", required_evidence: "" }]
-					: draft.exceptions.filter((_, exceptionIndex) => exceptionIndex !== index),
-		});
+		updateDraft(removeExceptionFromDraft(draft, index));
 	}
 
 	function reviewScopeProps(fieldKey: keyof RuleDraft["scope"]) {
@@ -205,23 +188,21 @@ export function RuleFormFields({
 							disabled={disabled}
 							mono
 							showAllOnOpen
-							onChange={(nextValue) =>
-								onEnforceabilityChange(nextValue as EnforceabilityClass)
-							}
+							onChange={(nextValue) => onEnforceabilityChange(nextValue)}
 						/>
 					</FieldWrapper>
 				</section>
 			) : null}
 
 			<section
-				className="review-detail-panel reveal"
+				className="review-detail-panel review-property-section reveal"
 				style={
 					panelDelayMs > 0
 						? ({ "--reveal-delay": `${panelDelayMs}ms` } as CSSProperties)
 						: undefined
 				}
 			>
-				<h4>Scope</h4>
+				<h4 className="record-section-heading">Scope</h4>
 				<div className="review-field-grid cols-2">
 					{SCOPE_FIELDS.map((field) => (
 						<FieldWrapper
@@ -247,7 +228,7 @@ export function RuleFormFields({
 			</section>
 
 			<section
-				className={`review-detail-panel reveal${isEnforceable ? "" : " is-muted"}`}
+				className={`review-detail-panel review-property-section reveal${isEnforceable ? "" : " is-muted"}`}
 				style={
 					panelDelayMs > 0
 						? ({ "--reveal-delay": `${panelDelayMs + 40}ms` } as CSSProperties)
@@ -255,7 +236,7 @@ export function RuleFormFields({
 				}
 				aria-disabled={!isEnforceable}
 			>
-				<h4>Machine-checkable shape</h4>
+				<h4 className="record-section-heading">Machine-checkable shape</h4>
 				{!isEnforceable ? (
 					<p className="review-field-description">
 						Guidance and subjective rules route to humans instead of machine
@@ -370,15 +351,22 @@ export function RuleFormFields({
 						{...reviewApplicabilityProps(
 							"aggregation_period",
 							draft.applicability.aggregation_period,
-							(value) => formatAggregationPeriod(value as AggregationPeriod | ""),
+							(value) =>
+								formatAggregationPeriod(
+									(value ?? "") as AggregationPeriod | "",
+								),
 						)}
 					>
-						<SearchablePicker
+						<SearchablePicker<AggregationPeriod | "">
 							label="Aggregation period"
 							inputId={`${idPrefix}-aggregation-period`}
 							hideLabel
 							value={draft.applicability.aggregation_period}
-							options={AGGREGATION_PERIOD_PICKER_OPTIONS}
+							options={
+								AGGREGATION_PERIOD_PICKER_OPTIONS as SearchablePickerOption<
+									AggregationPeriod | ""
+								>[]
+							}
 							placeholder="Select aggregation period"
 							emptyMessage="No matching periods"
 							disabled={disabled || !isEnforceable}
@@ -389,7 +377,7 @@ export function RuleFormFields({
 									...draft,
 									applicability: {
 										...draft.applicability,
-										aggregation_period: nextValue as AggregationPeriod | "",
+										aggregation_period: nextValue,
 									},
 								})
 							}
@@ -479,7 +467,7 @@ export function RuleFormFields({
 				</div>
 			</section>
 
-			<details className="review-detail-meta reveal">
+			<details className="review-detail-meta notion-collapsible reveal">
 				<summary>Exceptions</summary>
 				<div className="review-detail-meta-body">
 					<div className="review-detail-section-head">
@@ -498,7 +486,7 @@ export function RuleFormFields({
 
 					<div className="review-exceptions">
 						{draft.exceptions.map((exception, index) => (
-							<article key={index} className="review-exception-card">
+							<article key={exception.clientKey} className="review-exception-card">
 								<div className="review-exception-head">
 									<span className="review-exception-title">
 										Exception {index + 1}
@@ -563,3 +551,5 @@ export function RuleFormFields({
 		</>
 	);
 }
+
+export default RuleFormFields;

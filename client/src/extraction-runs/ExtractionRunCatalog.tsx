@@ -74,7 +74,7 @@ export default function ExtractionRunCatalog({ onOpenRun }: ExtractionRunCatalog
 
   useEffect(() => {
     void reload();
-  }, [appliedFilters, reload]);
+  }, [reload]);
 
   function handleScopeSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -93,7 +93,7 @@ export default function ExtractionRunCatalog({ onOpenRun }: ExtractionRunCatalog
 
   return (
     <div className="catalog-page content-enter">
-      <details className="review-scope-panel">
+      <details className="review-scope-panel notion-scope-panel">
         <summary>
           Scope filters
           {scopeFilterCount > 0 ? (
@@ -108,7 +108,7 @@ export default function ExtractionRunCatalog({ onOpenRun }: ExtractionRunCatalog
               onChange={(value) => setScopeDraft((current) => ({ ...current, documentId: value }))}
             />
             <label htmlFor="extraction-filter-version">
-              Document version id
+              Document version
               <input
                 id="extraction-filter-version"
                 name="extraction-filter-version"
@@ -125,12 +125,12 @@ export default function ExtractionRunCatalog({ onOpenRun }: ExtractionRunCatalog
             </label>
           </div>
           <div className="review-filter-actions">
-            <button type="submit" className="review-filter-apply">
+            <button type="submit" className="document-command document-command-accent">
               Apply scope
             </button>
             <button
               type="button"
-              className="review-filter-clear"
+              className="document-command"
               disabled={scopeFilterCount === 0 && !scopeActiveInDraft}
               onClick={handleClearScope}
             >

@@ -357,13 +357,13 @@ export default function ReingestionWizard({
               />
 
               <div className="reingestion-actions">
-                <button type="submit" className="reingestion-submit" disabled={!selectedFile}>
+                <button type="submit" className="document-command document-command-accent" disabled={!selectedFile}>
                   Begin re-ingestion
                 </button>
                 {selectedFile ? (
                   <button
                     type="button"
-                    className="reingestion-clear"
+                    className="document-command"
                     onClick={() => {
                       setSelectedFile(null);
                       setFormError(null);
@@ -416,10 +416,10 @@ export default function ReingestionWizard({
             {failureMessage}
           </p>
           <div className="reingestion-actions">
-            <button type="button" className="reingestion-submit" onClick={handleRetry}>
+            <button type="button" className="document-command document-command-accent" onClick={handleRetry}>
               Adjust and retry
             </button>
-            <button type="button" className="reingestion-clear" onClick={onClose}>
+            <button type="button" className="document-command" onClick={onClose}>
               Close wizard
             </button>
           </div>
@@ -478,7 +478,7 @@ export default function ReingestionWizard({
           </dl>
 
           <div className="reingestion-actions">
-            <button type="button" className="reingestion-submit" onClick={handleDone}>
+            <button type="button" className="document-command document-command-accent" onClick={handleDone}>
               Return to document
             </button>
           </div>

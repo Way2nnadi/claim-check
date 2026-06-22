@@ -1,5 +1,5 @@
 import { fetchCandidateRule, updateCandidateRule } from "./api";
-import type { CandidateRuleReview } from "./types";
+import type { CandidateRuleReview, CandidateRuleReviewUpdateRequest } from "./types";
 import { fetchDocumentSections } from "../policy-documents/api";
 import type { DocumentSection } from "../policy-documents/types";
 import { formatEnforceabilityClass, formatLifecycleState } from "../rules/format";
@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import { ApiError } from "../shared/api/client";
 import { approvalBlockersForRule, canEditCandidateRules, canResolveCandidateRule, resolveCandidateRuleDecision, resolveDecisionErrorMessage, validateDecisionComment } from "./decisions";
-import { describeCandidateRuleError, formatQAFlagCode, formatQAFlagDomain, lifecycleStateClassName, qaFlagDomain } from "./format";
+import { describeCandidateRuleError, formatQAFlagCode, formatQAFlagDomain, qaFlagDomain } from "./format";
 import { formatDocumentTitle } from "../policy-documents/format";
 import { RuleFormFields, type RuleFormFieldWrapperProps } from "../rules/RuleFormFields";
 import { applyEnforceabilityChange, buildCandidateRuleUpdatePayload, countRuleDraftDifferences, createRuleDraft, decisionBlockersFor, displayValue, draftAsRuleValue, ENFORCEABILITY_PICKER_OPTIONS, type RuleDraft } from "../rules/ruleDraft";
@@ -18,6 +18,16 @@ import CandidateRuleDecisionModal from "./CandidateRuleDecisionModal";
 
 import SectionBrowserDrawer from "./SectionBrowserDrawer";
 import SearchablePicker from "../shared/ui/SearchablePicker";
+import Breadcrumbs from "../shared/ui/Breadcrumbs";
+import CommentThread, { type CommentEntry } from "../shared/ui/CommentThread";
+import RecordPageHeader, {
+	type RecordPropertyGroup,
+} from "../shared/ui/RecordPageHeader";
+import StatusPill, {
+	enforceabilityToPillVariant,
+	lifecycleToPillVariant,
+} from "../shared/ui/StatusPill";
+import { RecordPageIcon, RulePageIcon } from "../shared/ui/PageIcons";
 
 export interface CandidateRuleDetailProps {
 	candidateRuleId: string;
@@ -132,7 +142,7 @@ function ReviewField({
 			{children}
 			{displayWasLine ? (
 				<p className="review-field-was">
-					<span className="review-field-was-label">Was</span> {extractedValue}
+					<span className="review-field-was-label">Previously</span> {extractedValue}
 				</p>
 			) : null}
 			{description ? (
@@ -336,7 +346,7 @@ function CitationStrip({
 
 	return (
 		<section
-			className="review-citation-strip reveal"
+			className="review-citation-strip review-source-group reveal"
 			aria-label="Source citation"
 		>
 			<header className="review-citation-strip-head">
@@ -682,7 +692,6 @@ export default function CandidateRuleDetail({
 	}
 
 	const rule = review.current_rule;
-	const lifecycleClass = lifecycleStateClassName(review.lifecycle_state);
 	const canResolve = canResolveCandidateRule(review, canEdit);
 	const saveDisabled =
 		!canEdit || isSaving || isResolving || unsavedChangeCount === 0;
@@ -703,42 +712,153 @@ export default function CandidateRuleDetail({
 		draft.enforceability_class !== "enforceable" ||
 		draft.enforceability_class !== review.extracted_rule.enforceability_class;
 
+	const headerPropertyGroups: RecordPropertyGroup[] = [
+		{
+			title: "Review",
+			properties: [
+				{
+					label: "Status",
+					value: (
+						<StatusPill
+							label={formatLifecycleState(review.lifecycle_state)}
+							variant={lifecycleToPillVariant(review.lifecycle_state)}
+						/>
+					),
+				},
+				{
+					label: "Enforceability",
+					value: (
+						<StatusPill
+							label={formatEnforceabilityClass(draft.enforceability_class)}
+							variant={enforceabilityToPillVariant(draft.enforceability_class)}
+						/>
+					),
+				},
+				{
+					label: "QA flags",
+					value:
+						review.qa_flags.length > 0 ? (
+							<StatusPill
+								label={`${review.qa_flags.length} flag${review.qa_flags.length === 1 ? "" : "s"}`}
+								variant="danger"
+							/>
+						) : (
+							<StatusPill label="Clear" variant="success" />
+						),
+				},
+			],
+		},
+		{
+			title: "Provenance",
+			properties: [
+				{
+					label: "Rule ID",
+					value: <code className="db-mono">{review.candidate_rule_id}</code>,
+				},
+				{
+					label: "Document",
+					value: citation ? (
+						<code className="db-mono">{citation.document_id}</code>
+					) : null,
+					empty: !citation,
+				},
+				{
+					label: "Extraction run",
+					value: rule.origin.extraction_run_id ? (
+						<code className="db-mono">{rule.origin.extraction_run_id}</code>
+					) : null,
+					empty: !rule.origin.extraction_run_id,
+				},
+			],
+		},
+	];
+
+	const headerActions = canEdit ? (
+		<>
+			<button
+				type="button"
+				className="document-command"
+				disabled={approveDisabled}
+				onClick={() => openDecisionModal("approve")}
+			>
+				Approve
+			</button>
+			<button
+				type="button"
+				className="document-command document-command-danger"
+				disabled={rejectDisabled}
+				onClick={() => openDecisionModal("reject")}
+			>
+				Reject
+			</button>
+			<button
+				type="submit"
+				form="candidate-rule-edit-form"
+				className="document-command document-command-accent"
+				disabled={saveDisabled}
+			>
+				{isSaving ? "Saving…" : "Save Candidate Rule"}
+			</button>
+		</>
+	) : undefined;
+
+	const activityEntries: CommentEntry[] = [];
+	const rationale =
+		review.committed_rule?.origin.rationale ?? rule.origin.rationale;
+	if (rationale) {
+		activityEntries.push({
+			id: "origin-rationale",
+			author: rule.origin.source_type === "manual" ? "Manual entry" : "Extraction",
+			body: rationale,
+		});
+	}
+
 	return (
 		<div className="review-detail content-enter">
-			<header className="review-detail-head">
-				<div className="review-detail-head-row">
-					{onBack ? (
-						<button type="button" className="detail-back" onClick={onBack}>
-							{backLabel}
-						</button>
-					) : (
-						<span />
-					)}
-					{differenceCount > 0 || unsavedChangeCount > 0 ? (
+			<RecordPageHeader
+				breadcrumbs={
+					onBack ? (
+						<Breadcrumbs
+							items={[
+								{
+									label: backLabel,
+									icon: <RulePageIcon size={14} />,
+									onClick: onBack,
+								},
+								{
+									label: shortenId(review.candidate_rule_id, 10),
+									icon: <RulePageIcon size={14} />,
+								},
+							]}
+						/>
+					) : undefined
+				}
+				icon={<RecordPageIcon icon={<RulePageIcon size={22} />} />}
+				title={pageTitle}
+				subtitle={normalizeStatement(draft.statement)}
+				recordId={review.candidate_rule_id}
+				propertyGroups={headerPropertyGroups}
+				propertyLayout="stacked"
+				actions={headerActions}
+				meta={
+					!canEdit ? (
+						<p className="review-edit-ledger">Read-only access</p>
+					) : differenceCount > 0 || unsavedChangeCount > 0 ? (
 						<p className="review-edit-ledger">
 							{differenceCount} divergent · {unsavedChangeCount} unsaved
+							{decisionBlockers.length > 0 ? " · save before deciding" : ""}
 						</p>
-					) : null}
-				</div>
-				<div className="review-detail-intro">
-					<h3>{pageTitle}</h3>
-				</div>
-				<div className="review-rule-meta">
-					<div className="review-rule-meta-head">
-						<code>{review.candidate_rule_id}</code>
-						<span className={`review-lifecycle ${lifecycleClass}`}>
-							{formatLifecycleState(review.lifecycle_state)}
-						</span>
-						<span
-							className={`review-qa-count${review.qa_flags.length > 0 ? " flagged" : " clear"}`}
-						>
-							{review.qa_flags.length > 0
-								? `${review.qa_flags.length} QA flag${review.qa_flags.length === 1 ? "" : "s"}`
-								: "QA clear"}
-						</span>
-					</div>
-				</div>
-			</header>
+					) : undefined
+				}
+			/>
+
+			{activityEntries.length > 0 ? (
+				<CommentThread
+					entries={activityEntries}
+					title="Rationale"
+					emptyMessage="No rationale recorded."
+				/>
+			) : null}
 
 			<div className="review-detail-body">
 				{errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
@@ -749,10 +869,16 @@ export default function CandidateRuleDetail({
 				<div className="review-detail-workspace">
 					<QaFlagsBanner flags={review.qa_flags} />
 
-					<form className="review-edit-form" onSubmit={handleSave}>
-						<section className="review-detail-panel reveal">
+					<form
+						id="candidate-rule-edit-form"
+						className="review-edit-form"
+						onSubmit={handleSave}
+					>
+						<section className="review-detail-panel review-property-section reveal">
+							<h4 className="record-section-heading">Rule fields</h4>
 							<ReviewField
 								label="Statement"
+								className="review-field--statement"
 								extractedValue={review.extracted_rule.statement}
 								changed={
 									draft.statement.trim() !== review.extracted_rule.statement
@@ -798,14 +924,10 @@ export default function CandidateRuleDetail({
 									placeholder="Select enforceability class"
 									emptyMessage="No matching classes"
 									disabled={!canEdit || isSaving}
-									mono
 									showAllOnOpen
 									onChange={(nextValue) =>
 										updateDraftState(
-											applyEnforceabilityChange(
-												draft,
-												nextValue as EnforceabilityClass,
-											),
+											applyEnforceabilityChange(draft, nextValue),
 										)
 									}
 								/>
@@ -834,9 +956,11 @@ export default function CandidateRuleDetail({
 								onCloseSections={() => setSectionsOpen(false)}
 							/>
 						) : (
-							<p className="review-citation-empty reveal">
-								No source linked for this rule.
-							</p>
+							<div className="review-source-group reveal">
+								<p className="review-citation-empty">
+									No source linked for this rule.
+								</p>
+							</div>
 						)}
 
 						<RuleFormFields
@@ -855,87 +979,39 @@ export default function CandidateRuleDetail({
 						/>
 
 						{approvalBlockers.length > 0 ? (
-							<section
-								className="review-approval-blockers reveal"
+							<div
+								className="notion-callout error reveal"
 								aria-label="Approval blockers"
 								style={{ "--reveal-delay": "140ms" } as CSSProperties}
 							>
-								<div className="review-approval-blockers-head">
-									<span className="review-save-kicker">Approval blockers</span>
-									<p className="review-save-note">
-										Resolve these issues before moving this Candidate Rule into
-										the Structured Policy Store.
-									</p>
-								</div>
-								<ul className="review-approval-blockers-list">
+								<p className="review-blocker-lede">
+									Resolve these issues before approving this Candidate Rule.
+								</p>
+								<ul className="review-blocker-list">
 									{approvalBlockers.map((blocker) => (
 										<li key={blocker}>{blocker}</li>
 									))}
 								</ul>
-							</section>
+							</div>
 						) : null}
 
 						{decisionBlockers.length > 0 ? (
-							<section
-								className="review-approval-blockers reveal"
+							<div
+								className="notion-callout reveal"
 								aria-label="Decision blockers"
 								style={{ "--reveal-delay": "150ms" } as CSSProperties}
 							>
-								<div className="review-approval-blockers-head">
-									<span className="review-save-kicker">Decision blockers</span>
-									<p className="review-save-note">Save edits first.</p>
-								</div>
-								<ul className="review-approval-blockers-list">
+								<p className="review-blocker-lede">Save edits before deciding.</p>
+								<ul className="review-blocker-list">
 									{decisionBlockers.map((blocker) => (
 										<li key={blocker}>{blocker}</li>
 									))}
 								</ul>
-							</section>
+							</div>
 						) : null}
 
-						<footer
-							className="review-save-rail reveal"
-							style={{ "--reveal-delay": "160ms" } as CSSProperties}
-						>
-							<div>
-								<span className="review-save-kicker">
-									{canEdit ? "Approver access" : "Viewer access"}
-								</span>
-								<p className="review-save-note">
-									{canEdit
-										? "Save edits before deciding."
-										: "Read-only access."}
-								</p>
-							</div>
-							<div className="review-save-actions">
-								<button
-									type="button"
-									className="review-secondary-button"
-									disabled={approveDisabled}
-									onClick={() => openDecisionModal("approve")}
-								>
-									Approve
-								</button>
-								<button
-									type="button"
-									className="review-secondary-button review-danger-button"
-									disabled={rejectDisabled}
-									onClick={() => openDecisionModal("reject")}
-								>
-									Reject
-								</button>
-								<button
-									type="submit"
-									className="review-save-button"
-									disabled={saveDisabled}
-								>
-									{isSaving ? "Saving…" : "Save Candidate Rule"}
-								</button>
-							</div>
-						</footer>
-
 						<details
-							className="review-detail-meta reveal"
+							className="review-detail-meta notion-collapsible reveal"
 							style={{ "--reveal-delay": "180ms" } as CSSProperties}
 						>
 							<summary>Audit & provenance</summary>

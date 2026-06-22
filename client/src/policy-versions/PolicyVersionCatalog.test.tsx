@@ -151,6 +151,48 @@ const publishedPolicyVersionDetailResponse = {
   ],
 };
 
+const compiledRuleSetResponse = {
+  compiled_rule_set_id: "compiled-policy-v2",
+  policy_version_id: "policy-v2",
+  compiled_by: "admin-user",
+  compiled_at: "2026-06-22T11:00:00Z",
+  summary: {
+    compiled: 1,
+    skipped_non_enforceable: 1,
+    compile_error: 0,
+  },
+  entries: [
+    {
+      rule_id: "rule-lodging-cap",
+      status: "compiled",
+      source_rule: policyVersionDetailResponse.rules[0],
+      compiled_rule: {
+        rule_id: "rule-lodging-cap",
+        statement: policyVersionDetailResponse.rules[0].statement,
+        scope: policyVersionDetailResponse.rules[0].scope,
+        condition: policyVersionDetailResponse.rules[0].condition,
+        applicability: policyVersionDetailResponse.rules[0].applicability,
+        exceptions: policyVersionDetailResponse.rules[0].exceptions,
+        citation: policyVersionDetailResponse.rules[0].citation,
+      },
+      skip_reason: null,
+      error_reason: null,
+    },
+    {
+      rule_id: "rule-lodging-guidance",
+      status: "skipped_non_enforceable",
+      source_rule: policyVersionDetailResponse.rules[1],
+      compiled_rule: null,
+      skip_reason: "Guidance Rules are not machine-checkable.",
+      error_reason: null,
+    },
+  ],
+};
+
+function compiledRuleSetsForPolicyVersion(policyVersionId: string) {
+  return `/api/policy-versions/${encodeURIComponent(policyVersionId)}/compiled-rule-sets`;
+}
+
 function makePrincipal(role: Role): AuthenticatedPrincipal {
   return {
     subject: `${role}-user`,
@@ -175,7 +217,7 @@ describe("PolicyVersionCatalog", () => {
       it("loads published Policy Versions, opens a snapshot, and exports JSON", async () => {
         window.sessionStorage.setItem("policy-pipeline.auth.token", token);
 
-        const fetchMock = vi.fn().mockImplementation((url: string) => {
+        const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
           if (url === "/api/policy-versions") {
             return Promise.resolve({
               ok: true,
@@ -186,6 +228,12 @@ describe("PolicyVersionCatalog", () => {
             return Promise.resolve({
               ok: true,
               json: async () => policyVersionDetailResponse,
+            });
+          }
+          if (url === compiledRuleSetsForPolicyVersion("policy-v2")) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({ items: [] }),
             });
           }
           if (url === "/api/policy-versions/policy-v2/snapshot") {
@@ -336,6 +384,12 @@ describe("PolicyVersionCatalog", () => {
             json: async () => publishedPolicyVersionDetailResponse,
           });
         }
+        if (url === compiledRuleSetsForPolicyVersion("policy-v3")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
         return Promise.reject(new Error(`Unexpected fetch: ${url}`));
       });
       vi.stubGlobal("fetch", fetchMock);
@@ -462,5 +516,88 @@ describe("PolicyVersionCatalog", () => {
         ),
       ).toBeInTheDocument();
     });
+  });
+
+  it("does not show compile controls for viewer clearance", async () => {
+    window.sessionStorage.setItem("policy-pipeline.auth.token", "viewer-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/policy-versions") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => policyVersionListResponse,
+          });
+        }
+        if (url === "/api/policy-versions/policy-v2") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => policyVersionDetailResponse,
+          });
+        }
+        if (url === compiledRuleSetsForPolicyVersion("policy-v2")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<PolicyVersionCatalog principal={makePrincipal("viewer")} />);
+
+    expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Open policy-v2/i }));
+    expect(await screen.findByText("Not compiled")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Compile Rule Set" })).not.toBeInTheDocument();
+  });
+
+  it("lets admin compile a Policy Version and shows per-rule status", async () => {
+    window.sessionStorage.setItem("policy-pipeline.auth.token", "admin-token");
+
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/policy-versions") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => policyVersionListResponse,
+        });
+      }
+      if (url === "/api/policy-versions/policy-v2") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => policyVersionDetailResponse,
+        });
+      }
+      if (
+        url === compiledRuleSetsForPolicyVersion("policy-v2") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => compiledRuleSetResponse,
+        });
+      }
+      if (url === compiledRuleSetsForPolicyVersion("policy-v2")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [] }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PolicyVersionCatalog principal={makePrincipal("admin")} />);
+
+    expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Open policy-v2/i }));
+    expect(await screen.findByRole("button", { name: "Compile Rule Set" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Compile Rule Set" }));
+
+    expect(await screen.findByText("1 compiled · 1 skipped")).toBeInTheDocument();
+    expect(screen.getAllByText("Compiled").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Skipped").length).toBeGreaterThan(0);
   });
 });

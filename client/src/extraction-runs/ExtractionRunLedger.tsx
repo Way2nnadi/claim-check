@@ -1,7 +1,8 @@
 import { formatExtractionRunStatus, formatPinningLabel, shortenId } from "./format";
 import type { ExtractionRun, ExtractionRunStatus } from "./types";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { formatUploadDate } from "../policy-documents/format";
+import FilterTabs from "../shared/ui/FilterTabs";
 
 type StatusTab = "all" | ExtractionRunStatus;
 
@@ -60,32 +61,18 @@ export default function ExtractionRunLedger({
 
 	return (
 		<div className="extraction-ledger-wrap">
-			<div
-				className="extraction-status-tabs"
-				role="tablist"
-				aria-label="Filter by run status"
-			>
-				{STATUS_TABS.map((tab) => {
-					const count = statusCounts[tab.id];
-					const isSelected = statusTab === tab.id;
-
-					return (
-						<button
-							key={tab.id}
-							type="button"
-							role="tab"
-							id={`extraction-status-tab-${tab.id}`}
-							className={`extraction-status-tab${isSelected ? " active" : ""}${tab.id !== "all" ? ` ${tab.id}` : ""}`}
-							aria-selected={isSelected}
-							aria-controls="extraction-run-panel"
-							onClick={() => setStatusTab(tab.id)}
-						>
-							<span>{tab.label}</span>
-							<span className="extraction-status-tab-count">{count}</span>
-						</button>
-					);
-				})}
-			</div>
+			<FilterTabs
+				tabs={STATUS_TABS.map((tab) => ({
+					id: tab.id,
+					label: tab.label,
+					count: statusCounts[tab.id],
+				}))}
+				activeTabId={statusTab}
+				onTabChange={(tabId) => setStatusTab(tabId as StatusTab)}
+				ariaLabel="Filter by run status"
+				idPrefix="extraction-status-tab"
+				panelId="extraction-run-panel"
+			/>
 
 			{filteredRuns.length === 0 ? (
 				<div
@@ -99,11 +86,11 @@ export default function ExtractionRunLedger({
 			) : (
 				<div
 					id="extraction-run-panel"
-					className="db-table-wrap"
+					className="db-table-wrap extraction-run-table-scroll"
 					role="tabpanel"
 					aria-labelledby={`extraction-status-tab-${statusTab}`}
 				>
-					<table className="db-table" aria-label="Extraction runs">
+					<table className="db-table extraction-run-table" aria-label="Extraction runs">
 						<thead>
 							<tr>
 								<th scope="col">Run</th>
@@ -129,72 +116,69 @@ export default function ExtractionRunLedger({
 								const isFailed = run.status === "failed";
 
 								return (
-									<tr key={run.extraction_run_id}>
-										<td className="db-mono" title={run.extraction_run_id}>
-											{shortenId(run.extraction_run_id)}
-										</td>
-										<td>
-											<span
-												className={`extraction-status${isFailed ? " failed" : " completed"}`}
-											>
-												{formatExtractionRunStatus(run.status)}
-											</span>
-											{isFailed && run.failure_detail ? (
-												<span className="db-secondary">{run.failure_detail}</span>
-											) : null}
-										</td>
-										{showDocumentContext ? (
-											<>
-												<td>{run.document_id}</td>
-												<td className="db-mono" title={run.document_version_id}>
-													{shortenId(run.document_version_id)}
-												</td>
-											</>
-										) : (
-											<>
-												<td className="db-secondary">
-													{formatPinningLabel(
-														run.prompt_template_id,
-														run.prompt_template_version,
-													)}
-												</td>
-												<td className="db-secondary">
-													{formatPinningLabel(
-														run.model_configuration_id,
-														run.model_configuration_version,
-													)}
-												</td>
-											</>
-										)}
-										<td>{run.candidate_rule_count}</td>
-										<td>
-											<time dateTime={run.created_at}>
-												{formatUploadDate(run.created_at)}
-											</time>
-										</td>
-										{onOpenRun ? (
-											<td className="db-actions">
-												{!isFailed ? (
-													<button
-														type="button"
-														className="db-link"
-														disabled={run.candidate_rule_count === 0}
-														aria-label={`Review rules from ${run.extraction_run_id}`}
-														onClick={() => onOpenRun(run.extraction_run_id)}
-													>
-														Open
-													</button>
-												) : (
-													<span
-														className="db-secondary"
-														title={run.failure_detail ?? undefined}
-													>
-														Failed
-													</span>
-												)}
+									<Fragment key={run.extraction_run_id}>
+										<tr className="extraction-run-row">
+											<td className="db-mono extraction-run-col-run" title={run.extraction_run_id}>
+												{shortenId(run.extraction_run_id)}
 											</td>
-										) : null}
-									</tr>
+											<td className="extraction-run-col-status">
+												<span
+													className={`extraction-status${isFailed ? " failed" : " completed"}`}
+												>
+													{formatExtractionRunStatus(run.status)}
+												</span>
+											</td>
+											{showDocumentContext ? (
+												<>
+													<td className="extraction-run-col-document">{run.document_id}</td>
+													<td
+														className="db-mono extraction-run-col-version"
+														title={run.document_version_id}
+													>
+														{shortenId(run.document_version_id)}
+													</td>
+												</>
+											) : (
+												<>
+													<td className="extraction-run-col-prompt">
+														{formatPinningLabel(
+															run.prompt_template_id,
+															run.prompt_template_version,
+														)}
+													</td>
+													<td className="extraction-run-col-model">
+														{formatPinningLabel(
+															run.model_configuration_id,
+															run.model_configuration_version,
+														)}
+													</td>
+												</>
+											)}
+											<td className="extraction-run-col-rules">{run.candidate_rule_count}</td>
+											<td className="extraction-run-col-recorded">
+												<time dateTime={run.created_at}>
+													{formatUploadDate(run.created_at)}
+												</time>
+											</td>
+											{onOpenRun ? (
+												<td className="db-actions extraction-run-col-actions">
+													{!isFailed ? (
+														<button
+															type="button"
+															className="db-link"
+															disabled={run.candidate_rule_count === 0}
+															aria-label={`Review rules from ${run.extraction_run_id}`}
+															onClick={() => onOpenRun(run.extraction_run_id)}
+														>
+															Open
+														</button>
+													) : (
+														<span className="db-secondary">—</span>
+													)}
+												</td>
+											) : null}
+										</tr>
+									</Fragment>
 								);
 							})}
 						</tbody>

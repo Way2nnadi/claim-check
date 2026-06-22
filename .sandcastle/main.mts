@@ -7,10 +7,95 @@ import {
 } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFile, execFileSync } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+const loadSandcastleEnv = (): void => {
+	const envPath = join(dirname(fileURLToPath(import.meta.url)), ".env");
+	if (!existsSync(envPath)) {
+		return;
+	}
+
+	for (const line of readFileSync(envPath, "utf8").split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) {
+			continue;
+		}
+
+		const separator = trimmed.indexOf("=");
+		if (separator === -1) {
+			continue;
+		}
+
+		const key = trimmed.slice(0, separator).trim();
+		let value = trimmed.slice(separator + 1).trim();
+		if (
+			(value.startsWith('"') && value.endsWith('"')) ||
+			(value.startsWith("'") && value.endsWith("'"))
+		) {
+			value = value.slice(1, -1);
+		}
+
+		if (process.env[key] === undefined) {
+			process.env[key] = value;
+		}
+	}
+};
+
+loadSandcastleEnv();
+
+const getCodexAccessToken = (): string | undefined => {
+	const token = process.env.CODEX_ACCESS_TOKEN?.trim();
+	if (token) {
+		return token;
+	}
+
+	const authPath = join(homedir(), ".codex", "auth.json");
+	if (!existsSync(authPath)) {
+		return undefined;
+	}
+
+	try {
+		const auth = JSON.parse(readFileSync(authPath, "utf8")) as {
+			tokens?: { access_token?: string };
+		};
+		const accessToken = auth.tokens?.access_token?.trim();
+		return accessToken || undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+const refreshCodexAuthFromAccessToken = (accessToken: string): void => {
+	try {
+		execFileSync("codex", ["login", "--with-access-token"], {
+			input: accessToken,
+			encoding: "utf8",
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		console.log("Refreshed host Codex auth from access token.");
+	} catch (error) {
+		const message =
+			error instanceof Error ? error.message.trim() : String(error);
+		throw new Error(
+			`Failed to refresh Codex auth from CODEX_ACCESS_TOKEN: ${message}`,
+		);
+	}
+};
+
+const codexAccessToken = getCodexAccessToken();
+if (codexAccessToken) {
+	refreshCodexAuthFromAccessToken(codexAccessToken);
+} else {
+	throw new Error(
+		"Missing Codex access token. Run `codex login` on the host, or set CODEX_ACCESS_TOKEN in .sandcastle/.env.",
+	);
+}
 
 const runGh = (args: string[]): string =>
 	execFileSync("gh", args, {
@@ -398,9 +483,14 @@ const IMAGE_NAME = "sandcastle:claim-check";
 
 const PARALLEL_RUNS = 2;
 
+const sandboxEnv: Record<string, string> = { GH_TOKEN: githubToken };
+if (codexAccessToken) {
+	sandboxEnv.CODEX_ACCESS_TOKEN = codexAccessToken;
+}
+
 const sandboxProvider = docker({
 	imageName: IMAGE_NAME,
-	env: { GH_TOKEN: githubToken },
+	env: sandboxEnv,
 	mounts: [
 		{
 			hostPath: "~/.codex",
@@ -412,6 +502,15 @@ const sandboxProvider = docker({
 const hooks = {
 	sandbox: {
 		onSandboxReady: [
+			...(codexAccessToken
+				? [
+						{
+							command:
+								'printf "%s" "$CODEX_ACCESS_TOKEN" | codex login --with-access-token',
+							timeoutMs: 30_000,
+						},
+					]
+				: []),
 			{ command: "codex login status", timeoutMs: 15_000 },
 			{ command: "gh auth setup-git", timeoutMs: 30_000 },
 			{ command: "uv sync --all-extras", timeoutMs: 300_000 },

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuthenticatedPrincipal } from "../shared/auth/types";
 import userEvent from "@testing-library/user-event";
 
+import type { LifecycleTabId } from "./format";
 import CandidateRuleLedger from "./CandidateRuleLedger";
 
 const principal: AuthenticatedPrincipal = {
@@ -111,7 +112,7 @@ function renderLedger(
 		onToggleCandidateRuleSelection?: (candidateRuleId: string) => void;
 		onToggleAllCandidateRuleSelections?: () => void;
 		onOpenReview?: (candidateRuleId: string) => void;
-		onLifecycleTabChange?: (tab: "queue" | "flagged" | "archive" | "all") => void;
+		onLifecycleTabChange?: (tab: LifecycleTabId) => void;
 	} = {},
 ) {
 	const selectableCandidateRuleIds =
@@ -240,17 +241,17 @@ describe("CandidateRuleLedger", () => {
 
 		renderLedger([firstReview, secondReview], { onOpenReview });
 
-		const firstRow = screen
-			.getByText("Meals are capped at $75 per day.")
-			.closest("article");
-		const secondRow = screen
-			.getByText("Lodging is capped at $250 per night.")
-			.closest("article");
+		const firstRow = screen.getByRole("button", {
+			name: "Open Candidate Rule rule-meals-cap",
+		});
+		const secondRow = screen.getByRole("button", {
+			name: "Open Candidate Rule rule-lodging-cap",
+		});
 
-		expect(firstRow).not.toBeNull();
-		expect(secondRow).not.toBeNull();
+		expect(firstRow).toBeInTheDocument();
+		expect(secondRow).toBeInTheDocument();
 
-		firstRow?.focus();
+		firstRow.focus();
 		expect(firstRow).toHaveFocus();
 
 		await user.keyboard("{ArrowDown}");

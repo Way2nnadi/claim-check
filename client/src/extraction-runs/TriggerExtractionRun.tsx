@@ -150,66 +150,73 @@ export default function TriggerExtractionRun({
 
       {registryStatus === "ready" && !registryEmpty ? (
         <form className="extraction-trigger-form" onSubmit={(event) => void handleSubmit(event)}>
-          <label htmlFor={`extraction-run-id-${documentVersionId}`}>
-            Run id
-            <input
-              id={`extraction-run-id-${documentVersionId}`}
-              name="extraction-run-id"
-              value={extractionRunId}
-              spellCheck={false}
+          <div className="extraction-trigger-fields">
+            <label htmlFor={`extraction-run-id-${documentVersionId}`}>
+              <span className="extraction-trigger-field-label">Run id</span>
+              <input
+                id={`extraction-run-id-${documentVersionId}`}
+                name="extraction-run-id"
+                className="extraction-trigger-field-input"
+                value={extractionRunId}
+                spellCheck={false}
+                disabled={isSubmitting}
+                onChange={(event) => {
+                  setExtractionRunId(event.target.value);
+                  setTriggerError(null);
+                  setTriggerSuccess(null);
+                }}
+              />
+            </label>
+
+            <RegistryPicker
+              label="Prompt"
+              value={promptSelection}
               disabled={isSubmitting}
-              onChange={(event) => {
-                setExtractionRunId(event.target.value);
+              isOpen={openPicker === "prompt"}
+              onOpenChange={(open) => setOpenPicker(open ? "prompt" : null)}
+              onChange={(nextValue) => {
+                setPromptSelection(nextValue);
                 setTriggerError(null);
                 setTriggerSuccess(null);
               }}
+              options={promptTemplates.map((template) => ({
+                value: formatRegistrySelection(template.prompt_template_id, template.version),
+                primary: formatPinningLabel(template.prompt_template_id, template.version),
+              }))}
             />
-          </label>
 
-          <RegistryPicker
-            label="Prompt"
-            value={promptSelection}
-            disabled={isSubmitting}
-            isOpen={openPicker === "prompt"}
-            onOpenChange={(open) => setOpenPicker(open ? "prompt" : null)}
-            onChange={(nextValue) => {
-              setPromptSelection(nextValue);
-              setTriggerError(null);
-              setTriggerSuccess(null);
-            }}
-            options={promptTemplates.map((template) => ({
-              value: formatRegistrySelection(template.prompt_template_id, template.version),
-              primary: formatPinningLabel(template.prompt_template_id, template.version),
-            }))}
-          />
+            <RegistryPicker
+              label="Model"
+              value={modelSelection}
+              disabled={isSubmitting}
+              isOpen={openPicker === "model"}
+              onOpenChange={(open) => setOpenPicker(open ? "model" : null)}
+              onChange={(nextValue) => {
+                setModelSelection(nextValue);
+                setTriggerError(null);
+                setTriggerSuccess(null);
+              }}
+              options={modelConfigurations.map((configuration) => ({
+                value: formatRegistrySelection(
+                  configuration.model_configuration_id,
+                  configuration.version,
+                ),
+                primary: formatPinningLabel(
+                  configuration.model_configuration_id,
+                  configuration.version,
+                ),
+              }))}
+            />
 
-          <RegistryPicker
-            label="Model"
-            value={modelSelection}
-            disabled={isSubmitting}
-            isOpen={openPicker === "model"}
-            onOpenChange={(open) => setOpenPicker(open ? "model" : null)}
-            onChange={(nextValue) => {
-              setModelSelection(nextValue);
-              setTriggerError(null);
-              setTriggerSuccess(null);
-            }}
-            options={modelConfigurations.map((configuration) => ({
-              value: formatRegistrySelection(
-                configuration.model_configuration_id,
-                configuration.version,
-              ),
-              primary: formatPinningLabel(
-                configuration.model_configuration_id,
-                configuration.version,
-              ),
-            }))}
-          />
-
-          <div className="extraction-trigger-actions">
-            <button type="submit" className="extraction-trigger-submit" disabled={isSubmitting}>
-              {isSubmitting ? "Extracting…" : "Extract"}
-            </button>
+            <div className="extraction-trigger-actions">
+              <button
+                type="submit"
+                className="extraction-trigger-submit extraction-trigger-submit-notion"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Extracting…" : "Extract"}
+              </button>
+            </div>
           </div>
         </form>
       ) : null}

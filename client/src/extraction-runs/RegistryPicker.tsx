@@ -40,6 +40,7 @@ export default function RegistryPicker({
       emptyMessage="No matching pins"
       disabled={disabled}
       mono
+      showAllOnOpen
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       onChange={onChange}

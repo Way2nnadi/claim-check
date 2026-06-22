@@ -1,5 +1,8 @@
-interface BreadcrumbItem {
+import type { ReactNode } from "react";
+
+export interface BreadcrumbItem {
 	label: string;
+	icon?: ReactNode;
 	onClick?: () => void;
 }
 
@@ -22,10 +25,16 @@ export default function Breadcrumbs({ items }: BreadcrumbsProps) {
 						<li key={`${item.label}-${index}`}>
 							{!isLast && item.onClick ? (
 								<button type="button" onClick={item.onClick}>
+									{item.icon ? (
+										<span className="breadcrumb-icon">{item.icon}</span>
+									) : null}
 									{item.label}
 								</button>
 							) : (
 								<span aria-current={isLast ? "page" : undefined}>
+									{item.icon ? (
+										<span className="breadcrumb-icon">{item.icon}</span>
+									) : null}
 									{item.label}
 								</span>
 							)}

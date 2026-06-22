@@ -84,31 +84,44 @@ async def test_admin_imports_expense_report_csv_and_persists_normalized_rows(
             headers={"Authorization": "Bearer viewer-token"},
         )
 
-    assert create_response.status_code == 201
-    payload = create_response.json()
-    assert payload["imported_by"] == "admin-user"
-    assert payload["source_filename"] == "expenses.csv"
-    assert payload["row_count"] == 1
-    assert len(payload["rows"]) == 1
-    assert payload["rows"][0] == {
-        "employee_id": "emp-001",
-        "expense_date": "2026-06-21",
-        "expense_category": "meals",
-        "amount": "42.50",
-        "currency": "USD",
-        "country": "us",
-        "travel_type": "domestic",
-        "business_purpose": "Team dinner",
-        "attendee_list": "Alice; Bob",
-        "manager_approval": True,
-        "receipt_attached": True,
-        "trip_id": "trip-7",
-    }
+        assert create_response.status_code == 201
+        payload = create_response.json()
+        assert payload["imported_by"] == "admin-user"
+        assert payload["source_filename"] == "expenses.csv"
+        assert payload["row_count"] == 1
+        assert len(payload["rows"]) == 1
+        assert payload["rows"][0] == {
+            "employee_id": "emp-001",
+            "expense_date": "2026-06-21",
+            "expense_category": "meals",
+            "amount": "42.50",
+            "currency": "USD",
+            "country": "us",
+            "travel_type": "domestic",
+            "business_purpose": "Team dinner",
+            "attendee_list": "Alice; Bob",
+            "manager_approval": True,
+            "receipt_attached": True,
+            "trip_id": "trip-7",
+        }
 
-    assert list_response.status_code == 200
-    assert len(list_response.json()["items"]) == 1
-    assert list_response.json()["items"][0]["expense_report_id"] == payload["expense_report_id"]
-    assert list_response.json()["items"][0]["rows"] == payload["rows"]
+        assert list_response.status_code == 200
+        assert len(list_response.json()["items"]) == 1
+        list_item = list_response.json()["items"][0]
+        assert list_item["expense_report_id"] == payload["expense_report_id"]
+        assert list_item["imported_by"] == "admin-user"
+        assert list_item["source_filename"] == "expenses.csv"
+        assert list_item["row_count"] == 1
+        assert list_item["created_at"] == payload["created_at"]
+        assert "rows" not in list_item
+
+        detail_response = await client.get(
+            f"/expense-reports/{payload['expense_report_id']}",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["rows"] == payload["rows"]
 
 
 @pytest.mark.anyio
@@ -237,3 +250,76 @@ emp-001,2026-06-21,meals,42.50,USD
 
     assert response.status_code == 403
     assert response.json() == {"detail": "You do not have access to this resource."}
+
+
+@pytest.mark.anyio
+async def test_all_authenticated_roles_can_list_and_open_expense_report_detail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    csv_contents = """employee_id,expense_date,expense_category,amount,currency
+emp-001,2026-06-21,meals,42.50,USD
+"""
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        create_response = await client.post(
+            "/expense-reports",
+            headers={"Authorization": "Bearer admin-token"},
+            files=_csv_upload("expenses.csv", csv_contents),
+        )
+        expense_report_id = create_response.json()["expense_report_id"]
+
+        for token in ("admin-token", "approver-token", "viewer-token"):
+            list_response = await client.get(
+                "/expense-reports",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            detail_response = await client.get(
+                f"/expense-reports/{expense_report_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+            assert list_response.status_code == 200
+            assert list_response.json()["items"][0]["expense_report_id"] == expense_report_id
+            assert "rows" not in list_response.json()["items"][0]
+
+            assert detail_response.status_code == 200
+            assert detail_response.json()["expense_report_id"] == expense_report_id
+            assert len(detail_response.json()["rows"]) == 1
+
+
+@pytest.mark.anyio
+async def test_expense_report_detail_returns_not_found_for_unknown_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/expense-reports/expense-report-missing",
+            headers={"Authorization": "Bearer viewer-token"},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Expense Report was not found."}

@@ -148,6 +148,12 @@ export function fetchExpenseReports(): Promise<ExpenseReportListResponse> {
   return apiRequest<ExpenseReportListResponse>("/api/expense-reports");
 }
 
+export function fetchExpenseReport(expenseReportId: string): Promise<ExpenseReport> {
+  return apiRequest<ExpenseReport>(
+    `/api/expense-reports/${encodeURIComponent(expenseReportId)}`,
+  );
+}
+
 export function importExpenseReportCsv(file: File): Promise<ExpenseReport> {
   const formData = new FormData();
   formData.append("file", file);

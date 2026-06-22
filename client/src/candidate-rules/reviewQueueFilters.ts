@@ -42,6 +42,13 @@ export function countReviewQueueScopeFilters(
 	);
 }
 
+export function countActiveScopeFilters(
+	filters: CandidateRuleFilters,
+	extractionRunId?: string | null,
+): number {
+	return countReviewQueueScopeFilters(filters) + Number(Boolean(extractionRunId));
+}
+
 export function isReviewQueueScopeActiveInDraft(
 	draft: ReviewQueueScopeDraft,
 ): boolean {
@@ -54,12 +61,17 @@ export function isReviewQueueScopeActiveInDraft(
 interface UseReviewQueueScopeFiltersOptions {
 	extractionRunId?: string | null;
 	onScopeChange?: () => void;
+	onClearExtractionRunScope?: () => void;
 }
 
 export function useReviewQueueScopeFilters(
 	options: UseReviewQueueScopeFiltersOptions = {},
 ) {
-	const { extractionRunId = null, onScopeChange } = options;
+	const {
+		extractionRunId = null,
+		onScopeChange,
+		onClearExtractionRunScope,
+	} = options;
 	const [scopeDraft, setScopeDraft] = useState<ReviewQueueScopeDraft>(
 		EMPTY_REVIEW_QUEUE_SCOPE,
 	);
@@ -91,7 +103,15 @@ export function useReviewQueueScopeFilters(
 		setScopeDraft(EMPTY_REVIEW_QUEUE_SCOPE);
 		onScopeChange?.();
 		setAppliedScopeFilters({});
-	}, [onScopeChange]);
+		onClearExtractionRunScope?.();
+	}, [onClearExtractionRunScope, onScopeChange]);
+
+	const activeFilterCount = countActiveScopeFilters(
+		appliedScopeFilters,
+		extractionRunId,
+	);
+	const hasActiveFilters =
+		activeFilterCount > 0 || isReviewQueueScopeActiveInDraft(scopeDraft);
 
 	return {
 		scopeDraft,
@@ -99,6 +119,8 @@ export function useReviewQueueScopeFilters(
 		appliedScopeFilters,
 		activeRuleFilters,
 		scopeFilterCount: countReviewQueueScopeFilters(appliedScopeFilters),
+		activeFilterCount,
+		hasActiveFilters,
 		scopeActiveInDraft: isReviewQueueScopeActiveInDraft(scopeDraft),
 		applyScope,
 		clearScope,

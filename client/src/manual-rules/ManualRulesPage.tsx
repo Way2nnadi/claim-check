@@ -12,6 +12,8 @@ import {
   summarizeApplicability,
   summarizeRuleScope,
 } from "../policy-versions/format";
+import RecordPageHeader from "../shared/ui/RecordPageHeader";
+import { RecordPageIcon, RulePageIcon } from "../shared/ui/PageIcons";
 
 interface ManualRulesPageProps {
   principal: AuthenticatedPrincipal;
@@ -140,24 +142,22 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
 
   return (
     <div className="review-detail content-enter">
-      <div className="catalog-toolbar">
-        <p className="catalog-scope">
-          Author a rule when policy knowledge exists before the document catches up.
-          Rationale is required; citation and exceptions are optional.
-        </p>
-        <button
-          type="submit"
-          form="manual-rule-form"
-          className="document-command"
-          disabled={!canCreate || isSubmitting}
-        >
-          {isSubmitting ? "Creating…" : "Create Manual Rule"}
-        </button>
-      </div>
-
-      <div className="review-detail-badges">
-        <span className="review-enforceability guidance">Human-authored</span>
-      </div>
+      <RecordPageHeader
+        icon={<RecordPageIcon icon={<RulePageIcon size={22} />} />}
+        title="Manual Rules"
+        subtitle="Author a rule when policy knowledge exists before the document catches up. Rationale is required; citation and exceptions are optional."
+        actions={
+          <button
+            type="submit"
+            form="manual-rule-form"
+            className="document-command document-command-accent"
+            disabled={!canCreate || isSubmitting}
+          >
+            {isSubmitting ? "Creating…" : "Create Manual Rule"}
+          </button>
+        }
+        meta={<span className="review-enforceability guidance">Human-authored</span>}
+      />
 
       <div className="review-detail-body">
         {submitError ? (
@@ -220,7 +220,8 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
           ) : null}
 
           <form id="manual-rule-form" className="review-edit-form" onSubmit={handleSubmit}>
-            <section className="review-detail-panel reveal">
+            <section className="review-detail-panel review-property-section reveal">
+              <h4 className="record-section-heading">Rule fields</h4>
               <ManualField label="Rule ID" inputId="manual-rule-id" error={validationErrors.rule_id}>
                 <input
                   id="manual-rule-id"
@@ -293,7 +294,7 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
               }
             />
 
-            <details className="review-detail-meta reveal">
+            <details className="review-detail-meta notion-collapsible reveal">
               <summary>Optional citation</summary>
               <div className="review-detail-meta-body">
                 <p className="review-detail-note">

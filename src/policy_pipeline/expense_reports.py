@@ -51,6 +51,14 @@ class ExpenseReportRow(BaseModel):
     trip_id: str | None = None
 
 
+class ExpenseReportSummary(BaseModel):
+    expense_report_id: str = Field(min_length=1)
+    imported_by: str = Field(min_length=1)
+    source_filename: str = Field(min_length=1)
+    row_count: int = Field(ge=0)
+    created_at: datetime
+
+
 class ExpenseReport(BaseModel):
     expense_report_id: str = Field(min_length=1)
     imported_by: str = Field(min_length=1)
@@ -61,7 +69,7 @@ class ExpenseReport(BaseModel):
 
 
 class ExpenseReportListResponse(BaseModel):
-    items: list[ExpenseReport]
+    items: list[ExpenseReportSummary]
 
 
 class ExpenseReportImportRowError(BaseModel):
@@ -124,30 +132,52 @@ def import_expense_report(
     return report
 
 
-def list_expense_reports(session: Session) -> list[ExpenseReport]:
+def list_expense_reports(session: Session) -> list[ExpenseReportSummary]:
     records = session.scalars(
         select(ExpenseReportRecord).order_by(
             ExpenseReportRecord.created_at.desc(),
             ExpenseReportRecord.expense_report_id.desc(),
         )
     ).all()
-    return [expense_report_from_record(record) for record in records]
+    return [expense_report_summary_from_record(record) for record in records]
+
+
+def get_expense_report(session: Session, *, expense_report_id: str) -> ExpenseReport | None:
+    record = session.scalar(
+        select(ExpenseReportRecord).where(
+            ExpenseReportRecord.expense_report_id == expense_report_id
+        )
+    )
+    if record is None:
+        return None
+    return expense_report_from_record(record)
+
+
+def expense_report_summary_from_record(record: ExpenseReportRecord) -> ExpenseReportSummary:
+    return ExpenseReportSummary(
+        expense_report_id=record.expense_report_id,
+        imported_by=record.imported_by,
+        source_filename=record.source_filename,
+        row_count=record.row_count,
+        created_at=_normalize_created_at(record.created_at),
+    )
 
 
 def expense_report_from_record(record: ExpenseReportRecord) -> ExpenseReport:
-    created_at = record.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=UTC)
-    else:
-        created_at = created_at.astimezone(UTC)
     return ExpenseReport(
         expense_report_id=record.expense_report_id,
         imported_by=record.imported_by,
         source_filename=record.source_filename,
         row_count=record.row_count,
         rows=[ExpenseReportRow.model_validate(row) for row in record.rows],
-        created_at=created_at,
+        created_at=_normalize_created_at(record.created_at),
     )
+
+
+def _normalize_created_at(created_at: datetime) -> datetime:
+    if created_at.tzinfo is None:
+        return created_at.replace(tzinfo=UTC)
+    return created_at.astimezone(UTC)
 
 
 def _parse_expense_report_rows(csv_bytes: bytes) -> list[ExpenseReportRow]:

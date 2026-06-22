@@ -10,6 +10,11 @@ const promptTemplates = {
       version: "v1",
       description: "Rule extraction baseline",
     },
+    {
+      prompt_template_id: "rule-extraction",
+      version: "v2",
+      description: "Rule extraction with scope object requirement",
+    },
   ],
 };
 
@@ -20,12 +25,49 @@ const modelConfigurations = {
       version: "v1",
       model: "gpt-5-mini",
     },
+    {
+      model_configuration_id: "openai-primary",
+      version: "v1",
+      model: "gpt-4o-mini",
+    },
   ],
 };
 
 describe("TriggerExtractionRun", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("lists every registry pin when a picker opens", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/prompt-templates") {
+        return Promise.resolve({ ok: true, json: async () => promptTemplates });
+      }
+      if (url === "/api/model-configurations") {
+        return Promise.resolve({ ok: true, json: async () => modelConfigurations });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <TriggerExtractionRun
+        documentId="expense-policy"
+        documentVersionId="docv-expense-v2"
+        onCompleted={() => undefined}
+      />,
+    );
+
+    await screen.findByLabelText("Prompt");
+    await userEvent.click(screen.getByLabelText("Prompt"));
+
+    expect(screen.getByRole("option", { name: "rule-extraction@v1" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "rule-extraction@v2" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByLabelText("Model"));
+
+    expect(screen.getByRole("option", { name: "fake-openai@v1" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "openai-primary@v1" })).toBeInTheDocument();
   });
 
   it("commissions an extraction run and reports success", async () => {

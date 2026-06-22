@@ -11,6 +11,7 @@ import { CandidateRuleCatalog } from "../candidate-rules";
 import { ExtractionRunCatalog } from "../extraction-runs";
 import { ManualRulesPage } from "../manual-rules";
 import { PolicyVersionCatalog } from "../policy-versions";
+import { CompiledRuleSetCatalog } from "../compiled-rule-sets";
 import { AuditLogPage } from "../audit";
 import { DashboardPage } from "../dashboard";
 import ThemeToggle from "../shared/ui/ThemeToggle";
@@ -26,6 +27,7 @@ type SectionId =
 	| "extraction-runs"
 	| "review"
 	| "policy-versions"
+	| "compliance"
 	| "manual-rules"
 	| "audit";
 
@@ -102,7 +104,9 @@ const shellSections: readonly ShellSection[] = [
 			</NavIcon>
 		),
 		actions: [],
-		ledger: ["Imports are immutable and rejected as a whole when any CSV row fails validation."],
+		ledger: [
+			"Imported rows become the expense facts compliance checks run against.",
+		],
 	},
 	{
 		id: "extraction-runs",
@@ -149,6 +153,22 @@ const shellSections: readonly ShellSection[] = [
 		ledger: ["Change summaries explain why a Policy Version was published."],
 	},
 	{
+		id: "compliance",
+		label: "Compliance",
+		kicker: "Rule Compiler",
+		icon: (
+			<NavIcon>
+				<svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18" aria-hidden="true">
+					<path d="M2 4h12v8H2V4zm1 1v6h10V5H3zm2 1h6v1H5V6zm0 2h4v1H5V8z" />
+				</svg>
+			</NavIcon>
+		),
+		actions: [],
+		ledger: [
+			"Compiled Rule Sets are immutable artifacts pinned to one Policy Version.",
+		],
+	},
+	{
 		id: "manual-rules",
 		label: "Manual Rules",
 		kicker: "Manual Override",
@@ -174,7 +194,7 @@ const shellSections: readonly ShellSection[] = [
 			</NavIcon>
 		),
 		actions: [],
-		ledger: ["The audit trail explains both what changed and who recorded it."],
+		ledger: ["Immutable record of what changed and who recorded it."],
 	},
 ];
 
@@ -541,6 +561,8 @@ export default function App() {
 						/>
 					) : activeSection === "policy-versions" ? (
 						<PolicyVersionCatalog principal={principal} />
+					) : activeSection === "compliance" ? (
+						<CompiledRuleSetCatalog />
 					) : activeSection === "manual-rules" ? (
 						<ManualRulesPage principal={principal} />
 					) : activeSection === "audit" ? (

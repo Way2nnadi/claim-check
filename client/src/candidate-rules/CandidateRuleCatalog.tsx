@@ -1,13 +1,34 @@
 import { approveCandidateRulesBulk, fetchCandidateRules } from "./api";
 import type { CandidateRuleFilters, CandidateRuleReview } from "./types";
 import { fetchExtractionRuns } from "../extraction-runs/api";
-import type { ExtractionRun, ExtractionRunFilters } from "../extraction-runs/types";
+import type {
+	ExtractionRun,
+	ExtractionRunFilters,
+} from "../extraction-runs/types";
 import { fetchPolicyDocuments } from "../policy-documents/api";
 import type { PolicyDocumentSummary } from "../policy-documents/types";
-import { shortenId } from "../shared/format/common";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { bulkApproveDisabled, bulkSelectableCandidateRuleIds, pruneSelectedCandidateRuleIds, resolveCandidateRuleDecision, resolveDecisionErrorMessage, selectedBulkCandidateRuleIds, toggleAllCandidateRuleSelections, toggleCandidateRuleSelection, validateDecisionComment } from "./decisions";
-import { PRIMARY_REVIEW_TABS, REVIEW_QUEUE_LIFECYCLE_STATES, describeCandidateRuleError, filterReviewsForTab, resolveReviewEmptyHint, resolveReviewEmptyMessage, type LifecycleTabId, type ReviewEmptyContext } from "./format";
+import {
+	bulkApproveDisabled,
+	bulkSelectableCandidateRuleIds,
+	pruneSelectedCandidateRuleIds,
+	resolveCandidateRuleDecision,
+	resolveDecisionErrorMessage,
+	selectedBulkCandidateRuleIds,
+	toggleAllCandidateRuleSelections,
+	toggleCandidateRuleSelection,
+	validateDecisionComment,
+} from "./decisions";
+import {
+	PRIMARY_REVIEW_TABS,
+	REVIEW_QUEUE_LIFECYCLE_STATES,
+	describeCandidateRuleError,
+	filterReviewsForTab,
+	resolveReviewEmptyHint,
+	resolveReviewEmptyMessage,
+	type LifecycleTabId,
+	type ReviewEmptyContext,
+} from "./format";
 import { hasAnyRole } from "../shared/permissions";
 import { useReviewQueueScopeFilters } from "./reviewQueueFilters";
 import { useAsyncResource } from "../shared/ui/useAsyncResource";
@@ -97,12 +118,14 @@ export default function CandidateRuleCatalog({
 		appliedScopeFilters,
 		activeRuleFilters,
 		scopeFilterCount,
-		scopeActiveInDraft,
+		activeFilterCount,
+		hasActiveFilters,
 		applyScope,
 		clearScope,
 	} = useReviewQueueScopeFilters({
 		extractionRunId,
 		onScopeChange: clearCandidateRuleSelections,
+		onClearExtractionRunScope,
 	});
 
 	const loadDocuments = useCallback(async (): Promise<void> => {
@@ -125,15 +148,16 @@ export default function CandidateRuleCatalog({
 		error: errorMessage,
 		reload: reloadRules,
 		setData: setReviews,
-	} = useAsyncResource(
-		fetchRules,
-		"Unable to load Candidate Rules.",
-		{ loadOnMount: false },
-	);
+	} = useAsyncResource(fetchRules, "Unable to load Candidate Rules.", {
+		loadOnMount: false,
+	});
 	const reviews = reviewsData ?? [];
 
 	const loadActiveRun = useCallback(
-		async (runId: string, scopeFilters: CandidateRuleFilters): Promise<void> => {
+		async (
+			runId: string,
+			scopeFilters: CandidateRuleFilters,
+		): Promise<void> => {
 			try {
 				const runFilters: ExtractionRunFilters = {};
 				if (scopeFilters.documentId) {
@@ -446,7 +470,7 @@ export default function CandidateRuleCatalog({
 			<CandidateRuleDetail
 				candidateRuleId={selectedCandidateRuleId}
 				principal={principal}
-				backLabel="← Queue"
+				backLabel="Queue"
 				onBack={() => setSelectedCandidateRuleId(null)}
 				onReviewChange={handleDetailReviewChange}
 				onReviewResolved={handleDetailReviewResolved}
@@ -455,16 +479,46 @@ export default function CandidateRuleCatalog({
 	}
 
 	return (
-		<div className="catalog-page review-catalog content-enter">
-			<details className="review-scope-panel">
+		<div className="catalog-page review-catalog-page content-enter">
+			<details className="review-scope-panel notion-scope-panel">
 				<summary>
 					Scope filters
-					{scopeFilterCount > 0 ? (
+					{activeFilterCount > 0 ? (
 						<span className="review-scope-panel-badge">
-							{scopeFilterCount} active
+							{activeFilterCount} active
 						</span>
 					) : null}
 				</summary>
+				{activeFilterCount > 0 ? (
+					<div className="scope-applied-filters">
+						{appliedScopeFilters.documentId ? (
+							<p className="scope-applied-filter">
+								<span className="scope-applied-filter-label">Document</span>
+								<code>{appliedScopeFilters.documentId}</code>
+							</p>
+						) : null}
+						{appliedScopeFilters.documentVersionId ? (
+							<p className="scope-applied-filter">
+								<span className="scope-applied-filter-label">Version</span>
+								<code>{appliedScopeFilters.documentVersionId}</code>
+							</p>
+						) : null}
+						{extractionRunId ? (
+							<p className="scope-applied-filter">
+								<span className="scope-applied-filter-label">Extraction run</span>
+								<span className="scope-applied-filter-copy">
+									{activeRun?.document_id ? (
+										<>
+											<code>{activeRun.document_id}</code>
+											<span aria-hidden="true"> · </span>
+										</>
+									) : null}
+									<code>{extractionRunId}</code>
+								</span>
+							</p>
+						) : null}
+					</div>
+				) : null}
 				<form className="review-scope-form" onSubmit={applyScope}>
 					<div className="review-filter-grid">
 						<DocumentFilterPicker
@@ -475,7 +529,7 @@ export default function CandidateRuleCatalog({
 							}
 						/>
 						<label htmlFor="review-filter-version">
-							Document version id
+							Document version
 							<input
 								id="review-filter-version"
 								name="review-filter-version"
@@ -492,16 +546,19 @@ export default function CandidateRuleCatalog({
 						</label>
 					</div>
 					<div className="review-filter-actions">
-						<button type="submit" className="review-filter-apply">
+						<button
+							type="submit"
+							className="document-command document-command-accent"
+						>
 							Apply scope
 						</button>
 						<button
 							type="button"
-							className="review-filter-clear"
-							disabled={scopeFilterCount === 0 && !scopeActiveInDraft}
+							className="document-command"
+							disabled={!hasActiveFilters}
 							onClick={clearScope}
 						>
-							Clear scope
+							Clear filters
 						</button>
 					</div>
 				</form>
@@ -520,37 +577,9 @@ export default function CandidateRuleCatalog({
 
 			{rulesStatus === "ready" ? (
 				<>
-					{scopeFilterCount > 0 ? (
-						<p className="catalog-scope">
-							{appliedScopeFilters.documentId ?? null}
-							{appliedScopeFilters.documentId &&
-							appliedScopeFilters.documentVersionId
-								? " · "
-								: null}
-							{appliedScopeFilters.documentVersionId ?? null}
-						</p>
-					) : null}
-
-					{extractionRunId ? (
-						<p className="catalog-scope review-run-scope-chip">
-							<span>{activeRun?.document_id ?? "Extraction run"}</span>
-							<span aria-hidden="true"> · </span>
-							<code title={extractionRunId}>{shortenId(extractionRunId)}</code>
-							{onClearExtractionRunScope ? (
-								<button
-									type="button"
-									className="review-scope-chip-action"
-									onClick={onClearExtractionRunScope}
-								>
-									Show all rules
-								</button>
-							) : null}
-						</p>
-					) : null}
-
 					{bulkFeedback ? (
 						<section
-							className={`review-bulk-feedback reveal ${bulkFeedback.tone}`}
+							className={`notion-callout review-bulk-feedback ${bulkFeedback.tone}`}
 						>
 							<p>{bulkFeedback.message}</p>
 							{bulkFeedback.failures.length > 0 ? (
@@ -653,7 +682,7 @@ export default function CandidateRuleCatalog({
 						<div className="review-decision-actions">
 							<button
 								type="button"
-								className="review-secondary-button"
+								className="document-command"
 								disabled={isBulkApproving}
 								onClick={closeBulkApproval}
 							>
@@ -661,7 +690,7 @@ export default function CandidateRuleCatalog({
 							</button>
 							<button
 								type="button"
-								className="review-save-button"
+								className="document-command document-command-accent"
 								disabled={isBulkApproving}
 								onClick={() => {
 									void handleBulkApprovalSubmit();
