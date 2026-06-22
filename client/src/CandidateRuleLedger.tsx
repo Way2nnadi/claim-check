@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import type { KeyboardEvent } from "react";
 import {
 	PRIMARY_REVIEW_TABS,
 	enforceabilityClassName,
@@ -113,6 +115,7 @@ export default function CandidateRuleLedger({
 	onClearCandidateRuleSelections,
 	onBulkApprove,
 }: CandidateRuleLedgerProps) {
+	const reviewRowRefs = useRef<Array<HTMLElement | null>>([]);
 	const canEdit = canEditCandidateRules(principal);
 	const selectableCount = selectableCandidateRuleIds.size;
 	const selectedCount = [...selectedCandidateRuleIds].filter((candidateRuleId) =>
@@ -120,6 +123,49 @@ export default function CandidateRuleLedger({
 	).length;
 	const allSelectableSelected =
 		selectableCount > 0 && selectedCount === selectableCount;
+
+	function focusReviewRow(index: number): void {
+		reviewRowRefs.current[index]?.focus();
+	}
+
+	function handleReviewRowKeyDown(
+		event: KeyboardEvent<HTMLElement>,
+		index: number,
+		candidateRuleId: string,
+	): void {
+		if (event.target !== event.currentTarget) {
+			return;
+		}
+
+		if (event.key === "ArrowDown") {
+			event.preventDefault();
+			focusReviewRow(Math.min(index + 1, reviews.length - 1));
+			return;
+		}
+
+		if (event.key === "ArrowUp") {
+			event.preventDefault();
+			focusReviewRow(Math.max(index - 1, 0));
+			return;
+		}
+
+		if (event.key === "Home") {
+			event.preventDefault();
+			focusReviewRow(0);
+			return;
+		}
+
+		if (event.key === "End") {
+			event.preventDefault();
+			focusReviewRow(reviews.length - 1);
+			return;
+		}
+
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			onOpenReview(candidateRuleId);
+		}
+	}
 
 	if (allReviews.length === 0) {
 		return (
@@ -232,7 +278,7 @@ export default function CandidateRuleLedger({
 							</div>
 						) : null}
 					</li>
-					{reviews.map((review) => {
+					{reviews.map((review, index) => {
 						const rule = review.current_rule;
 						const qaCount = review.qa_flags.length;
 						const lifecycleClass = lifecycleStateClassName(review.lifecycle_state);
@@ -252,7 +298,19 @@ export default function CandidateRuleLedger({
 						return (
 							<li key={review.candidate_rule_id}>
 								<article
+									ref={(node) => {
+										reviewRowRefs.current[index] = node;
+									}}
 									className={`review-row reveal lifecycle-${lifecycleClass}${isSelected ? " selected" : ""}`}
+									tabIndex={0}
+									aria-label={`Open Candidate Rule ${review.candidate_rule_id}`}
+									onKeyDown={(event) =>
+										handleReviewRowKeyDown(
+											event,
+											index,
+											review.candidate_rule_id,
+										)
+									}
 								>
 									<label className="review-rule-checkbox">
 										<input
@@ -329,7 +387,9 @@ export default function CandidateRuleLedger({
 												className={`review-qa-count${qaCount > 0 ? " flagged" : " clear"}`}
 												aria-label={`${qaCount} QA flag${qaCount === 1 ? "" : "s"}`}
 											>
-												{qaCount} QA
+												{qaCount > 0
+													? `${qaCount} QA flag${qaCount === 1 ? "" : "s"}`
+													: "QA clear"}
 											</span>
 										</div>
 									</div>

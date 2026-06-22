@@ -34,14 +34,7 @@ export function resolveTheme(): Theme {
 	if (stored) {
 		return stored;
 	}
-	if (
-		typeof window !== "undefined" &&
-		typeof window.matchMedia === "function" &&
-		window.matchMedia("(prefers-color-scheme: light)").matches
-	) {
-		return "light";
-	}
-	return "dark";
+	return "light";
 }
 
 export function applyTheme(theme: Theme): void {

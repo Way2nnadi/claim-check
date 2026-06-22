@@ -138,6 +138,10 @@ function createFetchMock(
   overrides: Partial<Record<string, () => Promise<{ ok: boolean; json: () => Promise<unknown> }>>> = {},
 ) {
   return vi.fn().mockImplementation((url: string) => {
+    const override = overrides[url];
+    if (override) {
+      return override();
+    }
     if (url === "/api/policy-documents") {
       return Promise.resolve({
         ok: true,
@@ -187,10 +191,6 @@ function createFetchMock(
         }),
       });
     }
-    const override = overrides[url];
-    if (override) {
-      return override();
-    }
     return Promise.reject(new Error(`Unexpected fetch: ${url}`));
   });
 }
@@ -211,6 +211,67 @@ describe("CandidateRuleCatalog", () => {
     expect(screen.getByText("Scope filters")).toBeInTheDocument();
     expect(document.getElementById("review-rule-panel")).toBeInTheDocument();
     expect(screen.queryByText("extract-expense-v1")).not.toBeInTheDocument();
+  });
+
+  it("supports keyboard navigation across the review queue", async () => {
+    const secondReview = buildReview({
+      candidate_rule_id: "rule-lodging-cap",
+      current_rule: {
+        ...buildReview().current_rule,
+        rule_id: "rule-lodging-cap",
+        statement: "Lodging is capped at $250 per night.",
+        scope: {
+          ...buildReview().current_rule.scope,
+          expense_category: "lodging",
+        },
+      },
+      extracted_rule: {
+        ...buildReview().extracted_rule,
+        rule_id: "rule-lodging-cap",
+        statement: "Lodging is capped at $250 per night.",
+        scope: {
+          ...buildReview().extracted_rule.scope,
+          expense_category: "lodging",
+        },
+      },
+      qa_flags: [],
+    });
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        "/api/candidate-rules": async () => ({
+          ok: true,
+          json: async () => ({
+            items: [buildReview(), secondReview],
+          }),
+        }),
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<CandidateRuleCatalog principal={principal} />);
+
+    const firstRow = (await screen.findByText("Meals are capped at $75 per day.")).closest(
+      "article",
+    );
+    const secondRow = screen.getByText("Lodging is capped at $250 per night.").closest(
+      "article",
+    );
+
+    expect(firstRow).not.toBeNull();
+    expect(secondRow).not.toBeNull();
+
+    firstRow?.focus();
+    expect(firstRow).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(secondRow).toHaveFocus();
+
+    await user.keyboard("{ArrowUp}");
+    expect(firstRow).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "Save Candidate Rule" })).toBeInTheDocument();
   });
 
   it("filters rules to a specific extraction run when scoped", async () => {

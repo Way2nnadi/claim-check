@@ -481,16 +481,17 @@ async def test_bulk_candidate_rule_approval_returns_partial_failures(
         "recorded_by": "approver-user",
     }
     assert audit_response.status_code == 200
-    assert audit_response.json()["items"] == [
-        {
-            "action": "candidate_rule.approved",
-            "actor_subject": "approver-user",
-            "actor_roles": ["approver"],
-            "entity_type": "candidate_rule",
-            "entity_id": "rule-123",
-            "payload": {"rationale": "Bulk approval after re-ingestion diff review."},
-        }
-    ]
+    audit_items = audit_response.json()["items"]
+    assert len(audit_items) == 1
+    assert audit_items[0] == {
+        "action": "candidate_rule.approved",
+        "actor_subject": "approver-user",
+        "actor_roles": ["approver"],
+        "entity_type": "candidate_rule",
+        "entity_id": "rule-123",
+        "occurred_at": audit_items[0]["occurred_at"],
+        "payload": {"rationale": "Bulk approval after re-ingestion diff review."},
+    }
 
 
 @pytest.mark.anyio

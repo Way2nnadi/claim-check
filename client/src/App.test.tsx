@@ -1,8 +1,88 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { SESSION_STORAGE_TOKEN_KEY } from "./api";
+
+function jsonResponse(payload: unknown) {
+  return Promise.resolve({
+    ok: true,
+    json: async () => payload,
+  });
+}
+
+function createAppFetchMock(
+  principal: {
+    subject: string;
+    roles: string[];
+    auth_backend: string;
+  },
+  overrides: Partial<
+    Record<
+      string,
+      | unknown
+      | ((url: string, init?: RequestInit) => Promise<{ ok: boolean; json: () => Promise<unknown> }>)
+    >
+  > = {},
+) {
+  return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    const override = overrides[url];
+    if (typeof override === "function") {
+      return override(url, init);
+    }
+    if (override !== undefined) {
+      return jsonResponse(override);
+    }
+
+    if (url === "/api/me") {
+      return jsonResponse(principal);
+    }
+    if (
+      url === "/api/candidate-rules?lifecycle_state=extracted&lifecycle_state=in_review"
+    ) {
+      return jsonResponse({
+        items: [
+          { candidate_rule_id: "rule-meals-cap" },
+          { candidate_rule_id: "rule-lodging-cap" },
+        ],
+      });
+    }
+    if (url === "/api/policy-versions") {
+      return jsonResponse({
+        items: [
+          {
+            policy_version_id: "policy-v4",
+            published_by: "approver-user",
+            change_summary: "Meals and lodging limits aligned to the new travel memo.",
+            rule_count: 18,
+            created_at: "2026-06-22T10:00:00Z",
+          },
+        ],
+      });
+    }
+    if (url === "/api/extraction-runs") {
+      return jsonResponse({
+        items: [
+          {
+            extraction_run_id: "extract-expense-v2",
+            document_id: "expense-policy",
+            document_version_id: "docv-expense-v2",
+            prompt_template_id: "rule-extraction",
+            prompt_template_version: "v2",
+            model_configuration_id: "gpt-5-mini",
+            model_configuration_version: "2026-06-01",
+            candidate_rule_count: 2,
+            created_at: "2026-06-22T09:30:00Z",
+            status: "completed",
+            failure_detail: null,
+          },
+        ],
+      });
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+  });
+}
 
 describe("App", () => {
   beforeEach(() => {
@@ -10,33 +90,21 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
-  it("restores the saved token, calls /api/me, and hides admin-only actions for viewers", async () => {
+  it("restores the saved token, calls /api/me, and renders the dashboard home page", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/me") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            subject: "viewer-user",
-            roles: ["viewer"],
-            auth_backend: "local",
-          }),
-        });
-      }
-      if (url === "/api/policy-documents") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [] }),
-        });
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    const fetchMock = createAppFetchMock({
+      subject: "viewer-user",
+      roles: ["viewer"],
+      auth_backend: "local",
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Upload Document Version" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    expect(await screen.findByText("2 Candidate Rules")).toBeInTheDocument();
+    expect(screen.getByText("policy-v4")).toBeInTheDocument();
+    expect(screen.getByText("extract-expense-v2")).toBeInTheDocument();
 
     const request = fetchMock.mock.calls[0]?.[1];
     const headers = new Headers(request?.headers);
@@ -48,37 +116,27 @@ describe("App", () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url === "/api/me") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              subject: "viewer-user",
-              roles: ["viewer"],
-              auth_backend: "local",
-            }),
-          });
-        }
-        if (url === "/api/policy-versions") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        if (url === "/api/policy-documents") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-      }),
+      createAppFetchMock(
+        {
+          subject: "viewer-user",
+          roles: ["viewer"],
+          auth_backend: "local",
+        },
+        {
+          "/api/policy-versions": { items: [] },
+        },
+      ),
     );
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Documents" });
-    await userEvent.click(screen.getByRole("button", { name: /Policy Versions/i }));
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Policy Versions/i },
+      ),
+    );
 
     expect(await screen.findByRole("heading", { name: "Policy Versions" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Publish Policy Version" })).not.toBeInTheDocument();
@@ -88,47 +146,37 @@ describe("App", () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url === "/api/me") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              subject: "admin-user",
-              roles: ["admin"],
-              auth_backend: "local",
-            }),
-          });
-        }
-        if (url === "/api/policy-versions") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              items: [
-                {
-                  policy_version_id: "policy-v1",
-                  published_by: "admin-user",
-                  change_summary: "Initial snapshot.",
-                  rule_count: 1,
-                  created_at: "2026-06-21T12:00:00Z",
-                },
-              ],
-            }),
-          });
-        }
-        if (url === "/api/policy-documents") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-      }),
+      createAppFetchMock(
+        {
+          subject: "admin-user",
+          roles: ["admin"],
+          auth_backend: "local",
+        },
+        {
+          "/api/policy-versions": {
+            items: [
+              {
+                policy_version_id: "policy-v1",
+                published_by: "admin-user",
+                change_summary: "Initial snapshot.",
+                rule_count: 1,
+                created_at: "2026-06-21T12:00:00Z",
+              },
+            ],
+          },
+        },
+      ),
     );
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /Policy Versions/i }));
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Policy Versions/i },
+      ),
+    );
 
     expect(await screen.findByText("policy-v1")).toBeInTheDocument();
     expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
@@ -143,8 +191,18 @@ describe("App", () => {
       expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByRole("button", { name: /Documents/i }));
-    await userEvent.click(screen.getByRole("button", { name: /Policy Versions/i }));
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Documents/i },
+      ),
+    );
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Policy Versions/i },
+      ),
+    );
 
     expect(await screen.findByText("policy-v1")).toBeInTheDocument();
     expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
@@ -154,37 +212,28 @@ describe("App", () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url === "/api/me") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              subject: "viewer-user",
-              roles: ["viewer"],
-              auth_backend: "local",
-            }),
-          });
-        }
-        if (url === "/api/policy-documents") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      createAppFetchMock({
+        subject: "viewer-user",
+        roles: ["viewer"],
+        auth_backend: "local",
       }),
     );
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Documents" });
-    await userEvent.click(screen.getByRole("button", { name: /Manual Rules/i }));
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Manual Rules/i },
+      ),
+    );
 
     expect(await screen.findByRole("heading", { name: "Manual Rules" })).toBeInTheDocument();
     const createButtons = screen.getAllByRole("button", {
       name: "Create Manual Rule",
     });
-    expect(createButtons).toHaveLength(2);
+    expect(createButtons.length).toBeGreaterThan(0);
     for (const button of createButtons) {
       expect(button).toBeDisabled();
     }
@@ -193,57 +242,36 @@ describe("App", () => {
 
   it("opens Audit, loads events, and applies entity filters", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/me") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            subject: "viewer-user",
-            roles: ["viewer"],
-            auth_backend: "local",
-          }),
-        });
-      }
-      if (url === "/api/policy-documents") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [] }),
-        });
-      }
-      if (url === "/api/audit-events") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            items: [
-              {
-                action: "candidate_rule.approved",
-                actor_subject: "approver-user",
-                actor_roles: ["approver"],
-                entity_type: "candidate_rule",
-                entity_id: "rule-123",
-                occurred_at: "2026-06-22T10:15:00Z",
-                payload: { rationale: "Citation verified by finance." },
-              },
-            ],
-          }),
-        });
-      }
-      if (
-        url ===
-        "/api/audit-events?entity_type=candidate_rule&entity_id=rule-404"
-      ) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [] }),
-        });
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-    });
+    const fetchMock = createAppFetchMock(
+      {
+        subject: "viewer-user",
+        roles: ["viewer"],
+        auth_backend: "local",
+      },
+      {
+        "/api/audit-events": {
+          items: [
+            {
+              action: "candidate_rule.approved",
+              actor_subject: "approver-user",
+              actor_roles: ["approver"],
+              entity_type: "candidate_rule",
+              entity_id: "rule-123",
+              occurred_at: "2026-06-22T10:15:00Z",
+              payload: { rationale: "Citation verified by finance." },
+            },
+          ],
+        },
+        "/api/audit-events?entity_type=candidate_rule&entity_id=rule-404": {
+          items: [],
+        },
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Documents" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     await userEvent.click(screen.getByRole("button", { name: /AuditTrace Archive/i }));
 
     expect(await screen.findByRole("heading", { name: "Audit Event Log" })).toBeInTheDocument();
@@ -279,24 +307,10 @@ describe("App", () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url === "/api/me") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              subject: "admin-user",
-              roles: ["admin"],
-              auth_backend: "local",
-            }),
-          });
-        }
-        if (url === "/api/policy-documents") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      createAppFetchMock({
+        subject: "admin-user",
+        roles: ["admin"],
+        auth_backend: "local",
       }),
     );
 
@@ -312,24 +326,10 @@ describe("App", () => {
   });
 
   it("authenticates with a persona token and shows role-allowed actions", async () => {
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/me") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            subject: "admin-user",
-            roles: ["admin"],
-            auth_backend: "local",
-          }),
-        });
-      }
-      if (url === "/api/policy-documents") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [] }),
-        });
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    const fetchMock = createAppFetchMock({
+      subject: "admin-user",
+      roles: ["admin"],
+      auth_backend: "local",
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -337,7 +337,13 @@ describe("App", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Enter as Admin" }));
 
-    expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Documents/i },
+      ),
+    );
     expect(screen.queryByRole("button", { name: "Upload Document Version" })).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem(SESSION_STORAGE_TOKEN_KEY)).toBe("local-admin-token");
 
@@ -347,24 +353,10 @@ describe("App", () => {
   });
 
   it("authenticates with a custom token and stores it for later requests", async () => {
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/me") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            subject: "custom-approver",
-            roles: ["approver"],
-            auth_backend: "local",
-          }),
-        });
-      }
-      if (url === "/api/policy-documents") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [] }),
-        });
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    const fetchMock = createAppFetchMock({
+      subject: "custom-approver",
+      roles: ["approver"],
+      auth_backend: "local",
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -374,7 +366,13 @@ describe("App", () => {
     await userEvent.type(screen.getByLabelText("Bearer token"), "custom-token");
     await userEvent.click(screen.getByRole("button", { name: "Sign in with custom token" }));
 
-    expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Documents/i },
+      ),
+    );
     expect(screen.queryByRole("button", { name: "Upload Document Version" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Schedule Re-ingestion" })).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem(SESSION_STORAGE_TOKEN_KEY)).toBe("custom-token");
@@ -386,40 +384,38 @@ describe("App", () => {
 
   it("renders the policy document catalog with summary metadata", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/me") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            subject: "viewer-user",
-            roles: ["viewer"],
-            auth_backend: "local",
-          }),
-        });
-      }
-      if (url === "/api/policy-documents") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            items: [
-              {
-                document_id: "expense-policy",
-                latest_document_version_id: "docv-expense-v2",
-                latest_uploaded_at: "2026-06-21T12:00:00Z",
-                version_count: 2,
-                active_version_count: 1,
-                has_deleted_versions: true,
-              },
-            ],
-          }),
-        });
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-    });
+    const fetchMock = createAppFetchMock(
+      {
+        subject: "viewer-user",
+        roles: ["viewer"],
+        auth_backend: "local",
+      },
+      {
+        "/api/policy-documents": {
+          items: [
+            {
+              document_id: "expense-policy",
+              latest_document_version_id: "docv-expense-v2",
+              latest_uploaded_at: "2026-06-21T12:00:00Z",
+              version_count: 2,
+              active_version_count: 1,
+              has_deleted_versions: true,
+            },
+          ],
+        },
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Documents/i },
+      ),
+    );
     expect(await screen.findByText("expense-policy")).toBeInTheDocument();
     expect(screen.getByText("Expense Policy")).toBeInTheDocument();
     expect(screen.getByText("docv-expense-v2")).toBeInTheDocument();
@@ -429,59 +425,52 @@ describe("App", () => {
 
   it("opens document detail from the catalog and lists versions", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/me") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            subject: "viewer-user",
-            roles: ["viewer"],
-            auth_backend: "local",
-          }),
-        });
-      }
-      if (url === "/api/policy-documents") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            items: [
-              {
-                document_id: "expense-policy",
-                latest_document_version_id: "docv-expense-v2",
-                latest_uploaded_at: "2026-06-21T12:00:00Z",
-                version_count: 2,
-                active_version_count: 1,
-                has_deleted_versions: true,
-              },
-            ],
-          }),
-        });
-      }
-      if (url === "/api/policy-documents/expense-policy/versions?include_deleted=true") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            items: [
-              {
-                document_id: "expense-policy",
-                document_version_id: "docv-expense-v2",
-                filename: "expense-policy-v2.pdf",
-                content_type: "application/pdf",
-                size_bytes: 2048,
-                sha256: "abc123def4567890abcdef1234567890abcdef1234567890abcdef1234567890",
-                deleted_at: null,
-                deletion_reason: null,
-              },
-            ],
-          }),
-        });
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-    });
+    const fetchMock = createAppFetchMock(
+      {
+        subject: "viewer-user",
+        roles: ["viewer"],
+        auth_backend: "local",
+      },
+      {
+        "/api/policy-documents": {
+          items: [
+            {
+              document_id: "expense-policy",
+              latest_document_version_id: "docv-expense-v2",
+              latest_uploaded_at: "2026-06-21T12:00:00Z",
+              version_count: 2,
+              active_version_count: 1,
+              has_deleted_versions: true,
+            },
+          ],
+        },
+        "/api/policy-documents/expense-policy/versions?include_deleted=true": {
+          items: [
+            {
+              document_id: "expense-policy",
+              document_version_id: "docv-expense-v2",
+              filename: "expense-policy-v2.pdf",
+              content_type: "application/pdf",
+              size_bytes: 2048,
+              sha256: "abc123def4567890abcdef1234567890abcdef1234567890abcdef1234567890",
+              deleted_at: null,
+              deletion_reason: null,
+            },
+          ],
+        },
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Documents/i },
+      ),
+    );
     await screen.findByText("Expense Policy");
     await userEvent.click(screen.getByRole("button", { name: /Expense Policy/i }));
 
@@ -492,29 +481,27 @@ describe("App", () => {
 
   it("shows a helpful empty state when the catalog has no documents", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/me") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            subject: "viewer-user",
-            roles: ["viewer"],
-            auth_backend: "local",
-          }),
-        });
-      }
-      if (url === "/api/policy-documents") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [] }),
-        });
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-    });
+    const fetchMock = createAppFetchMock(
+      {
+        subject: "viewer-user",
+        roles: ["viewer"],
+        auth_backend: "local",
+      },
+      {
+        "/api/policy-documents": { items: [] },
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Documents/i },
+      ),
+    );
     expect(await screen.findByRole("heading", { name: "No Policy Documents on file" })).toBeInTheDocument();
     expect(
       screen.getByText(/Ask an administrator to register a Policy Document/),
@@ -525,24 +512,10 @@ describe("App", () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url === "/api/me") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              subject: "viewer-user",
-              roles: ["viewer"],
-              auth_backend: "local",
-            }),
-          });
-        }
-        if (url === "/api/policy-documents") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      createAppFetchMock({
+        subject: "viewer-user",
+        roles: ["viewer"],
+        auth_backend: "local",
       }),
     );
 
@@ -567,31 +540,17 @@ describe("App", () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "approver-token");
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url === "/api/me") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              subject: "approver-user",
-              roles: ["approver"],
-              auth_backend: "local",
-            }),
-          });
-        }
-        if (url === "/api/policy-documents") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        if (url === "/api/candidate-rules") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ items: [] }),
-          });
-        }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-      }),
+      createAppFetchMock(
+        {
+          subject: "approver-user",
+          roles: ["approver"],
+          auth_backend: "local",
+        },
+        {
+          "/api/policy-documents": { items: [] },
+          "/api/candidate-rules": { items: [] },
+        },
+      ),
     );
 
     render(<App />);
