@@ -21,21 +21,22 @@ export const ALL_LIFECYCLE_STATES: readonly LifecycleState[] = [
 export type LifecycleTabId =
   | "queue"
   | "flagged"
+  | "archive"
   | "approved"
   | "published"
   | "closed"
   | "all"
   | "custom";
 
-export const LIFECYCLE_TABS: { id: LifecycleTabId; label: string }[] = [
+export const PRIMARY_REVIEW_TABS: { id: LifecycleTabId; label: string }[] = [
   { id: "queue", label: "Queue" },
   { id: "flagged", label: "Flagged" },
-  { id: "approved", label: "Approved" },
-  { id: "published", label: "Published" },
-  { id: "closed", label: "Closed" },
+  { id: "archive", label: "Archive" },
   { id: "all", label: "All" },
-  { id: "custom", label: "Custom" },
 ];
+
+/** @deprecated Use PRIMARY_REVIEW_TABS for visible navigation. */
+export const LIFECYCLE_TABS = PRIMARY_REVIEW_TABS;
 
 export function lifecycleStatesForTab(
   tab: LifecycleTabId,
@@ -45,6 +46,8 @@ export function lifecycleStatesForTab(
     case "queue":
     case "flagged":
       return [...REVIEW_QUEUE_LIFECYCLE_STATES];
+    case "archive":
+      return ["approved", "published", "rejected", "withdrawn", "superseded"];
     case "approved":
       return ["approved"];
     case "published":
@@ -96,6 +99,8 @@ export function emptyMessageForLifecycleTab(
       return "The review queue is empty — no extracted Rules are waiting for triage.";
     case "flagged":
       return "No flagged Candidate Rules in the current scope.";
+    case "archive":
+      return "No approved, published, or closed Candidate Rules in this scope.";
     case "approved":
       return "No approved Candidate Rules are waiting to publish.";
     case "published":
@@ -110,7 +115,21 @@ export function emptyMessageForLifecycleTab(
 }
 
 export function showEmptyStateHint(tab: LifecycleTabId): boolean {
-  return tab === "queue" || tab === "all" || tab === "flagged";
+  return tab === "queue" || tab === "all" || tab === "flagged" || tab === "archive";
+}
+
+export function countActiveReviewFilters(
+  scopeFilterCount: number,
+  lifecycleTab: LifecycleTabId,
+  customSelection: readonly LifecycleState[],
+): number {
+  let count = scopeFilterCount;
+  if (lifecycleTab === "all") {
+    count += 1;
+  } else if (lifecycleTab === "custom" && !isDefaultCustomSelection(customSelection)) {
+    count += 1;
+  }
+  return count;
 }
 
 export interface ReviewEmptyContext {

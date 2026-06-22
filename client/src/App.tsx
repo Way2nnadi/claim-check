@@ -105,13 +105,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "manual-rules",
 		label: "Manual Rules",
 		kicker: "Manual Override",
-		actions: [
-			{
-				label: "Create Manual Rule",
-				allowedRoles: ["admin", "approver"],
-				unavailableBehavior: "disable",
-			},
-		],
+		actions: [],
 		ledger: ["Rationale matters because Citation may be absent for this path."],
 	},
 	{

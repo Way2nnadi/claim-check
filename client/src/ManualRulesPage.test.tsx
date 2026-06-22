@@ -13,6 +13,11 @@ function makePrincipal(role: Role): AuthenticatedPrincipal {
   };
 }
 
+async function selectPickerOption(label: string, optionName: string): Promise<void> {
+  await userEvent.click(screen.getByLabelText(label));
+  await userEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 const createdManualRule = {
   rule_id: "rule-manual-offsite-dinner-cap",
   statement: "Team offsites may reimburse dinner up to $120 with director approval.",
@@ -87,18 +92,13 @@ describe("ManualRulesPage", () => {
         fireEvent.change(screen.getByLabelText("Employee group"), {
           target: { value: "employees" },
         });
-        fireEvent.change(screen.getByLabelText("Condition field"), {
+        fireEvent.change(screen.getByLabelText("Field"), {
           target: { value: "meal.amount" },
         });
-        fireEvent.change(screen.getByLabelText("Operator"), {
-          target: { value: "<=" },
-        });
-        fireEvent.change(screen.getByLabelText("Threshold value"), {
+        fireEvent.change(screen.getByLabelText("Value"), {
           target: { value: "120" },
         });
-        fireEvent.change(screen.getByLabelText("Aggregation period"), {
-          target: { value: "per_transaction" },
-        });
+        await selectPickerOption("Aggregation period", "per transaction");
         fireEvent.change(screen.getByLabelText("Unit"), {
           target: { value: "money" },
         });
@@ -203,10 +203,10 @@ describe("ManualRulesPage", () => {
     fireEvent.change(screen.getByLabelText("Rationale"), {
       target: { value: "Temporary finance exception pending document update." },
     });
-    fireEvent.change(screen.getByLabelText("Condition field"), {
+    fireEvent.change(screen.getByLabelText("Field"), {
       target: { value: "meal.amount" },
     });
-    fireEvent.change(screen.getByLabelText("Threshold value"), {
+    fireEvent.change(screen.getByLabelText("Value"), {
       target: { value: "90" },
     });
     fireEvent.change(screen.getByLabelText("Unit"), {

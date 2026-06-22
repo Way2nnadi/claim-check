@@ -199,9 +199,10 @@ describe("CandidateRuleCatalog", () => {
     render(<CandidateRuleCatalog principal={principal} />);
 
     expect(await screen.findByText(/Meals are capped at \$75 per day/)).toBeInTheDocument();
-    expect(screen.getByText("Extracted")).toBeInTheDocument();
+    expect(screen.getByText("1 awaiting review")).toBeInTheDocument();
+    expect(screen.getByText("Enforceable")).toBeInTheDocument();
     expect(screen.getByText("Scope filters")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Rule statement" })).toBeInTheDocument();
+    expect(document.getElementById("review-rule-panel")).toBeInTheDocument();
     expect(screen.queryByText("extract-expense-v1")).not.toBeInTheDocument();
   });
 
@@ -241,10 +242,7 @@ describe("CandidateRuleCatalog", () => {
       url.startsWith("/api/candidate-rules"),
     ).length;
 
-    await userEvent.click(screen.getByRole("tab", { name: /Custom/i }));
-    await userEvent.click(screen.getByLabelText("Extracted"));
-    await userEvent.click(screen.getByLabelText("In review"));
-    await userEvent.click(screen.getByLabelText("Published"));
+    await userEvent.click(screen.getByRole("tab", { name: /Archive/i }));
 
     expect(
       fetchMock.mock.calls.filter(([url]) => url.startsWith("/api/candidate-rules")),
@@ -252,17 +250,15 @@ describe("CandidateRuleCatalog", () => {
     expect(screen.queryByText(/Meals are capped at \$75 per day/)).not.toBeInTheDocument();
   });
 
-  it("opens a full-page edit desk when a rule is opened", async () => {
+  it("opens a full-page edit desk when edit is clicked", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
     render(<CandidateRuleCatalog principal={principal} />);
 
-    await userEvent.click(
-      await screen.findByRole("button", { name: /Open dossier for Meals are capped at \$75 per day/i }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
 
     expect(await screen.findByText("rule-meals-cap")).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "Candidate Rule review queue" })).toBeInTheDocument();
+    expect(screen.queryByRole("tabpanel", { name: "Candidate Rule review queue" })).not.toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "QA flags" })).toBeInTheDocument();
     expect(
       screen.getAllByText("Candidate Rule extraction confidence 0.62 is below 0.75."),
@@ -274,18 +270,27 @@ describe("CandidateRuleCatalog", () => {
     expect(screen.getByLabelText("Statement")).toHaveValue("Meals are capped at $75 per day.");
   });
 
-  it("clears the current selection from the review workbench", async () => {
+  it("does not open the edit desk when the queue row itself is clicked", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
     render(<CandidateRuleCatalog principal={principal} />);
 
-    await userEvent.click(
-      await screen.findByRole("button", { name: /Open dossier for Meals are capped at \$75 per day/i }),
-    );
-    await userEvent.click(await screen.findByRole("button", { name: "Clear selection" }));
+    await userEvent.click(await screen.findByText(/Meals are capped at \$75 per day/));
+
+    expect(document.getElementById("review-rule-panel")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Statement")).not.toBeInTheDocument();
+  });
+
+  it("returns to the review queue from the edit desk", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<CandidateRuleCatalog principal={principal} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: "← Queue" }));
 
     expect(await screen.findByText(/Meals are capped at \$75 per day/)).toBeInTheDocument();
-    expect(screen.getByText("Choose a Candidate Rule to inspect source, QA flags, and review deltas.")).toBeInTheDocument();
+    expect(document.getElementById("review-rule-panel")).toBeInTheDocument();
   });
 
   it("applies document scope filters to candidate rules", async () => {
@@ -309,7 +314,7 @@ describe("CandidateRuleCatalog", () => {
     });
   });
 
-  it("advances to the next filtered queue item after approval", async () => {
+  it("approves a queue item from the row action and removes it from the queue tab", async () => {
     const firstReview = buildReview();
     const approvedFirstReview = buildReview({
       lifecycle_state: "approved",
@@ -465,20 +470,17 @@ describe("CandidateRuleCatalog", () => {
 
     render(<CandidateRuleCatalog principal={principal} />);
 
-    await userEvent.click(
-      await screen.findByRole("button", { name: /Open dossier for Meals are capped at \$75 per day/i }),
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Approve Candidate Rule" }));
-    await userEvent.type(screen.getByLabelText("Approval rationale"), "Citation verified and threshold confirmed.");
-    await userEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
+    const approveButtons = await screen.findAllByRole("button", { name: "Approve" });
+    await userEvent.click(approveButtons[0]!);
+    await userEvent.type(screen.getByLabelText("Rationale"), "Citation verified and threshold confirmed.");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    expect(
-      await screen.findByRole("heading", { level: 3, name: "Expense Policy" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByLabelText("Statement")).toHaveValue("Lodging is capped at $250 per night.");
+    expect(await screen.findByText("Lodging is capped at $250 per night.")).toBeInTheDocument();
+    expect(screen.queryByText(/Meals are capped at \$75 per day/)).not.toBeInTheDocument();
+    expect(document.getElementById("review-rule-panel")).toBeInTheDocument();
   });
 
-  it("advances to the next filtered queue item after rejection", async () => {
+  it("rejects a queue item from the row action and removes it from the queue tab", async () => {
     const firstReview = buildReview();
     const rejectedFirstReview = buildReview({
       lifecycle_state: "rejected",
@@ -633,16 +635,16 @@ describe("CandidateRuleCatalog", () => {
 
     render(<CandidateRuleCatalog principal={principal} />);
 
-    await userEvent.click(
-      await screen.findByRole("button", { name: /Open dossier for Meals are capped at \$75 per day/i }),
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Reject Candidate Rule" }));
+    const rejectButtons = await screen.findAllByRole("button", { name: "Reject" });
+    await userEvent.click(rejectButtons[0]!);
     await userEvent.type(
-      screen.getByLabelText("Rejection reason"),
+      screen.getByLabelText("Reason"),
       "This statement duplicates a stricter Rule already approved elsewhere.",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    expect(await screen.findByLabelText("Statement")).toHaveValue("Airfare must be booked in economy class.");
+    expect(await screen.findByText("Airfare must be booked in economy class.")).toBeInTheDocument();
+    expect(screen.queryByText(/Meals are capped at \$75 per day/)).not.toBeInTheDocument();
+    expect(document.getElementById("review-rule-panel")).toBeInTheDocument();
   });
 });
