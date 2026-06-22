@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { CSSProperties } from "react";
 import {
   downloadPolicyVersionSnapshot,
   fetchPolicyVersion,
   fetchPolicyVersions,
-  publishPolicyVersion,
 } from "./api";
+import PublishPolicyVersionDrawer, {
+  type PublishedPolicyVersionResult,
+} from "./PublishPolicyVersionDrawer";
 import { hasAnyRole } from "./permissions";
 import {
   describePolicyVersionError,
-  describePolicyVersionPublishError,
   describeRuleOrigin,
   formatEffectiveWindow,
   formatEnforceabilityClass,
   formatPolicyVersionDate,
   formatRuleCount,
   latestPolicyVersionId,
-  policyVersionClearanceBlurb,
   summarizeApplicability,
   summarizeRuleScope,
 } from "./policyVersionFormat";
@@ -30,7 +30,6 @@ import type {
 
 interface PolicyVersionCatalogProps {
   principal: AuthenticatedPrincipal;
-  publishIntentToken?: number;
 }
 
 type CatalogStatus = "loading" | "ready" | "error";
@@ -48,16 +47,6 @@ function shortenId(value: string, visible = 8): string {
     return value;
   }
   return `${value.slice(0, visible)}…${value.slice(-visible)}`;
-}
-
-function summarizePrincipalClearance(principal: AuthenticatedPrincipal): Role {
-  if (principal.roles.includes("admin")) {
-    return "admin";
-  }
-  if (principal.roles.includes("approver")) {
-    return "approver";
-  }
-  return "viewer";
 }
 
 function hasEffectiveWindow(scope: Rule["scope"]): boolean {
@@ -304,25 +293,17 @@ function PolicyVersionDetail({
   );
 }
 
-export default function PolicyVersionCatalog({
-  principal,
-  publishIntentToken = 0,
-}: PolicyVersionCatalogProps) {
+export default function PolicyVersionCatalog({ principal }: PolicyVersionCatalogProps) {
   const [status, setStatus] = useState<CatalogStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [policyVersions, setPolicyVersions] = useState<PolicyVersionSummary[]>([]);
   const [selectedPolicyVersionId, setSelectedPolicyVersionId] = useState<string | null>(
     null,
   );
-  const [publishPanelOpen, setPublishPanelOpen] = useState(false);
-  const [policyVersionIdDraft, setPolicyVersionIdDraft] = useState("");
-  const [changeSummaryDraft, setChangeSummaryDraft] = useState("");
-  const [publishError, setPublishError] = useState<string | null>(null);
-  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishDrawerOpen, setPublishDrawerOpen] = useState(false);
 
   const canPublish = hasAnyRole(principal, PUBLISH_ALLOWED_ROLES);
   const latestId = latestPolicyVersionId(policyVersions);
-  const clearanceRole = summarizePrincipalClearance(principal);
 
   useEffect(() => {
     let cancelled = false;
@@ -353,91 +334,37 @@ export default function PolicyVersionCatalog({
     };
   }, []);
 
-  useEffect(() => {
-    if (!canPublish || publishIntentToken === 0) {
-      return;
-    }
-    setSelectedPolicyVersionId(null);
-    setPublishError(null);
-    setPublishPanelOpen(true);
-  }, [canPublish, publishIntentToken]);
-
-  function handleOpenPublishPanel(): void {
-    if (!canPublish) {
-      return;
-    }
-    setPublishError(null);
-    setPublishPanelOpen(true);
+  function handleClosePublishDrawer(): void {
+    setPublishDrawerOpen(false);
   }
 
-  function handleClosePublishPanel(): void {
-    if (isPublishing) {
-      return;
-    }
-    setPublishError(null);
-    setPublishPanelOpen(false);
-  }
+  function handlePublished(result: PublishedPolicyVersionResult): void {
+    const optimisticSummary: PolicyVersionSummary = {
+      policy_version_id: result.policy_version_id,
+      published_by: result.published_by,
+      change_summary: result.change_summary,
+      rule_count: result.rule_count,
+      created_at: new Date().toISOString(),
+    };
 
-  async function handlePublish(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (!canPublish || isPublishing) {
-      return;
-    }
+    setPolicyVersions((current) => [
+      optimisticSummary,
+      ...current.filter(
+        (version) => version.policy_version_id !== result.policy_version_id,
+      ),
+    ]);
+    setStatus("ready");
+    setErrorMessage(null);
+    setPublishDrawerOpen(false);
+    setSelectedPolicyVersionId(result.policy_version_id);
 
-    const nextPolicyVersionId = policyVersionIdDraft.trim();
-    const nextChangeSummary = changeSummaryDraft.trim();
-
-    if (!nextPolicyVersionId) {
-      setPublishError("Enter a Policy Version id.");
-      return;
-    }
-    if (!nextChangeSummary) {
-      setPublishError("Enter a change summary.");
-      return;
-    }
-
-    setIsPublishing(true);
-    setPublishError(null);
-
-    try {
-      const published = await publishPolicyVersion({
-        policy_version_id: nextPolicyVersionId,
-        change_summary: nextChangeSummary,
+    void fetchPolicyVersions()
+      .then((response) => {
+        setPolicyVersions(response.items);
+      })
+      .catch(() => {
+        // Keep the optimistic list update if the ledger refresh fails.
       });
-
-      const optimisticSummary: PolicyVersionSummary = {
-        policy_version_id: published.policy_version_id,
-        published_by: published.published_by,
-        change_summary: nextChangeSummary,
-        rule_count: published.rule_count,
-        created_at: new Date().toISOString(),
-      };
-
-      setPolicyVersions((current) => [
-        optimisticSummary,
-        ...current.filter(
-          (version) => version.policy_version_id !== published.policy_version_id,
-        ),
-      ]);
-      setStatus("ready");
-      setErrorMessage(null);
-      setPublishPanelOpen(false);
-      setPolicyVersionIdDraft("");
-      setChangeSummaryDraft("");
-      setSelectedPolicyVersionId(published.policy_version_id);
-
-      void fetchPolicyVersions()
-        .then((response) => {
-          setPolicyVersions(response.items);
-        })
-        .catch(() => {
-          // Keep the optimistic list update if the ledger refresh fails.
-        });
-    } catch (error: unknown) {
-      setPublishError(describePolicyVersionPublishError(error));
-    } finally {
-      setIsPublishing(false);
-    }
   }
 
   if (selectedPolicyVersionId) {
@@ -450,132 +377,12 @@ export default function PolicyVersionCatalog({
   }
 
   return (
-    <div className="policy-version-catalog content-enter">
-      <header className="policy-version-catalog-head reveal">
-        <div className="policy-version-command-deck">
-          <div className="policy-version-command-copy">
-            <p className="eyebrow">Publication Desk</p>
-            <h3>Publish immutable Policy Versions from approved Rules.</h3>
-            <p className="policy-version-catalog-lede">
-              Cut a new snapshot with a precise identifier and a change summary
-              that explains why this Policy Version exists.
-            </p>
-          </div>
-          <div className="policy-version-command-actions">
-            <button
-              type="button"
-              className="document-command document-command-accent"
-              onClick={handleOpenPublishPanel}
-              disabled={!canPublish}
-            >
-              Stage publish
-            </button>
-          </div>
-        </div>
-        <p className="policy-version-clearance">
-          {policyVersionClearanceBlurb(clearanceRole)}
-        </p>
-      </header>
-
-      {publishPanelOpen ? (
-        <section
-          className="policy-version-publisher reveal"
-          aria-labelledby="policy-version-publisher-heading"
-        >
-          <div className="policy-version-publisher-head">
-            <div>
-              <p className="eyebrow">Publication Order</p>
-              <h3 id="policy-version-publisher-heading">Publish Policy Version</h3>
-              <p className="policy-version-publisher-lede">
-                The snapshot will include every currently approved Rule and lock
-                them into an immutable Policy Version.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="detail-back"
-              onClick={handleClosePublishPanel}
-              disabled={isPublishing}
-            >
-              Close
-            </button>
-          </div>
-
-          <form
-            className="policy-version-publisher-form"
-            onSubmit={(event) => void handlePublish(event)}
-          >
-            <label htmlFor="policy-version-id">
-              Policy Version id
-              <input
-                id="policy-version-id"
-                name="policy-version-id"
-                value={policyVersionIdDraft}
-                spellCheck={false}
-                disabled={isPublishing}
-                onChange={(event) => {
-                  setPolicyVersionIdDraft(event.target.value);
-                  setPublishError(null);
-                }}
-              />
-            </label>
-
-            <label className="policy-version-publisher-summary" htmlFor="change-summary">
-              Change summary
-              <textarea
-                id="change-summary"
-                name="change-summary"
-                rows={4}
-                value={changeSummaryDraft}
-                disabled={isPublishing}
-                onChange={(event) => {
-                  setChangeSummaryDraft(event.target.value);
-                  setPublishError(null);
-                }}
-              />
-            </label>
-
-            <dl className="policy-version-publisher-ledger">
-              <div>
-                <dt>Source set</dt>
-                <dd>All currently approved Rules</dd>
-              </div>
-              <div>
-                <dt>Snapshot law</dt>
-                <dd>Immutable after publication</dd>
-              </div>
-              <div>
-                <dt>Outcome</dt>
-                <dd>Redirects into the new Policy Version entry</dd>
-              </div>
-            </dl>
-
-            {publishError ? (
-              <p className="error-banner" role="alert">
-                {publishError}
-              </p>
-            ) : null}
-
-            <div className="policy-version-publisher-actions">
-              <button
-                type="button"
-                className="document-command"
-                onClick={handleClosePublishPanel}
-                disabled={isPublishing}
-              >
-                Dismiss
-              </button>
-              <button
-                type="submit"
-                className="document-command document-command-accent"
-                disabled={isPublishing || !canPublish}
-              >
-                {isPublishing ? "Publishing…" : "Publish snapshot"}
-              </button>
-            </div>
-          </form>
-        </section>
-      ) : null}
+    <div className="policy-version-catalog catalog-page content-enter">
+      <PublishPolicyVersionDrawer
+        open={publishDrawerOpen}
+        onClose={handleClosePublishDrawer}
+        onPublished={handlePublished}
+      />
 
       {status === "loading" ? (
         <p className="catalog-status">
@@ -586,61 +393,77 @@ export default function PolicyVersionCatalog({
 
       {status === "error" ? <p className="error-banner">{errorMessage}</p> : null}
 
-      {status === "ready" && policyVersions.length === 0 ? (
-        <div className="catalog-empty reveal">
-          <h3>No published versions</h3>
-          <p>Published Policy Versions appear here.</p>
-        </div>
-      ) : null}
-
-      {status === "ready" && policyVersions.length > 0 ? (
+      {status === "ready" ? (
         <>
-          <p className="catalog-scope">
-            {policyVersions.length} published
-            {latestId ? ` · latest ${latestId}` : ""}
-          </p>
+          <div className="catalog-toolbar">
+            <p className="catalog-scope">
+              {policyVersions.length === 0
+                ? "No published versions"
+                : `${policyVersions.length} published${latestId ? ` · latest ${latestId}` : ""}`}
+            </p>
+            {canPublish ? (
+              <button
+                type="button"
+                className={`document-command${publishDrawerOpen ? " active" : ""}`}
+                aria-expanded={publishDrawerOpen}
+                onClick={() => {
+                  setSelectedPolicyVersionId(null);
+                  setPublishDrawerOpen((current) => !current);
+                }}
+              >
+                Publish Policy Version
+              </button>
+            ) : null}
+          </div>
 
-          <ul className="catalog-grid" aria-label="Published Policy Version catalog">
-            {policyVersions.map((version, index) => (
-              <li key={version.policy_version_id}>
-                <button
-                  type="button"
-                  className="catalog-folio policy-version-folio reveal"
-                  style={{ "--reveal-delay": `${80 + index * 65}ms` } as CSSProperties}
-                  aria-label={`Open Policy Version ${version.policy_version_id}`}
-                  onClick={() => setSelectedPolicyVersionId(version.policy_version_id)}
-                >
-                  <div className="catalog-folio-head">
-                    <h3>{version.policy_version_id}</h3>
-                  </div>
-                  <p className="policy-version-summary">{version.change_summary}</p>
-                  <dl className="catalog-meta">
-                    <div>
-                      <dt>Published</dt>
-                      <dd>{formatPolicyVersionDate(version.created_at)}</dd>
+          {policyVersions.length === 0 ? (
+            <div className="catalog-empty reveal">
+              <h3>No published versions</h3>
+              <p>Published Policy Versions appear here.</p>
+            </div>
+          ) : (
+            <ul className="catalog-grid" aria-label="Published Policy Version catalog">
+              {policyVersions.map((version, index) => (
+                <li key={version.policy_version_id}>
+                  <button
+                    type="button"
+                    className="catalog-folio policy-version-folio reveal"
+                    style={{ "--reveal-delay": `${80 + index * 65}ms` } as CSSProperties}
+                    aria-label={`Open Policy Version ${version.policy_version_id}`}
+                    onClick={() => setSelectedPolicyVersionId(version.policy_version_id)}
+                  >
+                    <div className="catalog-folio-head">
+                      <h3>{version.policy_version_id}</h3>
                     </div>
-                    <div>
-                      <dt>Rules</dt>
-                      <dd>{formatRuleCount(version.rule_count)}</dd>
+                    <p className="policy-version-summary">{version.change_summary}</p>
+                    <dl className="catalog-meta">
+                      <div>
+                        <dt>Published</dt>
+                        <dd>{formatPolicyVersionDate(version.created_at)}</dd>
+                      </div>
+                      <div>
+                        <dt>Rules</dt>
+                        <dd>{formatRuleCount(version.rule_count)}</dd>
+                      </div>
+                    </dl>
+                    <div className="catalog-folio-foot">
+                      <p
+                        className={
+                          version.policy_version_id === latestId
+                            ? "catalog-flag"
+                            : "catalog-flag is-empty"
+                        }
+                        aria-hidden={version.policy_version_id !== latestId}
+                      >
+                        Latest
+                      </p>
+                      <p className="catalog-open-hint">Open →</p>
                     </div>
-                  </dl>
-                  <div className="catalog-folio-foot">
-                    <p
-                      className={
-                        version.policy_version_id === latestId
-                          ? "catalog-flag"
-                          : "catalog-flag is-empty"
-                      }
-                      aria-hidden={version.policy_version_id !== latestId}
-                    >
-                      Latest
-                    </p>
-                    <p className="catalog-open-hint">Open →</p>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </>
       ) : null}
     </div>

@@ -44,7 +44,7 @@ describe("App", () => {
     expect(headers.get("Authorization")).toBe("Bearer viewer-token");
   });
 
-  it("disables Policy Version publishing for viewer clearance", async () => {
+  it("hides Policy Version publishing for viewer clearance", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "viewer-token");
     vi.stubGlobal(
       "fetch",
@@ -81,7 +81,73 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("button", { name: /Policy Versions/i }));
 
     expect(await screen.findByRole("heading", { name: "Policy Versions" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish Policy Version" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Publish Policy Version" })).not.toBeInTheDocument();
+  });
+
+  it("opens the publish drawer only after clicking Publish Policy Version", async () => {
+    window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/me") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              subject: "admin-user",
+              roles: ["admin"],
+              auth_backend: "local",
+            }),
+          });
+        }
+        if (url === "/api/policy-versions") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              items: [
+                {
+                  policy_version_id: "policy-v1",
+                  published_by: "admin-user",
+                  change_summary: "Initial snapshot.",
+                  rule_count: 1,
+                  created_at: "2026-06-21T12:00:00Z",
+                },
+              ],
+            }),
+          });
+        }
+        if (url === "/api/policy-documents") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Policy Versions/i }));
+
+    expect(await screen.findByText("policy-v1")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Publish Policy Version" }));
+
+    expect(await screen.findByLabelText("Policy Version id")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Close publish Policy Version drawer" }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /Documents/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Policy Versions/i }));
+
+    expect(await screen.findByText("policy-v1")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
   });
 
   it("opens Manual Rules and keeps creation disabled for viewer clearance", async () => {
@@ -367,7 +433,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "No Policy Documents on file" })).toBeInTheDocument();
     expect(
-      screen.getByText(/Upload a source document to open the catalog/),
+      screen.getByText(/Ask an administrator to register a Policy Document/),
     ).toBeInTheDocument();
   });
 

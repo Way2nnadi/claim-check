@@ -45,9 +45,13 @@ describe("DocumentDetail", () => {
     render(<DocumentDetail documentId="expense-policy" onBack={() => undefined} />);
 
     expect(await screen.findByText("docv-expense-v2")).toBeInTheDocument();
-    expect(screen.getByText("docv-expense-v1")).toBeInTheDocument();
+    expect(screen.queryByText("docv-expense-v1")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /Archived/i }));
+
+    expect(await screen.findByText("docv-expense-v1")).toBeInTheDocument();
     expect(screen.getByText("Superseded by v2")).toBeInTheDocument();
-    expect(screen.getAllByText("Archived").length).toBeGreaterThan(0);
+    expect(screen.getByRole("tab", { name: /Archived/i })).toHaveAttribute("aria-selected", "true");
   });
 
   it("downloads active document versions as raw bytes", async () => {
@@ -116,11 +120,12 @@ describe("DocumentDetail", () => {
 
     render(<DocumentDetail documentId="expense-policy" onBack={() => undefined} />);
 
+    await screen.findByText("docv-expense-v2");
+    expect(screen.getByRole("button", { name: "Retrieve source" })).not.toBeDisabled();
+
+    await userEvent.click(screen.getByRole("tab", { name: /Archived/i }));
     await screen.findByText("docv-expense-v1");
-    const downloadButtons = screen.getAllByRole("button", { name: "Retrieve source" });
-    expect(downloadButtons).toHaveLength(2);
-    expect(downloadButtons[0]).not.toBeDisabled();
-    expect(downloadButtons[1]).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Retrieve source" })).toBeDisabled();
     expect(screen.getByText(/Source unavailable for archived versions/)).toBeInTheDocument();
   });
 
@@ -139,7 +144,7 @@ describe("DocumentDetail", () => {
     expect(screen.getByRole("code")).toHaveTextContent("missing-policy");
   });
 
-  it("shows the upload panel for admins and hides it for viewers", async () => {
+  it("shows the upload drawer for admins and hides it for viewers", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -153,9 +158,10 @@ describe("DocumentDetail", () => {
     );
 
     await screen.findByText("docv-expense-v2");
+    expect(screen.queryByRole("heading", { name: "New Document Version" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "New version" }));
     expect(screen.getByRole("heading", { name: "New Document Version" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload version" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deposit version" })).toBeInTheDocument();
 
     rerender(<DocumentDetail documentId="expense-policy" canUpload={false} onBack={() => undefined} />);
     expect(screen.queryByRole("heading", { name: "New Document Version" })).not.toBeInTheDocument();
@@ -198,7 +204,7 @@ describe("DocumentDetail", () => {
     await userEvent.click(screen.getByRole("button", { name: "New version" }));
     const file = new File(["pdf-bytes"], "expense-policy-v3.pdf", { type: "application/pdf" });
     await userEvent.upload(screen.getByLabelText(/Select PDF or DOCX/i), file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload version" }));
+    await userEvent.click(screen.getByRole("button", { name: "Deposit version" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -237,7 +243,7 @@ describe("DocumentDetail", () => {
     await userEvent.click(screen.getByRole("button", { name: "New version" }));
     const file = new File(["not-a-pdf"], "broken.pdf", { type: "application/pdf" });
     await userEvent.upload(screen.getByLabelText(/Select PDF or DOCX/i), file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload version" }));
+    await userEvent.click(screen.getByRole("button", { name: "Deposit version" }));
 
     expect(
       await screen.findByText(
@@ -265,7 +271,7 @@ describe("DocumentDetail", () => {
     expect(
       screen.getByText("Only native-digital PDF and DOCX Policy Documents are supported."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload version" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deposit version" })).toBeDisabled();
   });
 
   it("shows archive controls for admins and hides them for viewers", async () => {
@@ -356,7 +362,8 @@ describe("DocumentDetail", () => {
     });
 
     expect(await screen.findByText("Superseded by corrected policy language.")).toBeInTheDocument();
-    expect(screen.getAllByText("Archived").length).toBeGreaterThan(1);
+    expect(screen.getByRole("tab", { name: /Archived/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Archived/i })).toHaveTextContent("2");
     expect(screen.queryByRole("button", { name: "Strike from register" })).not.toBeInTheDocument();
   });
 

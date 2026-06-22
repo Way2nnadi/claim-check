@@ -1433,186 +1433,17 @@ button:disabled {
 	gap: 1.35rem;
 }
 
-.policy-version-catalog-head,
 .policy-version-detail-head {
 	display: grid;
 	gap: 0.9rem;
 }
 
-.policy-version-command-deck {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(12rem, 0.7fr);
-  gap: 1rem 1.2rem;
-  padding: 1.35rem 1.4rem;
-  overflow: hidden;
-  border: 1px solid rgba(var(--rgb-signal), 0.2);
-  background:
-    linear-gradient(135deg, rgba(var(--rgb-signal), 0.12), transparent 45%),
-    linear-gradient(180deg, rgba(var(--rgb-highlight), 0.04), transparent 65%),
-    rgba(var(--rgb-mid), 0.55);
-  box-shadow: inset 0 1px 0 rgba(var(--rgb-highlight), 0.05);
-}
-
-.policy-version-command-deck::after {
-  content: "";
-  position: absolute;
-  inset: auto -15% 0 35%;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(var(--rgb-phosphor), 0.65),
-    transparent
-  );
-  transform: rotate(-7deg);
-  transform-origin: center;
-}
-
-.policy-version-command-copy {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.policy-version-command-copy h3,
-.policy-version-publisher-head h3 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(1.45rem, 2.7vw, 2.1rem);
-  font-weight: 500;
-  letter-spacing: -0.03em;
-}
-
-.policy-version-command-actions {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.policy-version-catalog-lede,
 .policy-version-detail-lede {
 	margin: 0;
 	max-width: 46rem;
 	font-size: 1rem;
 	line-height: 1.65;
 	color: var(--muted-ink);
-}
-
-.policy-version-clearance {
-	margin: 0;
-	max-width: 44rem;
-	padding: 0.9rem 1rem;
-	border: 1px solid rgba(var(--rgb-phosphor), 0.2);
-	background: linear-gradient(
-			120deg,
-			rgba(var(--rgb-phosphor), 0.08),
-			transparent 55%
-		), rgba(var(--rgb-mid), 0.48);
-	font-family: var(--font-mono);
-	font-size: 0.78rem;
-	color: var(--ink);
-}
-
-.policy-version-publisher {
-  display: grid;
-  gap: 1rem;
-  padding: 1.25rem 1.35rem 1.35rem;
-  border: 1px solid rgba(var(--rgb-phosphor), 0.25);
-  background:
-    radial-gradient(circle at top right, rgba(var(--rgb-phosphor), 0.14), transparent 38%),
-    linear-gradient(180deg, rgba(var(--rgb-highlight), 0.05), transparent 55%),
-    rgba(var(--rgb-mid), 0.6);
-  box-shadow: inset 0 1px 0 rgba(var(--rgb-highlight), 0.05);
-}
-
-.policy-version-publisher-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.85rem 1.2rem;
-}
-
-.policy-version-publisher-lede {
-  margin: 0.4rem 0 0;
-  max-width: 42rem;
-  color: var(--muted-ink);
-}
-
-.policy-version-publisher-form {
-  display: grid;
-  gap: 1rem;
-}
-
-.policy-version-publisher-form label {
-  display: grid;
-  gap: 0.45rem;
-  font-family: var(--font-label);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted-ink);
-}
-
-.policy-version-publisher-form input,
-.policy-version-publisher-form textarea {
-  width: 100%;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 0.3rem;
-  background: rgba(var(--rgb-deep), 0.62);
-  color: var(--ink);
-  font-family: var(--font-body);
-  font-size: 0.96rem;
-  line-height: 1.6;
-  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
-}
-
-.policy-version-publisher-form input:focus,
-.policy-version-publisher-form textarea:focus {
-  outline: none;
-  border-color: rgba(var(--rgb-phosphor), 0.45);
-  box-shadow: 0 0 0 1px rgba(var(--rgb-phosphor), 0.18), var(--glow-phosphor);
-}
-
-.policy-version-publisher-summary textarea {
-  min-height: 8.5rem;
-  resize: vertical;
-}
-
-.policy-version-publisher-ledger {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin: 0;
-}
-
-.policy-version-publisher-ledger div {
-  padding: 0.85rem 0.9rem;
-  border: 1px solid rgba(var(--rgb-signal), 0.16);
-  background: rgba(var(--rgb-raised), 0.34);
-}
-
-.policy-version-publisher-ledger dt {
-  margin: 0 0 0.35rem;
-  font-family: var(--font-label);
-  font-size: 0.62rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--signal);
-}
-
-.policy-version-publisher-ledger dd {
-  margin: 0;
-  color: var(--ink);
-  line-height: 1.55;
-}
-
-.policy-version-publisher-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.7rem;
 }
 
 .policy-version-folio {
@@ -1813,9 +1644,50 @@ button:disabled {
 .catalog-toolbar {
 	display: flex;
 	flex-wrap: wrap;
-	align-items: flex-end;
+	align-items: center;
 	justify-content: space-between;
 	gap: 1rem;
+}
+
+.catalog-register-panel {
+	margin-top: 0.15rem;
+}
+
+.catalog-register-id {
+	display: grid;
+	gap: 0.45rem;
+	font-family: var(--font-label);
+	font-size: 0.62rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--muted-ink);
+}
+
+.catalog-register-id input {
+	padding: 0.55rem 0.7rem;
+	border: 1px solid var(--line);
+	background: rgba(var(--rgb-mid), 0.92);
+	font-family: var(--font-mono);
+	font-size: 0.82rem;
+	letter-spacing: 0;
+	text-transform: none;
+	color: var(--ink);
+}
+
+.catalog-register-id input:focus {
+	outline: 2px solid rgba(var(--rgb-phosphor), 0.28);
+	outline-offset: 1px;
+}
+
+.catalog-register-note {
+	margin: 0;
+	padding: 0.65rem 0.75rem;
+	border-left: 2px solid rgba(var(--rgb-signal), 0.45);
+	background: rgba(var(--rgb-signal), 0.08);
+	font-size: 0.82rem;
+	line-height: 1.5;
+	color: var(--muted-ink);
+	display: block;
 }
 
 .document-lookup.compact {
@@ -2083,6 +1955,19 @@ button:disabled {
 .catalog-close:hover {
 	border-color: rgba(var(--rgb-phosphor), 0.28);
 	color: var(--accent);
+}
+
+.version-toolbar {
+	display: grid;
+	gap: 0.75rem;
+}
+
+.version-ledger-empty {
+	margin: 0;
+	padding: 1rem 0.15rem;
+	color: var(--muted-ink);
+	font-size: 0.92rem;
+	line-height: 1.55;
 }
 
 .version-ledger {
@@ -3602,6 +3487,89 @@ button:disabled {
 	);
 }
 
+.mission-drawer .policy-version-publish-form {
+	display: grid;
+	gap: 0.85rem;
+	align-content: start;
+}
+
+.mission-drawer .register-document-form {
+	display: grid;
+	gap: 0.85rem;
+	align-content: start;
+}
+
+.register-document-form label:not(.version-upload-dropzone) {
+	display: grid;
+	gap: 0.35rem;
+	font-family: var(--font-label);
+	font-size: 0.62rem;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--folio);
+}
+
+.register-document-form input[type="text"] {
+	width: 100%;
+	padding: 0.65rem 0.75rem;
+	border: 1px solid var(--line-strong);
+	background: rgba(var(--rgb-raised), 0.62);
+	font-family: var(--font-mono);
+	font-size: 0.82rem;
+	line-height: 1.4;
+	color: var(--ink);
+}
+
+.register-document-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.65rem;
+	margin-top: 0.5rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--line);
+}
+
+.policy-version-publish-form label {
+	display: grid;
+	gap: 0.35rem;
+	font-family: var(--font-label);
+	font-size: 0.62rem;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--folio);
+}
+
+.policy-version-publish-form input,
+.policy-version-publish-form textarea {
+	width: 100%;
+	padding: 0.65rem 0.75rem;
+	border: 1px solid var(--line-strong);
+	background: rgba(var(--rgb-raised), 0.62);
+	color: var(--ink);
+}
+
+.policy-version-publish-form input {
+	font-family: var(--font-mono);
+	font-size: 0.82rem;
+	line-height: 1.4;
+}
+
+.policy-version-publish-form textarea {
+	min-height: 5.5rem;
+	font-family: var(--font-body);
+	font-size: 0.9rem;
+	line-height: 1.55;
+	resize: vertical;
+}
+
+.policy-version-publish-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 0.5rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--line);
+}
+
 @keyframes mission-backdrop-in {
 	from {
 		opacity: 0;
@@ -3824,15 +3792,27 @@ button:disabled {
 	color: var(--folio);
 }
 
-.reingestion-form input:not([type="file"]) {
+.reingestion-form input:not([type="file"]),
+.reingestion-form textarea {
 	width: 100%;
 	max-width: 100%;
 	padding: 0.65rem 0.75rem;
 	border: 1px solid var(--line-strong);
 	background: rgba(var(--rgb-raised), 0.62);
+	color: var(--ink);
+}
+
+.reingestion-form input:not([type="file"]) {
 	font-family: var(--font-mono);
 	font-size: 0.82rem;
-	color: var(--ink);
+}
+
+.reingestion-form textarea {
+	min-height: 6.5rem;
+	font-family: var(--font-body);
+	font-size: 0.9rem;
+	line-height: 1.55;
+	resize: vertical;
 }
 
 .reingestion-dropzone {
@@ -4207,15 +4187,6 @@ button:disabled {
 		flex-direction: column;
 		align-items: stretch;
 		gap: 0.85rem;
-	}
-
-	.policy-version-command-deck,
-	.policy-version-publisher-ledger {
-		grid-template-columns: 1fr;
-	}
-
-	.policy-version-command-actions {
-		justify-content: flex-start;
 	}
 
 	.policy-version-detail-head-row,

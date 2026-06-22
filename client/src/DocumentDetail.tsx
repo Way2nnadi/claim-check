@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type { CSSProperties } from "react";
 import {
@@ -6,7 +6,6 @@ import {
   deleteDocumentVersion,
   downloadDocumentVersion,
   fetchDocumentVersions,
-  uploadDocumentVersion,
 } from "./api";
 import {
   describeFetchError,
@@ -14,6 +13,7 @@ import {
   formatContentTypeLabel,
   formatDocumentTitle,
 } from "./documentFormat";
+import NewDocumentVersionDrawer from "./NewDocumentVersionDrawer";
 import type { DocumentVersion, PolicyDocumentSummary } from "./types";
 import ReingestionDrawer from "./ReingestionDrawer";
 import VersionExtractionRuns from "./VersionExtractionRuns";
@@ -27,29 +27,15 @@ interface DocumentDetailProps {
   onBack: () => void;
 }
 
-const UPLOAD_ACCEPT =
-  ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-const UPLOAD_FORMAT_ERROR =
-  "Only native-digital PDF and DOCX Policy Documents are supported.";
-
 const DELETE_REASON_REQUIRED = "Enter a reason before striking this version from the register.";
 const DELETE_REASON_MAX_LENGTH = 500;
 
-function isAcceptedUploadFile(file: File): boolean {
-  const lowerName = file.name.toLowerCase();
-  const hasExtension = lowerName.endsWith(".pdf") || lowerName.endsWith(".docx");
-  if (!hasExtension) {
-    return false;
-  }
-  if (!file.type) {
-    return true;
-  }
-  return (
-    file.type === "application/pdf" ||
-    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  );
-}
+type VersionTab = "active" | "archived";
+
+const VERSION_TABS: readonly { id: VersionTab; label: string }[] = [
+  { id: "active", label: "Active" },
+  { id: "archived", label: "Archived" },
+];
 
 export default function DocumentDetail({
   documentId,
@@ -62,17 +48,14 @@ export default function DocumentDetail({
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [downloadingVersionId, setDownloadingVersionId] = useState<string | null>(null);
   const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({});
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadInputKey, setUploadInputKey] = useState(0);
   const [archivingVersionId, setArchivingVersionId] = useState<string | null>(null);
   const [archiveReason, setArchiveReason] = useState("");
   const [archiveErrors, setArchiveErrors] = useState<Record<string, string>>({});
   const [isArchiving, setIsArchiving] = useState(false);
-  const [uploadPanelOpen, setUploadPanelOpen] = useState(false);
+  const [uploadDrawerOpen, setUploadDrawerOpen] = useState(false);
   const [reingestionOpen, setReingestionOpen] = useState(false);
+  const [versionTab, setVersionTab] = useState<VersionTab>("active");
 
   const loadVersions = useCallback(async (): Promise<void> => {
     setStatus("loading");
@@ -109,9 +92,17 @@ export default function DocumentDetail({
 
   useEffect(() => {
     if (canUpload && status === "not_found") {
-      setUploadPanelOpen(true);
+      setUploadDrawerOpen(true);
     }
   }, [canUpload, status]);
+
+  async function handleVersionUploaded(documentVersionId: string): Promise<void> {
+    setUploadDrawerOpen(false);
+    setUploadSuccess(
+      `Registered ${documentVersionId}. Prior Document Versions remain unchanged.`,
+    );
+    await loadVersions();
+  }
 
   async function handleDownload(version: DocumentVersion): Promise<void> {
     if (version.deleted_at) {
@@ -142,49 +133,6 @@ export default function DocumentDetail({
       }));
     } finally {
       setDownloadingVersionId(null);
-    }
-  }
-
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>): void {
-    const file = event.target.files?.[0] ?? null;
-    setSelectedFile(file);
-    setUploadError(null);
-    setUploadSuccess(null);
-
-    if (file && !isAcceptedUploadFile(file)) {
-      setUploadError(UPLOAD_FORMAT_ERROR);
-      setSelectedFile(null);
-      setUploadInputKey((current) => current + 1);
-    }
-  }
-
-  async function handleUploadSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (!canUpload || !selectedFile || isUploading) {
-      return;
-    }
-
-    if (!isAcceptedUploadFile(selectedFile)) {
-      setUploadError(UPLOAD_FORMAT_ERROR);
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadError(null);
-    setUploadSuccess(null);
-
-    try {
-      const created = await uploadDocumentVersion(documentId, selectedFile);
-      setUploadSuccess(
-        `Registered ${created.document_version_id}. Prior Document Versions remain unchanged.`,
-      );
-      setSelectedFile(null);
-      setUploadInputKey((current) => current + 1);
-      await loadVersions();
-    } catch (error: unknown) {
-      setUploadError(describeFetchError(error, "Upload failed."));
-    } finally {
-      setIsUploading(false);
     }
   }
 
@@ -239,6 +187,7 @@ export default function DocumentDetail({
       await deleteDocumentVersion(version.document_id, version.document_version_id, reason);
       closeArchiveForm();
       await loadVersions();
+      setVersionTab("archived");
     } catch (error: unknown) {
       setArchiveErrors((current) => ({
         ...current,
@@ -251,6 +200,20 @@ export default function DocumentDetail({
 
   const latestVersionId =
     summary?.latest_document_version_id ?? versions.find((version) => !version.deleted_at)?.document_version_id;
+
+  const activeVersions = useMemo(
+    () => versions.filter((version) => !version.deleted_at),
+    [versions],
+  );
+  const archivedVersions = useMemo(
+    () => versions.filter((version) => Boolean(version.deleted_at)),
+    [versions],
+  );
+  const displayedVersions = versionTab === "active" ? activeVersions : archivedVersions;
+  const versionTabCounts: Record<VersionTab, number> = {
+    active: activeVersions.length,
+    archived: archivedVersions.length,
+  };
 
   const showAdminActions = canUpload && (status === "ready" || status === "not_found");
   const showReingestion = showAdminActions && status === "ready";
@@ -266,10 +229,13 @@ export default function DocumentDetail({
             <div className="document-detail-commands">
               <button
                 type="button"
-                className={`document-command${uploadPanelOpen ? " active" : ""}`}
-                aria-expanded={uploadPanelOpen}
-                aria-controls="document-upload-panel"
-                onClick={() => setUploadPanelOpen((current) => !current)}
+                className={`document-command${uploadDrawerOpen ? " active" : ""}`}
+                aria-expanded={uploadDrawerOpen}
+                aria-controls="new-document-version-drawer"
+                onClick={() => {
+                  setUploadSuccess(null);
+                  setUploadDrawerOpen(true);
+                }}
               >
                 New version
               </button>
@@ -290,79 +256,12 @@ export default function DocumentDetail({
         </div>
       </header>
 
-      {showAdminActions && uploadPanelOpen ? (
-        <section
-          id="document-upload-panel"
-          className="document-upload-panel reveal"
-          aria-labelledby="version-upload-heading"
-        >
-          <form className="document-admin-upload" onSubmit={(event) => void handleUploadSubmit(event)}>
-            <div className="document-admin-upload-head">
-              <h4 id="version-upload-heading">New Document Version</h4>
-              <p>PDF or DOCX — appends an immutable version to the ledger.</p>
-            </div>
-
-            <label className="version-upload-dropzone compact" htmlFor="document-version-file">
-              <input
-                key={uploadInputKey}
-                id="document-version-file"
-                name="document-version-file"
-                type="file"
-                accept={UPLOAD_ACCEPT}
-                disabled={isUploading}
-                onChange={handleFileChange}
-              />
-              <span className="version-upload-dropcopy">
-                {selectedFile ? (
-                  <>
-                    <strong>{selectedFile.name}</strong>
-                    <span>{formatBytes(selectedFile.size)}</span>
-                  </>
-                ) : (
-                  <>
-                    <strong>Select PDF or DOCX</strong>
-                    <span>Drop file or click to browse</span>
-                  </>
-                )}
-              </span>
-            </label>
-
-            <div className="version-upload-actions">
-              <button
-                type="submit"
-                className="version-upload-submit"
-                disabled={!selectedFile || isUploading || Boolean(uploadError && !selectedFile)}
-              >
-                {isUploading ? "Uploading…" : "Upload version"}
-              </button>
-              {selectedFile ? (
-                <button
-                  type="button"
-                  className="version-upload-clear"
-                  disabled={isUploading}
-                  onClick={() => {
-                    setSelectedFile(null);
-                    setUploadError(null);
-                    setUploadSuccess(null);
-                    setUploadInputKey((current) => current + 1);
-                  }}
-                >
-                  Clear
-                </button>
-              ) : null}
-            </div>
-          </form>
-
-          {uploadError ? (
-            <p className="version-upload-feedback error" role="alert">
-              {uploadError}
-            </p>
-          ) : null}
-          {uploadSuccess ? (
-            <output className="version-upload-feedback success">{uploadSuccess}</output>
-          ) : null}
-        </section>
-      ) : null}
+      <NewDocumentVersionDrawer
+        documentId={documentId}
+        open={showAdminActions && uploadDrawerOpen}
+        onClose={() => setUploadDrawerOpen(false)}
+        onUploaded={(documentVersionId) => void handleVersionUploaded(documentVersionId)}
+      />
 
       <ReingestionDrawer
         documentId={documentId}
@@ -370,6 +269,10 @@ export default function DocumentDetail({
         onClose={() => setReingestionOpen(false)}
         onCompleted={() => void loadVersions()}
       />
+
+      {uploadSuccess ? (
+        <output className="version-upload-feedback success">{uploadSuccess}</output>
+      ) : null}
 
       {status === "loading" ? (
         <p className="catalog-status">
@@ -398,8 +301,47 @@ export default function DocumentDetail({
 
       {status === "ready" ? (
         <>
-          <ol className="version-ledger" aria-label={`Document Versions for ${documentId}`}>
-            {versions.map((version, index) => {
+          <div className="version-toolbar reveal">
+            <div
+              className="catalog-tabs"
+              role="tablist"
+              aria-label="Filter by version status"
+            >
+              {VERSION_TABS.map((tab) => {
+                const isSelected = versionTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    id={`document-version-tab-${tab.id}`}
+                    className={`catalog-tab${isSelected ? " active" : ""}`}
+                    aria-selected={isSelected}
+                    aria-controls="document-version-panel"
+                    onClick={() => setVersionTab(tab.id)}
+                  >
+                    <span>{tab.label}</span>
+                    <span className="catalog-tab-count">{versionTabCounts[tab.id]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div
+            id="document-version-panel"
+            role="tabpanel"
+            aria-labelledby={`document-version-tab-${versionTab}`}
+          >
+            {displayedVersions.length === 0 ? (
+              <p className="version-ledger-empty">
+                {versionTab === "active"
+                  ? "No active Document Versions on file."
+                  : "No archived Document Versions on file."}
+              </p>
+            ) : (
+              <ol className="version-ledger" aria-label={`Document Versions for ${documentId}`}>
+                {displayedVersions.map((version, index) => {
               const isArchived = Boolean(version.deleted_at);
               const isLatest = version.document_version_id === latestVersionId;
               const downloadError = downloadErrors[version.document_version_id];
@@ -411,7 +353,7 @@ export default function DocumentDetail({
                 <li key={version.document_version_id}>
                   <article
                     className={`version-row reveal${isArchived ? " deleted" : ""}${
-                      isLatest ? " latest" : ""
+                      isLatest && !isArchived ? " latest" : ""
                     }`}
                     style={{ "--reveal-delay": `${60 + index * 55}ms` } as CSSProperties}
                   >
@@ -419,8 +361,9 @@ export default function DocumentDetail({
                       <div className="version-row-head">
                         <code>{version.document_version_id}</code>
                         <span className="version-format">{formatContentTypeLabel(version.content_type)}</span>
-                        {isLatest ? <span className="version-badge">Latest</span> : null}
-                        {isArchived ? <span className="version-badge muted">Archived</span> : null}
+                        {isLatest && !isArchived ? (
+                          <span className="version-badge">Latest</span>
+                        ) : null}
                       </div>
                       <p className="version-filename">{version.filename}</p>
                       <dl className="version-meta-grid">
@@ -528,7 +471,9 @@ export default function DocumentDetail({
                 </li>
               );
             })}
-          </ol>
+              </ol>
+            )}
+          </div>
         </>
       ) : null}
     </div>

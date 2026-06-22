@@ -263,7 +263,7 @@ describe("PolicyVersionCatalog", () => {
     },
   );
 
-  it("disables publish controls for viewer clearance", async () => {
+  it("does not open publish controls for viewer clearance", async () => {
     window.sessionStorage.setItem("policy-pipeline.auth.token", "viewer-token");
     vi.stubGlobal(
       "fetch",
@@ -276,7 +276,28 @@ describe("PolicyVersionCatalog", () => {
     render(<PolicyVersionCatalog principal={makePrincipal("viewer")} />);
 
     expect(await screen.findByText("policy-v2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stage publish" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Publish Policy Version" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
+  });
+
+  it("does not open the publish drawer until the toolbar button is clicked", async () => {
+    window.sessionStorage.setItem("policy-pipeline.auth.token", "admin-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => policyVersionListResponse,
+      }),
+    );
+
+    render(<PolicyVersionCatalog principal={makePrincipal("admin")} />);
+
+    expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Policy Version id")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Publish Policy Version" }));
+
+    expect(await screen.findByLabelText("Policy Version id")).toBeInTheDocument();
   });
 
   describe.each([
@@ -322,14 +343,15 @@ describe("PolicyVersionCatalog", () => {
       render(<PolicyVersionCatalog principal={makePrincipal(role)} />);
 
       expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Publish Policy Version" }));
+      expect(await screen.findByLabelText("Policy Version id")).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Stage publish" }));
       await userEvent.type(screen.getByLabelText("Policy Version id"), "policy-v3");
       await userEvent.type(
         screen.getByLabelText("Change summary"),
         "Approved meal and lodging adjustments for summer travel.",
       );
-      await userEvent.click(screen.getByRole("button", { name: "Publish snapshot" }));
+      await userEvent.click(screen.getByRole("button", { name: "Publish" }));
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
@@ -383,11 +405,12 @@ describe("PolicyVersionCatalog", () => {
       render(<PolicyVersionCatalog principal={makePrincipal(role)} />);
 
       expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Publish Policy Version" }));
+      expect(await screen.findByLabelText("Policy Version id")).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Stage publish" }));
       await userEvent.type(screen.getByLabelText("Policy Version id"), "policy-v3");
       await userEvent.type(screen.getByLabelText("Change summary"), "Ready to publish.");
-      await userEvent.click(screen.getByRole("button", { name: "Publish snapshot" }));
+      await userEvent.click(screen.getByRole("button", { name: "Publish" }));
 
       expect(
         await screen.findByText(
@@ -423,14 +446,15 @@ describe("PolicyVersionCatalog", () => {
       render(<PolicyVersionCatalog principal={makePrincipal(role)} />);
 
       expect(await screen.findByText("policy-v2")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Publish Policy Version" }));
+      expect(await screen.findByLabelText("Policy Version id")).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Stage publish" }));
       await userEvent.type(screen.getByLabelText("Policy Version id"), "policy-v2");
       await userEvent.type(
         screen.getByLabelText("Change summary"),
         "Attempted overwrite of an immutable snapshot.",
       );
-      await userEvent.click(screen.getByRole("button", { name: "Publish snapshot" }));
+      await userEvent.click(screen.getByRole("button", { name: "Publish" }));
 
       expect(
         await screen.findByText(

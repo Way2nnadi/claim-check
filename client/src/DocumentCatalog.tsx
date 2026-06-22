@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { fetchPolicyDocuments } from "./api";
 import DocumentDetail from "./DocumentDetail";
@@ -8,6 +8,7 @@ import {
   formatUploadDate,
 } from "./documentFormat";
 import { hasAnyRole } from "./permissions";
+import RegisterDocumentDrawer from "./RegisterDocumentDrawer";
 import type { AuthenticatedPrincipal, PolicyDocumentSummary } from "./types";
 
 interface DocumentCatalogProps {
@@ -22,30 +23,49 @@ export default function DocumentCatalog({ principal }: DocumentCatalogProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [registerDrawerOpen, setRegisterDrawerOpen] = useState(false);
+
+  const loadDocuments = useCallback(async (): Promise<PolicyDocumentSummary[]> => {
+    setStatus("loading");
+    setErrorMessage(null);
+
+    try {
+      const response = await fetchPolicyDocuments();
+      setDocuments(response.items);
+      setStatus("ready");
+      return response.items;
+    } catch (error: unknown) {
+      setErrorMessage(describeFetchError(error, "Unable to load the document registry."));
+      setStatus("error");
+      return [];
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
-    void fetchPolicyDocuments()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setDocuments(response.items);
-        setStatus("ready");
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setErrorMessage(describeFetchError(error, "Unable to load the document registry."));
-        setStatus("error");
-      });
+    void loadDocuments().then(() => {
+      if (cancelled) {
+        return;
+      }
+    });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadDocuments]);
+
+  useEffect(() => {
+    if (canUpload && status === "ready" && documents.length === 0) {
+      setRegisterDrawerOpen(true);
+    }
+  }, [canUpload, documents.length, status]);
+
+  async function handleDocumentRegistered(documentId: string): Promise<void> {
+    await loadDocuments();
+    setRegisterDrawerOpen(false);
+    setSelectedDocumentId(documentId);
+  }
 
   if (selectedDocumentId) {
     const summary = documents.find((item) => item.document_id === selectedDocumentId);
@@ -78,13 +98,29 @@ export default function DocumentCatalog({ principal }: DocumentCatalogProps) {
     );
   }
 
+  const existingDocumentIds = documents.map((document) => document.document_id);
+
+  const registerDrawer = canUpload ? (
+    <RegisterDocumentDrawer
+      open={registerDrawerOpen}
+      onClose={() => setRegisterDrawerOpen(false)}
+      existingDocumentIds={existingDocumentIds}
+      onRegistered={(documentId) => void handleDocumentRegistered(documentId)}
+    />
+  ) : null;
+
   if (documents.length === 0) {
     return (
       <div className="catalog-page content-enter">
+        {registerDrawer}
         <div className="catalog-empty reveal">
           <span className="folio">Registry · empty</span>
           <h3>No Policy Documents on file</h3>
-          <p>Upload a source document to open the catalog.</p>
+          <p>
+            {canUpload
+              ? "Register a source document to open the catalog."
+              : "Ask an administrator to register a Policy Document."}
+          </p>
         </div>
       </div>
     );
@@ -92,9 +128,22 @@ export default function DocumentCatalog({ principal }: DocumentCatalogProps) {
 
   return (
     <div className="catalog-page content-enter">
-      <p className="catalog-scope">
-        {documents.length} document{documents.length === 1 ? "" : "s"} indexed
-      </p>
+      {registerDrawer}
+      <div className="catalog-toolbar">
+        <p className="catalog-scope">
+          {documents.length} document{documents.length === 1 ? "" : "s"} indexed
+        </p>
+        {canUpload ? (
+          <button
+            type="button"
+            className={`document-command${registerDrawerOpen ? " active" : ""}`}
+            aria-expanded={registerDrawerOpen}
+            onClick={() => setRegisterDrawerOpen((current) => !current)}
+          >
+            Register document
+          </button>
+        ) : null}
+      </div>
 
       <ul className="catalog-grid" aria-label="Policy Document catalog">
         {documents.map((document, index) => (

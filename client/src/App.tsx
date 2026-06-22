@@ -97,13 +97,7 @@ const shellSections: readonly ShellSection[] = [
 		id: "policy-versions",
 		label: "Policy Versions",
 		kicker: "Version Ledger",
-		actions: [
-			{
-				label: "Publish Policy Version",
-				allowedRoles: ["admin", "approver"],
-				unavailableBehavior: "disable",
-			},
-		],
+		actions: [],
 		ledger: ["Change summaries explain why a Policy Version was published."],
 	},
 	{
@@ -157,7 +151,6 @@ export default function App() {
 	const [customToken, setCustomToken] = useState("");
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
-	const [policyVersionPublishIntent, setPolicyVersionPublishIntent] = useState(0);
 
 	useEffect(() => {
 		const token = getStoredToken();
@@ -437,13 +430,7 @@ export default function App() {
 										className="action-chip"
 										disabled={!allowed}
 										onClick={() => {
-											if (
-												allowed &&
-												currentSection.id === "policy-versions" &&
-												action.label === "Publish Policy Version"
-											) {
-												setPolicyVersionPublishIntent((current) => current + 1);
-											}
+											// Section-specific actions are handled inside each catalog view.
 										}}
 									>
 										{action.label}
@@ -470,10 +457,7 @@ export default function App() {
 							}
 						/>
 					) : activeSection === "policy-versions" ? (
-						<PolicyVersionCatalog
-							principal={principal}
-							publishIntentToken={policyVersionPublishIntent}
-						/>
+						<PolicyVersionCatalog principal={principal} />
 					) : activeSection === "manual-rules" ? (
 						<ManualRulesPage principal={principal} />
 					) : (
