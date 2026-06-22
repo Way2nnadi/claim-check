@@ -34,7 +34,11 @@ function buildFilters(scope: ScopeFilters): ExtractionRunFilters {
   return filters;
 }
 
-export default function ExtractionRunCatalog() {
+interface ExtractionRunCatalogProps {
+  onOpenRun?: (extractionRunId: string) => void;
+}
+
+export default function ExtractionRunCatalog({ onOpenRun }: ExtractionRunCatalogProps) {
   const [status, setStatus] = useState<CatalogStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
@@ -152,6 +156,7 @@ export default function ExtractionRunCatalog() {
           <ExtractionRunLedger
             runs={runs}
             showDocumentContext
+            onOpenRun={onOpenRun}
             emptyMessage={
               scopeFilterCount > 0
                 ? "No Extraction Runs match the current filters."

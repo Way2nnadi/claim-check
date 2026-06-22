@@ -113,6 +113,59 @@ export function showEmptyStateHint(tab: LifecycleTabId): boolean {
   return tab === "queue" || tab === "all" || tab === "flagged";
 }
 
+export interface ReviewEmptyContext {
+  lifecycleTab: LifecycleTabId;
+  reviews: readonly CandidateRuleReview[];
+  displayedReviews: readonly CandidateRuleReview[];
+  scopeFilterCount: number;
+  extractionRunId: string | null;
+  hasNonDefaultLifecycleFilters: boolean;
+}
+
+export function resolveReviewEmptyMessage(context: ReviewEmptyContext): string {
+  const {
+    lifecycleTab,
+    reviews,
+    displayedReviews,
+    scopeFilterCount,
+    extractionRunId,
+    hasNonDefaultLifecycleFilters,
+  } = context;
+
+  if (scopeFilterCount > 0) {
+    return "No Candidate Rules match the current scope filters.";
+  }
+
+  if (extractionRunId && reviews.length === 0) {
+    return "This Extraction Run produced no Candidate Rules.";
+  }
+
+  if (reviews.length > 0 && displayedReviews.length === 0) {
+    if (lifecycleTab === "queue") {
+      return "No Candidate Rules are waiting in the queue for this scope.";
+    }
+    return emptyMessageForLifecycleTab(lifecycleTab, hasNonDefaultLifecycleFilters);
+  }
+
+  return emptyMessageForLifecycleTab(lifecycleTab, hasNonDefaultLifecycleFilters);
+}
+
+export function resolveReviewEmptyHint(context: ReviewEmptyContext): string | null {
+  if (!showEmptyStateHint(context.lifecycleTab)) {
+    return null;
+  }
+
+  if (context.reviews.length > 0 && context.displayedReviews.length === 0) {
+    return "Rules exist in this scope under other lifecycle tabs — try All to see them.";
+  }
+
+  if (context.scopeFilterCount > 0 || context.extractionRunId) {
+    return "Adjust scope filters or choose Show all rules if you expected to see pending work.";
+  }
+
+  return "Extracted Rules appear here after an Extraction Run completes.";
+}
+
 export function isDefaultCustomSelection(selection: readonly LifecycleState[]): boolean {
   if (selection.length !== REVIEW_QUEUE_LIFECYCLE_STATES.length) {
     return false;

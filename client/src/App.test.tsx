@@ -372,7 +372,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Collapse navigation" })).toBeInTheDocument();
   });
 
-  it("renders the review queue when navigating to Review", async () => {
+  it("renders the review queue when navigating to Review Rules", async () => {
     window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "approver-token");
     vi.stubGlobal(
       "fetch",
@@ -406,9 +406,9 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByRole("navigation", { name: "Primary" });
-    await userEvent.click(screen.getByRole("button", { name: "ReviewApproval Desk" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review RulesApproval Desk" }));
 
-    expect(await screen.findByRole("heading", { name: "Review" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Review Rules" })).toBeInTheDocument();
     expect(
       screen.getByText(/The review queue is empty — no extracted Rules are waiting for triage/),
     ).toBeInTheDocument();

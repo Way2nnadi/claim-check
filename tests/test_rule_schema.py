@@ -63,6 +63,26 @@ def test_extracted_enforceable_quantitative_rule_payload_is_valid() -> None:
     assert rule.exceptions[0].required_evidence == ["manager_approval"]
 
 
+def test_invalid_currency_is_cleared_instead_of_rejected() -> None:
+    payload = build_extracted_rule_payload()
+    payload["applicability"]["currency"] = "100"
+
+    rule = Rule.model_validate(payload)
+
+    assert rule.applicability is not None
+    assert rule.applicability.currency is None
+
+
+def test_short_currency_is_cleared_instead_of_rejected() -> None:
+    payload = build_extracted_rule_payload()
+    payload["applicability"]["currency"] = "US"
+
+    rule = Rule.model_validate(payload)
+
+    assert rule.applicability is not None
+    assert rule.applicability.currency is None
+
+
 def test_manual_guidance_rule_payload_is_valid_without_citation() -> None:
     rule = Rule.model_validate(
         {
@@ -160,10 +180,6 @@ def test_rule_enums_publish_expected_contract_values() -> None:
         (
             lambda payload: payload["citation"].__setitem__("end_char", 500),
             "Citation end_char must be greater than start_char.",
-        ),
-        (
-            lambda payload: payload["applicability"].__setitem__("currency", "US"),
-            "String should have at least 3 characters",
         ),
     ],
 )

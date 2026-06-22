@@ -168,12 +168,12 @@ describe("CandidateRuleDetail", () => {
 
     expect(await screen.findByDisplayValue("Meals are capped at $75 per day.")).toBeInTheDocument();
 
-    await userEvent.clear(screen.getByLabelText("Current statement"));
-    await userEvent.type(screen.getByLabelText("Current statement"), "Meals are capped at $80 per day.");
-    await userEvent.clear(screen.getByLabelText("Current condition value"));
-    await userEvent.type(screen.getByLabelText("Current condition value"), "80");
+    await userEvent.clear(screen.getByLabelText("Statement"));
+    await userEvent.type(screen.getByLabelText("Statement"), "Meals are capped at $80 per day.");
+    await userEvent.clear(screen.getByLabelText("Value"));
+    await userEvent.type(screen.getByLabelText("Value"), "80");
 
-    expect(screen.getAllByText("Changed from extracted").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Was").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: "Save Candidate Rule" }));
 
@@ -198,14 +198,71 @@ describe("CandidateRuleDetail", () => {
     expect(screen.getByText("Candidate Rule moved to in review.")).toBeInTheDocument();
   });
 
-  it("disables save controls for viewers", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => buildReview(),
-      }),
+  it("rejects numeric currency input and hides Was when extraction had no currency", async () => {
+    const review = buildReview({
+      current_rule: {
+        ...buildReview().current_rule,
+        applicability: {
+          aggregation_period: "per_day",
+          unit: "money",
+          currency: null,
+          limit_basis: "per employee",
+        },
+      },
+      extracted_rule: {
+        ...buildReview().extracted_rule,
+        applicability: {
+          aggregation_period: "per_day",
+          unit: "money",
+          currency: null,
+          limit_basis: "per employee",
+        },
+      },
+    });
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/candidate-rules/rule-meals-cap") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => review,
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CandidateRuleDetail
+        candidateRuleId="rule-meals-cap"
+        principal={approverPrincipal}
+        onBack={() => undefined}
+      />,
     );
+
+    const currencyInput = await screen.findByLabelText("Currency");
+    await userEvent.type(currencyInput, "100");
+
+    expect(currencyInput).toHaveValue("");
+    expect(screen.queryByText("Was")).not.toBeInTheDocument();
+  });
+
+  it("disables save controls for viewers", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/candidate-rules/rule-meals-cap") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => buildReview(),
+        });
+      }
+      if (url.startsWith("/api/policy-documents/") && url.endsWith("/sections")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [] }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <CandidateRuleDetail
@@ -250,7 +307,10 @@ describe("CandidateRuleDetail", () => {
     );
 
     await screen.findByDisplayValue("Meals are capped at $75 per day.");
-    await userEvent.selectOptions(screen.getByLabelText("Current enforceability class"), "guidance");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open Enforceability class list" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: "Guidance" }));
     await userEvent.click(screen.getByRole("button", { name: "Save Candidate Rule" }));
 
     expect(

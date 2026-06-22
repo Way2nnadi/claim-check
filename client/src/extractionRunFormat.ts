@@ -12,6 +12,13 @@ export function formatPinningLabel(id: string, version: string): string {
   return `${id}@${version}`;
 }
 
+export function shortenId(value: string, maxLength = 32, visible = 8): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, visible)}…${value.slice(-visible)}`;
+}
+
 const EXTRACTION_ERROR_FALLBACK = "Extraction Run could not be started.";
 
 export function describeExtractionTriggerError(error: unknown): string {

@@ -1,4 +1,6 @@
 from enum import StrEnum
+import re
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -85,8 +87,23 @@ class Scope(BaseModel):
 class Applicability(BaseModel):
     aggregation_period: AggregationPeriod
     unit: str = Field(min_length=1)
-    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    currency: str | None = Field(default=None, min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
     limit_basis: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_currency(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        currency = data.get("currency")
+        if currency is None:
+            return data
+        normalized = str(currency).strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", normalized):
+            return {**data, "currency": None}
+        if normalized != currency:
+            return {**data, "currency": normalized}
+        return data
 
 
 class RuleException(BaseModel):

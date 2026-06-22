@@ -84,6 +84,41 @@ describe("ExtractionRunCatalog", () => {
     expect(screen.getByRole("tab", { name: /Failed/i })).toHaveTextContent("1");
   });
 
+  it("renders an Open button for completed runs with candidate rules", async () => {
+    const onOpenRun = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/policy-documents") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [] }),
+          });
+        }
+        if (url === "/api/extraction-runs") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => sampleRuns,
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<ExtractionRunCatalog onOpenRun={onOpenRun} />);
+
+    const openButton = await screen.findByRole("button", {
+      name: /Review 2 Candidate Rules from extract-expense-v1/i,
+    });
+    expect(openButton).toHaveTextContent("Open");
+    expect(
+      screen.queryByRole("button", { name: /extract-expense-v2-failed/i }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(openButton);
+    expect(onOpenRun).toHaveBeenCalledWith("extract-expense-v1");
+  });
+
   it("filters runs by status tab", async () => {
     vi.stubGlobal(
       "fetch",

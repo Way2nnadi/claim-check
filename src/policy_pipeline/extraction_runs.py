@@ -306,8 +306,26 @@ def _normalize_applicability(
     if draft.applicability is None:
         return None, False
 
+    applicability_payload = draft.applicability.model_dump()
+    currency = applicability_payload.get("currency")
+    if currency is not None:
+        normalized_currency = str(currency).strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", normalized_currency):
+            qa_flags.append(
+                QAFlag(
+                    code=QAFlagCode.INVALID_ENUM,
+                    detail=(
+                        "Candidate Rule contains an invalid currency code: "
+                        f"{currency!r}. Expected a 3-letter ISO code."
+                    ),
+                )
+            )
+            applicability_payload["currency"] = None
+        else:
+            applicability_payload["currency"] = normalized_currency
+
     try:
-        return Applicability.model_validate(draft.applicability.model_dump()), False
+        return Applicability.model_validate(applicability_payload), False
     except ValidationError as exc:
         invalid_enum_error = next(
             (

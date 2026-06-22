@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import {
   ApiError,
   fetchCandidateRule,
@@ -12,12 +12,13 @@ import {
   formatLifecycleState,
   formatQAFlagCode,
   formatQAFlagDomain,
-  formatScopeField,
   lifecycleStateClassName,
   qaFlagDomain,
 } from "./candidateRuleFormat";
+import { formatDocumentTitle } from "./documentFormat";
 import { hasAnyRole } from "./permissions";
 import SectionBrowserDrawer from "./SectionBrowserDrawer";
+import SearchablePicker from "./SearchablePicker";
 import type {
   AggregationPeriod,
   Applicability,
@@ -38,6 +39,7 @@ interface CandidateRuleDetailProps {
   candidateRuleId: string;
   principal: AuthenticatedPrincipal;
   onBack?: () => void;
+  backLabel?: string;
   onReviewChange?: (review: CandidateRuleReview) => void;
 }
 
@@ -79,13 +81,15 @@ interface RuleDraft {
   exceptions: ExceptionDraft[];
 }
 
-interface RedlineFieldProps {
-  currentLabel: string;
+interface ReviewFieldProps {
+  label: string;
   extractedValue: ReactNode;
   changed: boolean;
+  showWasLine?: boolean;
   inputId: string;
   children: ReactNode;
   description?: string;
+  className?: string;
 }
 
 const EDITOR_ROLES = ["admin", "approver"] as const;
@@ -106,36 +110,41 @@ const AGGREGATION_PERIOD_OPTIONS: readonly AggregationPeriod[] = [
 
 const SCOPE_FIELDS: readonly {
   key: keyof ScopeDraft;
-  currentLabel: string;
-  caption: string;
+  label: string;
+  placeholder: string;
 }[] = [
-  { key: "country", currentLabel: "Current scope country", caption: "Country" },
-  {
-    key: "expense_category",
-    currentLabel: "Current scope expense category",
-    caption: "Expense category",
-  },
-  { key: "travel_type", currentLabel: "Current scope travel type", caption: "Travel type" },
-  {
-    key: "employee_group",
-    currentLabel: "Current scope employee group",
-    caption: "Employee group",
-  },
+  { key: "country", label: "Country", placeholder: "Country" },
+  { key: "expense_category", label: "Expense category", placeholder: "Expense category" },
+  { key: "travel_type", label: "Travel type", placeholder: "Travel type" },
+  { key: "employee_group", label: "Employee group", placeholder: "Employee group" },
   {
     key: "effective_start_date",
-    currentLabel: "Current effective start date",
-    caption: "Effective start date",
+    label: "Effective start",
+    placeholder: "YYYY-MM-DD",
   },
   {
     key: "effective_end_date",
-    currentLabel: "Current effective end date",
-    caption: "Effective end date",
+    label: "Effective end",
+    placeholder: "YYYY-MM-DD",
   },
 ];
 
 function normalizeOptionalString(value: string): string | null {
   const normalized = value.trim();
   return normalized === "" ? null : normalized;
+}
+
+function hasExtractedBaseline(value: string | null | undefined): boolean {
+  return value != null && value.trim().length > 0;
+}
+
+function normalizeCurrencyInput(value: string): string {
+  return value.replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 3);
+}
+
+function normalizeCurrencyForSave(value: string): string | null {
+  const normalized = normalizeCurrencyInput(value);
+  return normalized.length === 0 ? null : normalized;
 }
 
 function normalizeRequiredString(value: string): string {
@@ -162,7 +171,7 @@ function createRuleDraft(rule: CandidateRuleValue): RuleDraft {
     applicability: {
       aggregation_period: rule.applicability?.aggregation_period ?? "",
       unit: rule.applicability?.unit ?? "",
-      currency: rule.applicability?.currency ?? "",
+      currency: normalizeCurrencyInput(rule.applicability?.currency ?? ""),
       limit_basis: rule.applicability?.limit_basis ?? "",
     },
     exceptions:
@@ -204,7 +213,7 @@ function buildConditionFromDraft(condition: ConditionDraft): RuleCondition | nul
 
 function buildApplicabilityFromDraft(applicability: ApplicabilityDraft): Applicability | null {
   const unit = normalizeRequiredString(applicability.unit);
-  const currency = normalizeOptionalString(applicability.currency);
+  const currency = normalizeCurrencyForSave(applicability.currency);
   const limit_basis = normalizeOptionalString(applicability.limit_basis);
 
   if (!applicability.aggregation_period && !unit && !currency && !limit_basis) {
@@ -294,6 +303,19 @@ function formatAggregationPeriod(value: AggregationPeriod | "" | null): string {
   return value.replaceAll("_", " ");
 }
 
+const ENFORCEABILITY_PICKER_OPTIONS = ENFORCEABILITY_OPTIONS.map((value) => ({
+  value,
+  label: formatEnforceabilityClass(value),
+}));
+
+const AGGREGATION_PERIOD_PICKER_OPTIONS = [
+  { value: "", label: "Not set" },
+  ...AGGREGATION_PERIOD_OPTIONS.map((value) => ({
+    value,
+    label: formatAggregationPeriod(value),
+  })),
+];
+
 function countDifferences(review: CandidateRuleReview, draft: RuleDraft): number {
   let count = 0;
 
@@ -339,26 +361,26 @@ function countDifferences(review: CandidateRuleReview, draft: RuleDraft): number
   return count;
 }
 
+function normalizeStatement(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function statementsMatch(left: string, right: string): boolean {
+  const normalizedLeft = normalizeStatement(left);
+  const normalizedRight = normalizeStatement(right);
+  return normalizedLeft.length > 0 && normalizedLeft === normalizedRight;
+}
+
+function sectionLocation(section: DocumentSection): string {
+  const path = section.heading_path.length > 0 ? section.heading_path : ["Preamble"];
+  return path.join(" › ");
+}
+
 function shortenId(value: string, visible = 6): string {
   if (value.length <= visible * 2 + 1) {
     return value;
   }
   return `${value.slice(0, visible)}…${value.slice(-visible)}`;
-}
-
-function sectionTitle(section: DocumentSection): string {
-  const path = section.heading_path.length > 0 ? section.heading_path : ["Preamble"];
-  const label = path[path.length - 1];
-  return label.length > 72 ? `${label.slice(0, 71).trimEnd()}…` : label;
-}
-
-function sectionContext(section: DocumentSection): string | null {
-  const path = section.heading_path.length > 0 ? section.heading_path : ["Preamble"];
-  if (path.length <= 1) {
-    return null;
-  }
-  const context = path.slice(0, -1).join(" › ");
-  return context.length > 56 ? `${context.slice(0, 55).trimEnd()}…` : context;
 }
 
 function cleanSourceFragment(text: string): string {
@@ -401,33 +423,28 @@ function splitSectionCitation(section: DocumentSection, citation: Citation): Cit
   };
 }
 
-function RedlineField({
-  currentLabel,
+function ReviewField({
+  label,
   extractedValue,
   changed,
+  showWasLine,
   inputId,
   children,
   description,
-}: RedlineFieldProps) {
+  className,
+}: ReviewFieldProps) {
+  const displayWasLine = showWasLine ?? changed;
+
   return (
-    <div className={`review-redline-field${changed ? " changed" : ""}`}>
-      <div className="review-redline-field-head">
-        <span className="review-redline-title">{currentLabel}</span>
-        <span className={`review-redline-badge${changed ? " changed" : ""}`}>
-          {changed ? "Changed from extracted" : "Matches extracted"}
-        </span>
-      </div>
-      <div className="review-redline-compare">
-        <div className="review-redline-source">
-          <span className="review-redline-caption">Extracted</span>
-          <div className="review-redline-source-value">{extractedValue}</div>
-        </div>
-        <div className="review-redline-current">
-          <label htmlFor={inputId}>{currentLabel}</label>
-          {children}
-          {description ? <p className="review-redline-description">{description}</p> : null}
-        </div>
-      </div>
+    <div className={`review-field${changed ? " changed" : ""}${className ? ` ${className}` : ""}`}>
+      <label htmlFor={inputId}>{label}</label>
+      {children}
+      {displayWasLine ? (
+        <p className="review-field-was">
+          <span className="review-field-was-label">Was</span> {extractedValue}
+        </p>
+      ) : null}
+      {description ? <p className="review-field-description">{description}</p> : null}
     </div>
   );
 }
@@ -436,13 +453,28 @@ interface SourceCitationViewProps {
   section: DocumentSection;
   citation: Citation;
   showFullSection: boolean;
+  suppressHighlight?: boolean;
 }
 
-function SourceCitationView({ section, citation, showFullSection }: SourceCitationViewProps) {
+function SourceCitationView({
+  section,
+  citation,
+  showFullSection,
+  suppressHighlight = false,
+}: SourceCitationViewProps) {
   const split = splitSectionCitation(section, citation);
 
   if (!showFullSection || !split) {
+    if (suppressHighlight) {
+      return null;
+    }
     return <div className="review-source-passage">{citation.quote}</div>;
+  }
+
+  const hasContext = Boolean(split.before || split.after);
+
+  if (suppressHighlight && !hasContext) {
+    return null;
   }
 
   return (
@@ -450,7 +482,7 @@ function SourceCitationView({ section, citation, showFullSection }: SourceCitati
       {split.before ? (
         <p className="review-source-context-muted">{truncateContext(split.before)}</p>
       ) : null}
-      <div className="review-source-passage">{split.highlight}</div>
+      {!suppressHighlight ? <div className="review-source-passage">{split.highlight}</div> : null}
       {split.after ? (
         <p className="review-source-context-muted">{truncateContext(split.after)}</p>
       ) : null}
@@ -458,99 +490,155 @@ function SourceCitationView({ section, citation, showFullSection }: SourceCitati
   );
 }
 
-interface ExtractedRuleSpecProps {
-  rule: CandidateRuleValue;
-  qaFlags: QAFlag[];
-}
-
-function ExtractedRuleSpec({ rule, qaFlags }: ExtractedRuleSpecProps) {
-  const scopeEntries = [
-    formatScopeField("Country", rule.scope.country),
-    formatScopeField("Expense category", rule.scope.expense_category),
-    formatScopeField("Travel type", rule.scope.travel_type),
-    formatScopeField("Employee group", rule.scope.employee_group),
-    formatScopeField("Effective from", rule.scope.effective_start_date),
-    formatScopeField("Effective until", rule.scope.effective_end_date),
-  ].filter((entry): entry is string => entry !== null);
-
-  const applicabilityParts: string[] = [];
-  if (rule.applicability) {
-    applicabilityParts.push(rule.applicability.aggregation_period.replace(/_/g, " "));
-    applicabilityParts.push(rule.applicability.unit);
-    if (rule.applicability.currency) {
-      applicabilityParts.push(rule.applicability.currency);
-    }
-    if (rule.applicability.limit_basis) {
-      applicabilityParts.push(rule.applicability.limit_basis);
-    }
+function QaFlagsBanner({ flags }: { flags: QAFlag[] }) {
+  if (flags.length === 0) {
+    return null;
   }
 
-  const summaryParts = [
-    formatEnforceabilityClass(rule.enforceability_class),
-    ...applicabilityParts,
-  ];
+  return (
+    <aside className="review-qa-banner reveal" aria-label="QA flags">
+      <ul className="review-qa-domain-list">
+        {flags.map((flag) => {
+          const domain = qaFlagDomain(flag.code);
+          return (
+            <li key={`${flag.code}-${flag.detail}`} className={`review-qa-domain-card ${domain}`}>
+              <div className="review-qa-domain-head">
+                <span className="review-qa-domain-label">{formatQAFlagDomain(domain)}</span>
+                <span className="review-qa-code">{formatQAFlagCode(flag.code)}</span>
+              </div>
+              <p>{flag.detail}</p>
+            </li>
+          );
+        })}
+      </ul>
+    </aside>
+  );
+}
 
-  const hasSecondaryDetails = scopeEntries.length > 0 || rule.exceptions.length > 0;
+interface CitationStripProps {
+  citation: Citation;
+  currentStatement: string;
+  sections: DocumentSection[];
+  sectionsStatus: "idle" | "loading" | "ready" | "error";
+  sectionsError: string | null;
+  selectedSection: DocumentSection | null;
+  viewingCitedSection: boolean;
+  showFullSection: boolean;
+  sectionsOpen: boolean;
+  sectionFilter: string;
+  sourceBodyRef: RefObject<HTMLElement | null>;
+  onToggleContext: () => void;
+  onBrowseSections: () => void;
+  onSectionFilterChange: (value: string) => void;
+  onSectionSelect: (sectionId: string) => void;
+  onCloseSections: () => void;
+}
+
+function CitationStrip({
+  citation,
+  currentStatement,
+  sections,
+  sectionsStatus,
+  sectionsError,
+  selectedSection,
+  viewingCitedSection,
+  showFullSection,
+  sectionsOpen,
+  sectionFilter,
+  sourceBodyRef,
+  onToggleContext,
+  onBrowseSections,
+  onSectionFilterChange,
+  onSectionSelect,
+  onCloseSections,
+}: CitationStripProps) {
+  const canBrowse = sections.length > 0;
+  const quoteMatchesStatement = statementsMatch(citation.quote, currentStatement);
+  const locationLabel = selectedSection
+    ? sectionLocation(selectedSection)
+    : formatDocumentTitle(citation.document_id);
+
+  let stripBody: ReactNode = null;
+
+  if (sectionsStatus === "loading") {
+    stripBody = (
+      <>
+        {!quoteMatchesStatement ? (
+          <div className="review-source-passage">{citation.quote}</div>
+        ) : null}
+        <p className="review-citation-status">
+          <span className="catalog-status-rule" aria-hidden="true" />
+          Loading source…
+        </p>
+      </>
+    );
+  } else if (sectionsStatus === "error") {
+    stripBody = (
+      <>
+        {!quoteMatchesStatement ? (
+          <div className="review-source-passage">{citation.quote}</div>
+        ) : null}
+        <p className="review-citation-status error">{sectionsError}</p>
+      </>
+    );
+  } else if (selectedSection && viewingCitedSection) {
+    stripBody = (
+      <SourceCitationView
+        section={selectedSection}
+        citation={citation}
+        showFullSection={showFullSection}
+        suppressHighlight={quoteMatchesStatement}
+      />
+    );
+  } else if (selectedSection) {
+    stripBody = (
+      <div className="review-source-text">{cleanSourceFragment(selectedSection.content)}</div>
+    );
+  } else if (!quoteMatchesStatement) {
+    stripBody = <div className="review-source-passage">{citation.quote}</div>;
+  }
 
   return (
-    <div className="review-extracted-spec">
-      {qaFlags.length > 0 ? (
-        <ul className="review-qa-domain-list">
-          {qaFlags.map((flag) => {
-            const domain = qaFlagDomain(flag.code);
-            return (
-              <li key={`${flag.code}-${flag.detail}`} className={`review-qa-domain-card ${domain}`}>
-                <div className="review-qa-domain-head">
-                  <span className="review-qa-domain-label">{formatQAFlagDomain(domain)}</span>
-                  <span className="review-qa-code">{formatQAFlagCode(flag.code)}</span>
-                </div>
-                <p>{flag.detail}</p>
-              </li>
-            );
-          })}
-        </ul>
+    <section className="review-citation-strip reveal" aria-label="Source citation">
+      <header className="review-citation-strip-head">
+        <div className="review-citation-strip-intro">
+          <span className="review-citation-kicker">Source</span>
+          <p className="review-citation-location">{locationLabel}</p>
+        </div>
+        <div className="review-citation-strip-actions">
+          {viewingCitedSection ? (
+            <button type="button" className="review-source-context-toggle" onClick={onToggleContext}>
+              {showFullSection ? "Passage only" : "More context"}
+            </button>
+          ) : null}
+          {canBrowse ? (
+            <button type="button" className="review-source-browse-toggle" onClick={onBrowseSections}>
+              Browse sections ({sections.length})
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      {stripBody ? (
+        <div ref={sourceBodyRef as RefObject<HTMLDivElement>} className="review-citation-strip-body">
+          {stripBody}
+        </div>
       ) : null}
 
-      <div className="review-extracted-body">
-        <p className="review-extracted-summary">{summaryParts.join(" · ")}</p>
-
-        {rule.condition ? (
-          <div className="review-extracted-row">
-            <span className="review-extracted-label">Condition</span>
-            <code className="review-split-condition">
-              {rule.condition.field} {rule.condition.operator} {rule.condition.value}
-            </code>
-          </div>
-        ) : null}
-
-        {hasSecondaryDetails ? (
-          <details className="review-extracted-details">
-            <summary>Scope & exceptions</summary>
-            {scopeEntries.length > 0 ? (
-              <ul className="review-split-scope-list">
-                {scopeEntries.map((entry) => (
-                  <li key={entry}>{entry}</li>
-                ))}
-              </ul>
-            ) : null}
-            {rule.exceptions.length > 0 ? (
-              <ul className="review-split-exception-list">
-                {rule.exceptions.map((exception) => (
-                  <li key={exception.description}>
-                    <p>{exception.description}</p>
-                    {exception.required_evidence.length > 0 ? (
-                      <p className="review-split-exception-evidence">
-                        Evidence: {exception.required_evidence.join(", ")}
-                      </p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </details>
-        ) : null}
-      </div>
-    </div>
+      {canBrowse ? (
+        <SectionBrowserDrawer
+          open={sectionsOpen}
+          documentId={citation.document_id}
+          sections={sections}
+          filter={sectionFilter}
+          selectedSectionId={selectedSection?.section_id ?? citation.section_id}
+          citedSectionId={citation.section_id}
+          onFilterChange={onSectionFilterChange}
+          onSelect={onSectionSelect}
+          onClose={onCloseSections}
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -558,6 +646,7 @@ export default function CandidateRuleDetail({
   candidateRuleId,
   principal,
   onBack,
+  backLabel = "Clear selection",
   onReviewChange,
 }: CandidateRuleDetailProps) {
   const [status, setStatus] = useState<DetailStatus>("loading");
@@ -704,7 +793,7 @@ export default function CandidateRuleDetail({
       <div className="review-detail content-enter">
         <p className="catalog-status compact">
           <span className="catalog-status-rule" aria-hidden="true" />
-          Opening Candidate Rule edit desk…
+          Opening Candidate Rule…
         </p>
       </div>
     );
@@ -715,12 +804,15 @@ export default function CandidateRuleDetail({
       <div className="review-detail content-enter">
         {onBack ? (
           <button type="button" className="detail-back" onClick={onBack}>
-            Clear selection
+            {backLabel}
           </button>
         ) : null}
         <div className="review-not-found reveal">
-          <span className="folio">Candidate Rule edit desk · missing</span>
-          <p>No Candidate Rule exists for <code>{candidateRuleId}</code>.</p>
+          <span className="folio">Signal lost</span>
+          <h4>Candidate Rule not found</h4>
+          <p>
+            No Candidate Rule exists for <code>{candidateRuleId}</code>.
+          </p>
         </div>
       </div>
     );
@@ -731,7 +823,7 @@ export default function CandidateRuleDetail({
       <div className="review-detail content-enter">
         {onBack ? (
           <button type="button" className="detail-back" onClick={onBack}>
-            Clear selection
+            {backLabel}
           </button>
         ) : null}
         <p className="error-banner">{errorMessage}</p>
@@ -746,198 +838,59 @@ export default function CandidateRuleDetail({
   const saveDisabled = !canEdit || isSaving || unsavedChangeCount === 0;
   const hasCommittedEdits = review.committed_rule !== null;
 
+  const pageTitle = citation
+    ? formatDocumentTitle(citation.document_id)
+    : rule.scope.expense_category ?? review.candidate_rule_id;
+  const showEnforceabilityHint =
+    draft.enforceability_class !== "enforceable" ||
+    draft.enforceability_class !== review.extracted_rule.enforceability_class;
+
   return (
     <div className="review-detail content-enter">
       <header className="review-detail-head">
         <div className="review-detail-head-row">
-          <div className="review-detail-intro">
-            <span className="folio">Candidate Rule edit desk</span>
-            <h1 className="review-verify-statement">{draft.statement || rule.statement}</h1>
-            <details className="review-verify-meta">
-              <summary>Rule details</summary>
-              <dl className="review-verify-meta-grid">
-                <div>
-                  <dt>Rule ID</dt>
-                  <dd>{review.candidate_rule_id}</dd>
-                </div>
-                {citation ? (
-                  <>
-                    <div>
-                      <dt>Document</dt>
-                      <dd>{citation.document_id}</dd>
-                    </div>
-                    <div>
-                      <dt>Version</dt>
-                      <dd>{shortenId(citation.document_version_id)}</dd>
-                    </div>
-                    <div>
-                      <dt>Citation span</dt>
-                      <dd>
-                        chars {citation.start_char}–{citation.end_char}
-                      </dd>
-                    </div>
-                  </>
-                ) : null}
-              </dl>
-            </details>
-          </div>
-          <div className="review-detail-badges">
+          {onBack ? (
+            <button type="button" className="detail-back" onClick={onBack}>
+              {backLabel}
+            </button>
+          ) : (
+            <span />
+          )}
+          {differenceCount > 0 || unsavedChangeCount > 0 ? (
+            <p className="review-edit-ledger">
+              {differenceCount} divergent · {unsavedChangeCount} unsaved
+            </p>
+          ) : null}
+        </div>
+        <div className="review-detail-intro">
+          <h3>{pageTitle}</h3>
+        </div>
+        <div className="review-rule-meta">
+          <div className="review-rule-meta-head">
+            <code>{review.candidate_rule_id}</code>
             <span className={`review-lifecycle ${lifecycleClass}`}>
               {formatLifecycleState(review.lifecycle_state)}
-            </span>
-            <span className={`review-enforceability ${rule.enforceability_class}`}>
-              {formatEnforceabilityClass(rule.enforceability_class)}
             </span>
             <span
               className={`review-qa-count${review.qa_flags.length > 0 ? " flagged" : " clear"}`}
             >
-              {review.qa_flags.length} QA flag{review.qa_flags.length === 1 ? "" : "s"}
+              {review.qa_flags.length} QA
             </span>
           </div>
         </div>
-
-        <div className="review-detail-toolbar">
-          {onBack ? (
-            <button type="button" className="detail-back inline" onClick={onBack}>
-              Clear selection
-            </button>
-          ) : null}
-          <p className="review-edit-ledger">
-            {differenceCount} field{differenceCount === 1 ? "" : "s"} diverge from extracted values.
-          </p>
-          <p className="review-edit-ledger">
-            {unsavedChangeCount} unsaved change{unsavedChangeCount === 1 ? "" : "s"}.
-          </p>
-        </div>
       </header>
 
+      <div className="review-detail-body">
       {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
       {saveMessage ? <p className="review-save-banner">{saveMessage}</p> : null}
 
-      <div className="review-split-panes review-verify-panes">
-        <section
-          className="review-split-source reveal"
-          aria-label="Source document"
-          style={{ "--reveal-delay": "40ms" } as CSSProperties}
-        >
-          {!citation ? (
-            <div className="review-source-empty">
-              <div className="review-source-empty-icon" aria-hidden="true">
-                <span />
-              </div>
-              <p className="review-source-empty-title">No source linked</p>
-              <p className="review-source-empty-body">
-                This rule has no policy excerpt attached, so there is nothing to compare against.
-              </p>
-            </div>
-          ) : (
-            <>
-              <header className="review-source-compact-head">
-                <div className="review-source-compact-top">
-                  <p className="review-source-doc">{citation.document_id}</p>
-                  {viewingCitedSection ? (
-                    <button
-                      type="button"
-                      className="review-source-context-toggle"
-                      onClick={() => setShowFullSection((current) => !current)}
-                    >
-                      {showFullSection ? "Passage only" : "More context"}
-                    </button>
-                  ) : null}
-                </div>
-                {selectedSection ? (
-                  <>
-                    <p className="review-source-section">{sectionTitle(selectedSection)}</p>
-                    {sectionContext(selectedSection) ? (
-                      <p className="review-source-breadcrumb">{sectionContext(selectedSection)}</p>
-                    ) : null}
-                  </>
-                ) : null}
-              </header>
+      <div className="review-detail-workspace">
+        <QaFlagsBanner flags={review.qa_flags} />
 
-              {sectionsStatus === "loading" ? (
-                <div className="review-source-loading">
-                  <span className="catalog-status-rule" aria-hidden="true" />
-                  <p>Loading source…</p>
-                </div>
-              ) : sectionsStatus === "error" ? (
-                <div className="review-source-loading">
-                  <p className="error-banner">{sectionsError}</p>
-                </div>
-              ) : sections.length === 0 ? (
-                <div className="review-source-empty compact">
-                  <p className="review-source-empty-title">No sections found</p>
-                  <p className="review-source-empty-body">
-                    This document version has no parsed sections yet.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <article
-                    ref={sourceBodyRef}
-                    className="review-source-preview"
-                    aria-label="Section content"
-                  >
-                    {selectedSection ? (
-                      viewingCitedSection ? (
-                        <SourceCitationView
-                          section={selectedSection}
-                          citation={citation}
-                          showFullSection={showFullSection}
-                        />
-                      ) : (
-                        <div className="review-source-text">
-                          {cleanSourceFragment(selectedSection.content)}
-                        </div>
-                      )
-                    ) : (
-                      <p className="review-split-empty">Choose a section to read the source text.</p>
-                    )}
-                  </article>
-
-                  <footer className="review-source-foot">
-                    <button
-                      type="button"
-                      className="review-source-browse-toggle"
-                      onClick={() => setSectionsOpen(true)}
-                    >
-                      Browse sections ({sections.length})
-                    </button>
-                  </footer>
-
-                  <SectionBrowserDrawer
-                    open={sectionsOpen}
-                    documentId={citation.document_id}
-                    sections={sections}
-                    filter={sectionFilter}
-                    selectedSectionId={selectedSectionId}
-                    citedSectionId={citation.section_id}
-                    onFilterChange={setSectionFilter}
-                    onSelect={handleSectionSelect}
-                    onClose={() => setSectionsOpen(false)}
-                  />
-                </>
-              )}
-            </>
-          )}
-        </section>
-
-        <section
-          className="review-split-rule reveal"
-          aria-label="Extracted rule"
-          style={{ "--reveal-delay": "80ms" } as CSSProperties}
-        >
-          <h2 className="review-extracted-heading">Extracted rule</h2>
-          <ExtractedRuleSpec rule={review.extracted_rule} qaFlags={review.qa_flags} />
-        </section>
-      </div>
-
-      <div className="review-detail-stage">
         <form className="review-edit-form" onSubmit={handleSave}>
           <section className="review-detail-panel reveal">
-            <h4>Rule body</h4>
-            <RedlineField
-              currentLabel="Current statement"
+            <ReviewField
+              label="Statement"
               extractedValue={review.extracted_rule.statement}
               changed={draft.statement.trim() !== review.extracted_rule.statement}
               inputId="candidate-rule-statement"
@@ -954,49 +907,82 @@ export default function CandidateRuleDetail({
                   })
                 }
               />
-            </RedlineField>
+            </ReviewField>
 
-            <RedlineField
-              currentLabel="Current enforceability class"
+            <ReviewField
+              label="Enforceability"
               extractedValue={formatEnforceabilityClass(review.extracted_rule.enforceability_class)}
               changed={draft.enforceability_class !== review.extracted_rule.enforceability_class}
               inputId="candidate-rule-enforceability"
-              description="If you switch away from enforceable, clear the machine-checkable condition before saving."
+              description={
+                showEnforceabilityHint
+                  ? "If you switch away from enforceable, clear the machine-checkable condition before saving."
+                  : undefined
+              }
             >
-              <select
-                id="candidate-rule-enforceability"
+              <SearchablePicker
+                label="Enforceability class"
+                inputId="candidate-rule-enforceability"
+                hideLabel
                 value={draft.enforceability_class}
+                options={ENFORCEABILITY_PICKER_OPTIONS}
+                placeholder="Select enforceability class"
+                emptyMessage="No matching classes"
                 disabled={!canEdit || isSaving}
-                onChange={(event) =>
+                mono
+                showAllOnOpen
+                onChange={(nextValue) =>
                   updateDraftState({
                     ...draft,
-                    enforceability_class: event.target.value as EnforceabilityClass,
+                    enforceability_class: nextValue as EnforceabilityClass,
                   })
                 }
-              >
-                {ENFORCEABILITY_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {formatEnforceabilityClass(value)}
-                  </option>
-                ))}
-              </select>
-            </RedlineField>
+              />
+            </ReviewField>
           </section>
+
+          {citation ? (
+            <CitationStrip
+              citation={citation}
+              currentStatement={draft.statement}
+              sections={sections}
+              sectionsStatus={sectionsStatus}
+              sectionsError={sectionsError}
+              selectedSection={selectedSection}
+              viewingCitedSection={viewingCitedSection}
+              showFullSection={showFullSection}
+              sectionsOpen={sectionsOpen}
+              sectionFilter={sectionFilter}
+              sourceBodyRef={sourceBodyRef}
+              onToggleContext={() => setShowFullSection((current) => !current)}
+              onBrowseSections={() => setSectionsOpen(true)}
+              onSectionFilterChange={setSectionFilter}
+              onSectionSelect={handleSectionSelect}
+              onCloseSections={() => setSectionsOpen(false)}
+            />
+          ) : (
+            <p className="review-citation-empty reveal">No source linked for this rule.</p>
+          )}
 
           <section
             className="review-detail-panel reveal"
             style={{ "--reveal-delay": "40ms" } as CSSProperties}
           >
             <h4>Scope</h4>
-            <div className="review-redline-grid">
+            <div className="review-field-grid cols-2">
               {SCOPE_FIELDS.map((field) => (
-                <RedlineField
+                <ReviewField
                   key={field.key}
-                  currentLabel={field.currentLabel}
+                  label={field.label}
                   extractedValue={displayValue(review.extracted_rule.scope[field.key])}
                   changed={
                     normalizeOptionalString(draft.scope[field.key]) !==
                     review.extracted_rule.scope[field.key]
+                  }
+                  showWasLine={
+                    normalizeOptionalString(draft.scope[field.key]) !==
+                      review.extracted_rule.scope[field.key] &&
+                    hasExtractedBaseline(review.extracted_rule.scope[field.key])
                   }
                   inputId={`candidate-rule-${field.key}`}
                 >
@@ -1005,7 +991,7 @@ export default function CandidateRuleDetail({
                     value={draft.scope[field.key]}
                     disabled={!canEdit || isSaving}
                     spellCheck={false}
-                    placeholder={field.caption}
+                    placeholder={field.placeholder}
                     onChange={(event) =>
                       updateDraftState({
                         ...draft,
@@ -1016,7 +1002,7 @@ export default function CandidateRuleDetail({
                       })
                     }
                   />
-                </RedlineField>
+                </ReviewField>
               ))}
             </div>
           </section>
@@ -1026,11 +1012,15 @@ export default function CandidateRuleDetail({
             style={{ "--reveal-delay": "80ms" } as CSSProperties}
           >
             <h4>Machine-checkable shape</h4>
-            <div className="review-redline-grid">
-              <RedlineField
-                currentLabel="Current condition field"
+            <div className="review-field-grid cols-3 review-condition-row">
+              <ReviewField
+                label="Field"
                 extractedValue={displayValue(extractedCondition?.field)}
                 changed={draft.condition.field.trim() !== (extractedCondition?.field ?? "")}
+                showWasLine={
+                  draft.condition.field.trim() !== (extractedCondition?.field ?? "") &&
+                  hasExtractedBaseline(extractedCondition?.field)
+                }
                 inputId="candidate-rule-condition-field"
               >
                 <input
@@ -1049,12 +1039,16 @@ export default function CandidateRuleDetail({
                     })
                   }
                 />
-              </RedlineField>
+              </ReviewField>
 
-              <RedlineField
-                currentLabel="Current condition operator"
+              <ReviewField
+                label="Operator"
                 extractedValue={displayValue(extractedCondition?.operator)}
                 changed={draft.condition.operator.trim() !== (extractedCondition?.operator ?? "")}
+                showWasLine={
+                  draft.condition.operator.trim() !== (extractedCondition?.operator ?? "") &&
+                  hasExtractedBaseline(extractedCondition?.operator)
+                }
                 inputId="candidate-rule-condition-operator"
               >
                 <input
@@ -1073,12 +1067,16 @@ export default function CandidateRuleDetail({
                     })
                   }
                 />
-              </RedlineField>
+              </ReviewField>
 
-              <RedlineField
-                currentLabel="Current condition value"
+              <ReviewField
+                label="Value"
                 extractedValue={displayValue(extractedCondition?.value)}
                 changed={draft.condition.value.trim() !== (extractedCondition?.value ?? "")}
+                showWasLine={
+                  draft.condition.value.trim() !== (extractedCondition?.value ?? "") &&
+                  hasExtractedBaseline(extractedCondition?.value)
+                }
                 inputId="candidate-rule-condition-value"
               >
                 <input
@@ -1097,44 +1095,55 @@ export default function CandidateRuleDetail({
                     })
                   }
                 />
-              </RedlineField>
+              </ReviewField>
+            </div>
 
-              <RedlineField
-                currentLabel="Current aggregation period"
+            <div className="review-field-grid cols-2 review-applicability-grid">
+              <ReviewField
+                label="Aggregation period"
                 extractedValue={formatAggregationPeriod(extractedApplicability?.aggregation_period ?? null)}
                 changed={
                   draft.applicability.aggregation_period !==
                   (extractedApplicability?.aggregation_period ?? "")
                 }
+                showWasLine={
+                  draft.applicability.aggregation_period !==
+                    (extractedApplicability?.aggregation_period ?? "") &&
+                  hasExtractedBaseline(extractedApplicability?.aggregation_period)
+                }
                 inputId="candidate-rule-aggregation-period"
               >
-                <select
-                  id="candidate-rule-aggregation-period"
+                <SearchablePicker
+                  label="Aggregation period"
+                  inputId="candidate-rule-aggregation-period"
+                  hideLabel
                   value={draft.applicability.aggregation_period}
+                  options={AGGREGATION_PERIOD_PICKER_OPTIONS}
+                  placeholder="Select aggregation period"
+                  emptyMessage="No matching periods"
                   disabled={!canEdit || isSaving}
-                  onChange={(event) =>
+                  mono
+                  showAllOnOpen
+                  onChange={(nextValue) =>
                     updateDraftState({
                       ...draft,
                       applicability: {
                         ...draft.applicability,
-                        aggregation_period: event.target.value as AggregationPeriod | "",
+                        aggregation_period: nextValue as AggregationPeriod | "",
                       },
                     })
                   }
-                >
-                  <option value="">Not set</option>
-                  {AGGREGATION_PERIOD_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {formatAggregationPeriod(value)}
-                    </option>
-                  ))}
-                </select>
-              </RedlineField>
+                />
+              </ReviewField>
 
-              <RedlineField
-                currentLabel="Current applicability unit"
+              <ReviewField
+                label="Unit"
                 extractedValue={displayValue(extractedApplicability?.unit)}
                 changed={draft.applicability.unit.trim() !== (extractedApplicability?.unit ?? "")}
+                showWasLine={
+                  draft.applicability.unit.trim() !== (extractedApplicability?.unit ?? "") &&
+                  hasExtractedBaseline(extractedApplicability?.unit)
+                }
                 inputId="candidate-rule-applicability-unit"
               >
                 <input
@@ -1153,16 +1162,22 @@ export default function CandidateRuleDetail({
                     })
                   }
                 />
-              </RedlineField>
+              </ReviewField>
 
-              <RedlineField
-                currentLabel="Current applicability currency"
+              <ReviewField
+                label="Currency"
                 extractedValue={displayValue(extractedApplicability?.currency)}
                 changed={
-                  normalizeOptionalString(draft.applicability.currency) !==
+                  normalizeCurrencyForSave(draft.applicability.currency) !==
                   extractedApplicability?.currency
                 }
+                showWasLine={
+                  normalizeCurrencyForSave(draft.applicability.currency) !==
+                    extractedApplicability?.currency &&
+                  hasExtractedBaseline(extractedApplicability?.currency)
+                }
                 inputId="candidate-rule-applicability-currency"
+                description="3-letter ISO code (e.g. USD)."
               >
                 <input
                   id="candidate-rule-applicability-currency"
@@ -1170,24 +1185,31 @@ export default function CandidateRuleDetail({
                   disabled={!canEdit || isSaving}
                   spellCheck={false}
                   placeholder="USD"
+                  maxLength={3}
+                  autoCapitalize="characters"
                   onChange={(event) =>
                     updateDraftState({
                       ...draft,
                       applicability: {
                         ...draft.applicability,
-                        currency: event.target.value,
+                        currency: normalizeCurrencyInput(event.target.value),
                       },
                     })
                   }
                 />
-              </RedlineField>
+              </ReviewField>
 
-              <RedlineField
-                currentLabel="Current applicability limit basis"
+              <ReviewField
+                label="Limit basis"
                 extractedValue={displayValue(extractedApplicability?.limit_basis)}
                 changed={
                   normalizeOptionalString(draft.applicability.limit_basis) !==
                   extractedApplicability?.limit_basis
+                }
+                showWasLine={
+                  normalizeOptionalString(draft.applicability.limit_basis) !==
+                    extractedApplicability?.limit_basis &&
+                  hasExtractedBaseline(extractedApplicability?.limit_basis)
                 }
                 inputId="candidate-rule-applicability-limit-basis"
               >
@@ -1207,130 +1229,7 @@ export default function CandidateRuleDetail({
                     })
                   }
                 />
-              </RedlineField>
-            </div>
-          </section>
-
-          <section
-            className="review-detail-panel reveal"
-            style={{ "--reveal-delay": "120ms" } as CSSProperties}
-          >
-            <div className="review-detail-section-head">
-              <h4>Exceptions</h4>
-              <button
-                type="button"
-                className="review-secondary-button"
-                disabled={!canEdit || isSaving}
-                onClick={() =>
-                  updateDraftState({
-                    ...draft,
-                    exceptions: [...draft.exceptions, { description: "", required_evidence: "" }],
-                  })
-                }
-              >
-                Add exception
-              </button>
-            </div>
-
-            <div className="review-exceptions">
-              {draft.exceptions.map((exception, index) => {
-                const extractedException = review.extracted_rule.exceptions[index];
-                const changed = !areEqual(
-                  buildExceptionsFromDraft([exception])[0] ?? null,
-                  extractedException ?? null,
-                );
-
-                return (
-                  <div
-                    key={`${review.candidate_rule_id}-exception-${index}`}
-                    className={`review-exception-card${changed ? " changed" : ""}`}
-                  >
-                    <div className="review-redline-field-head">
-                      <span className="review-redline-title">
-                        Exception {index + 1}
-                      </span>
-                      <span className={`review-redline-badge${changed ? " changed" : ""}`}>
-                        {changed ? "Changed from extracted" : "Matches extracted"}
-                      </span>
-                    </div>
-
-                    <div className="review-exception-grid">
-                      <div className="review-redline-source">
-                        <span className="review-redline-caption">Extracted</span>
-                        <div className="review-redline-source-value">
-                          <p>{displayValue(extractedException?.description)}</p>
-                          <p className="review-exception-evidence">
-                            {extractedException?.required_evidence.length
-                              ? extractedException.required_evidence.join(", ")
-                              : "No required evidence"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="review-redline-current">
-                        <label htmlFor={`candidate-rule-exception-description-${index}`}>
-                          Current exception description
-                        </label>
-                        <textarea
-                          id={`candidate-rule-exception-description-${index}`}
-                          rows={3}
-                          value={exception.description}
-                          disabled={!canEdit || isSaving}
-                          onChange={(event) =>
-                            updateDraftState({
-                              ...draft,
-                              exceptions: draft.exceptions.map((item, itemIndex) =>
-                                itemIndex === index
-                                  ? { ...item, description: event.target.value }
-                                  : item,
-                              ),
-                            })
-                          }
-                        />
-
-                        <label htmlFor={`candidate-rule-exception-evidence-${index}`}>
-                          Current required evidence
-                        </label>
-                        <textarea
-                          id={`candidate-rule-exception-evidence-${index}`}
-                          rows={3}
-                          value={exception.required_evidence}
-                          disabled={!canEdit || isSaving}
-                          placeholder="One evidence item per line"
-                          onChange={(event) =>
-                            updateDraftState({
-                              ...draft,
-                              exceptions: draft.exceptions.map((item, itemIndex) =>
-                                itemIndex === index
-                                  ? { ...item, required_evidence: event.target.value }
-                                  : item,
-                              ),
-                            })
-                          }
-                        />
-
-                        <div className="review-exception-actions">
-                          <button
-                            type="button"
-                            className="review-secondary-button"
-                            disabled={!canEdit || isSaving || draft.exceptions.length === 1}
-                            onClick={() =>
-                              updateDraftState({
-                                ...draft,
-                                exceptions: draft.exceptions.filter(
-                                  (_, itemIndex) => itemIndex !== index,
-                                ),
-                              })
-                            }
-                          >
-                            Remove exception
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              </ReviewField>
             </div>
           </section>
 
@@ -1352,95 +1251,59 @@ export default function CandidateRuleDetail({
               {isSaving ? "Saving…" : "Save Candidate Rule"}
             </button>
           </footer>
-        </form>
 
-        <aside className="review-detail-rail">
-          <section className="review-detail-panel reveal" style={{ "--reveal-delay": "30ms" } as CSSProperties}>
-            <h4>Provenance</h4>
-            <dl className="review-detail-grid">
-              <div>
-                <dt>Extraction run</dt>
-                <dd>{rule.origin.extraction_run_id ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Principal</dt>
-                <dd>{principal.subject}</dd>
-              </div>
-              {citation ? (
-                <>
-                  <div>
-                    <dt>Document</dt>
-                    <dd>{citation.document_id}</dd>
-                  </div>
-                  <div>
-                    <dt>Version</dt>
-                    <dd>{citation.document_version_id}</dd>
+          <details className="review-detail-meta reveal" style={{ "--reveal-delay": "180ms" } as CSSProperties}>
+            <summary>Audit & provenance</summary>
+            <div className="review-detail-meta-body">
+              <dl className="review-detail-grid compact">
+                <div>
+                  <dt>Extraction run</dt>
+                  <dd>{rule.origin.extraction_run_id ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>Principal</dt>
+                  <dd>{principal.subject}</dd>
+                </div>
+                {citation ? (
+                  <>
+                    <div>
+                      <dt>Document</dt>
+                      <dd>{citation.document_id}</dd>
+                    </div>
+                    <div>
+                      <dt>Version</dt>
+                      <dd>{shortenId(citation.document_version_id)}</dd>
+                    </div>
+                    <div className="review-detail-span">
+                      <dt>Citation span</dt>
+                      <dd>
+                        {citation.section_id} · chars {citation.start_char}–{citation.end_char}
+                      </dd>
+                    </div>
+                  </>
+                ) : null}
+              </dl>
+              <p className="review-detail-note">
+                {hasCommittedEdits
+                  ? "Committed edits remain separate from the extracted Candidate Rule for auditability."
+                  : "No committed edits yet. Saving will preserve the extracted Rule and create a reviewed value set."}
+              </p>
+              {hasCommittedEdits ? (
+                <dl className="review-detail-grid compact">
+                  <div className="review-detail-span">
+                    <dt>Extracted statement</dt>
+                    <dd>{review.extracted_rule.statement}</dd>
                   </div>
                   <div className="review-detail-span">
-                    <dt>Citation</dt>
-                    <dd>
-                      <blockquote className="review-citation-quote">
-                        {citation.quote}
-                      </blockquote>
-                      <p className="review-citation-meta">
-                        {citation.section_id} · chars{" "}
-                        {citation.start_char}–{citation.end_char}
-                      </p>
-                    </dd>
+                    <dt>Current statement</dt>
+                    <dd>{rule.statement}</dd>
                   </div>
-                </>
-              ) : (
-                <div className="review-detail-span">
-                  <dt>Citation</dt>
-                  <dd>None attached</dd>
-                </div>
-              )}
-            </dl>
-          </section>
-
-          <section
-            className="review-detail-panel reveal"
-            style={{ "--reveal-delay": "60ms" } as CSSProperties}
-          >
-            <h4>QA Flags</h4>
-            {review.qa_flags.length === 0 ? (
-              <p className="review-detail-empty">No QA Flags recorded for this Candidate Rule.</p>
-            ) : (
-              <ul className="review-qa-list">
-                {review.qa_flags.map((flag) => (
-                  <li key={`${flag.code}-${flag.detail}`}>
-                    <span className="review-qa-code">{formatQAFlagCode(flag.code)}</span>
-                    <p>{flag.detail}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section
-            className="review-detail-panel reveal"
-            style={{ "--reveal-delay": "90ms" } as CSSProperties}
-          >
-            <h4>Review lineage</h4>
-            <p className="review-detail-note">
-              {hasCommittedEdits
-                ? "Committed edits remain separate from the extracted Candidate Rule for auditability."
-                : "No committed edits yet. Saving will preserve the extracted Rule and create a reviewed value set."}
-            </p>
-            {hasCommittedEdits ? (
-              <dl className="review-detail-grid">
-                <div className="review-detail-span">
-                  <dt>Extracted statement</dt>
-                  <dd>{review.extracted_rule.statement}</dd>
-                </div>
-                <div className="review-detail-span">
-                  <dt>Current statement</dt>
-                  <dd>{rule.statement}</dd>
-                </div>
-              </dl>
-            ) : null}
-          </section>
-        </aside>
+                </dl>
+              ) : null}
+            </div>
+          </details>
+        </form>
+      </div>
       </div>
     </div>
   );

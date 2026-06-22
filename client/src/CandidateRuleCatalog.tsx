@@ -1,401 +1,435 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { fetchCandidateRules, fetchPolicyDocuments } from "./api";
+import {
+	fetchCandidateRules,
+	fetchExtractionRuns,
+	fetchPolicyDocuments,
+} from "./api";
 import CandidateRuleDetail from "./CandidateRuleDetail";
 import CandidateRuleLedger from "./CandidateRuleLedger";
 import {
-  ALL_LIFECYCLE_STATES,
-  LIFECYCLE_TABS,
-  REVIEW_QUEUE_LIFECYCLE_STATES,
-  describeCandidateRuleError,
-  emptyMessageForLifecycleTab,
-  filterReviewsForTab,
-  formatLifecycleState,
-  isDefaultCustomSelection,
-  showEmptyStateHint,
-  type LifecycleTabId,
+	ALL_LIFECYCLE_STATES,
+	LIFECYCLE_TABS,
+	REVIEW_QUEUE_LIFECYCLE_STATES,
+	describeCandidateRuleError,
+	filterReviewsForTab,
+	formatLifecycleState,
+	isDefaultCustomSelection,
+	resolveReviewEmptyHint,
+	resolveReviewEmptyMessage,
+	type LifecycleTabId,
 } from "./candidateRuleFormat";
 import DocumentFilterPicker from "./DocumentFilterPicker";
+import { shortenId } from "./extractionRunFormat";
 import type {
-  AuthenticatedPrincipal,
-  CandidateRuleFilters,
-  CandidateRuleReview,
-  LifecycleState,
-  PolicyDocumentSummary,
+	AuthenticatedPrincipal,
+	CandidateRuleFilters,
+	CandidateRuleReview,
+	ExtractionRun,
+	LifecycleState,
+	PolicyDocumentSummary,
 } from "./types";
 
 interface CandidateRuleCatalogProps {
-  principal: AuthenticatedPrincipal;
+	principal: AuthenticatedPrincipal;
+	extractionRunId?: string | null;
+	onClearExtractionRunScope?: () => void;
 }
 
 type CatalogStatus = "loading" | "ready" | "error";
 
-interface ScopeFilters {
-  documentId: string;
-  documentVersionId: string;
-  extractionRunId: string;
+type ReviewView =
+	| { screen: "rules" }
+	| { screen: "detail"; candidateRuleId: string };
+
+interface RuleScopeFilters {
+	documentId: string;
+	documentVersionId: string;
+}
+
+function buildRuleFilters(
+	scope: RuleScopeFilters,
+	extractionRunId?: string | null,
+): CandidateRuleFilters {
+	const filters: CandidateRuleFilters = {};
+	const trimmedDocumentId = scope.documentId.trim();
+	const trimmedVersionId = scope.documentVersionId.trim();
+
+	if (trimmedDocumentId) {
+		filters.documentId = trimmedDocumentId;
+	}
+	if (trimmedVersionId) {
+		filters.documentVersionId = trimmedVersionId;
+	}
+	if (extractionRunId) {
+		filters.extractionRunId = extractionRunId;
+	}
+
+	return filters;
 }
 
 function countScopeFilters(filters: CandidateRuleFilters): number {
-  return (
-    Number(Boolean(filters.documentId)) +
-    Number(Boolean(filters.documentVersionId)) +
-    Number(Boolean(filters.extractionRunId))
-  );
+	return (
+		Number(Boolean(filters.documentId)) +
+		Number(Boolean(filters.documentVersionId))
+	);
 }
 
-function buildScopeFilters(scope: ScopeFilters): CandidateRuleFilters {
-  const filters: CandidateRuleFilters = {};
-  const trimmedDocumentId = scope.documentId.trim();
-  const trimmedVersionId = scope.documentVersionId.trim();
-  const trimmedExtractionRunId = scope.extractionRunId.trim();
+export default function CandidateRuleCatalog({
+	principal,
+	extractionRunId = null,
+	onClearExtractionRunScope,
+}: CandidateRuleCatalogProps) {
+	const [view, setView] = useState<ReviewView>({ screen: "rules" });
+	const [rulesStatus, setRulesStatus] = useState<CatalogStatus>("loading");
+	const [errorMessage, setErrorMessage] = useState<string | null>(null);
+	const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
+	const [activeRun, setActiveRun] = useState<ExtractionRun | null>(null);
+	const [reviews, setReviews] = useState<CandidateRuleReview[]>([]);
+	const [lifecycleTab, setLifecycleTab] = useState<LifecycleTabId>("queue");
+	const [customLifecycleSelection, setCustomLifecycleSelection] = useState<
+		Set<LifecycleState>
+	>(() => new Set(REVIEW_QUEUE_LIFECYCLE_STATES));
+	const [scopeDraft, setScopeDraft] = useState<RuleScopeFilters>({
+		documentId: "",
+		documentVersionId: "",
+	});
+	const [appliedScopeFilters, setAppliedScopeFilters] =
+		useState<CandidateRuleFilters>({});
 
-  if (trimmedDocumentId) {
-    filters.documentId = trimmedDocumentId;
-  }
-  if (trimmedVersionId) {
-    filters.documentVersionId = trimmedVersionId;
-  }
-  if (trimmedExtractionRunId) {
-    filters.extractionRunId = trimmedExtractionRunId;
-  }
+	const loadDocuments = useCallback(async (): Promise<void> => {
+		try {
+			const documentsResponse = await fetchPolicyDocuments();
+			setDocuments(documentsResponse.items);
+		} catch {
+			// Scope picker degrades gracefully when documents cannot be loaded.
+		}
+	}, []);
 
-  return filters;
-}
+	const loadRules = useCallback(
+		async (scopeFilters: CandidateRuleFilters): Promise<void> => {
+			setRulesStatus("loading");
+			setErrorMessage(null);
 
-export default function CandidateRuleCatalog({ principal }: CandidateRuleCatalogProps) {
-  const [status, setStatus] = useState<CatalogStatus>("loading");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [documents, setDocuments] = useState<PolicyDocumentSummary[]>([]);
-  const [reviews, setReviews] = useState<CandidateRuleReview[]>([]);
-  const [selectedCandidateRuleId, setSelectedCandidateRuleId] = useState<string | null>(null);
-  const [selectionDismissed, setSelectionDismissed] = useState(false);
-  const [lifecycleTab, setLifecycleTab] = useState<LifecycleTabId>("queue");
-  const [customLifecycleSelection, setCustomLifecycleSelection] = useState<Set<LifecycleState>>(
-    () => new Set(REVIEW_QUEUE_LIFECYCLE_STATES),
-  );
-  const [scopeDraft, setScopeDraft] = useState<ScopeFilters>({
-    documentId: "",
-    documentVersionId: "",
-    extractionRunId: "",
-  });
-  const [appliedScopeFilters, setAppliedScopeFilters] = useState<CandidateRuleFilters>(() =>
-    buildScopeFilters({
-      documentId: "",
-      documentVersionId: "",
-      extractionRunId: "",
-    }),
-  );
+			try {
+				const reviewsResponse = await fetchCandidateRules(scopeFilters);
+				setReviews(reviewsResponse.items);
+				setRulesStatus("ready");
+			} catch (error: unknown) {
+				setErrorMessage(
+					describeCandidateRuleError(error, "Unable to load Candidate Rules."),
+				);
+				setRulesStatus("error");
+			}
+		},
+		[],
+	);
 
-  const loadReviews = useCallback(async (filters: CandidateRuleFilters): Promise<void> => {
-    setStatus("loading");
-    setErrorMessage(null);
+	const loadActiveRun = useCallback(async (runId: string): Promise<void> => {
+		try {
+			const runsResponse = await fetchExtractionRuns();
+			setActiveRun(
+				runsResponse.items.find((run) => run.extraction_run_id === runId) ??
+					null,
+			);
+		} catch {
+			setActiveRun(null);
+		}
+	}, []);
 
-    try {
-      const [documentsResponse, reviewsResponse] = await Promise.all([
-        fetchPolicyDocuments(),
-        fetchCandidateRules(filters),
-      ]);
-      setDocuments(documentsResponse.items);
-      setReviews(reviewsResponse.items);
-      setStatus("ready");
-    } catch (error: unknown) {
-      setErrorMessage(
-        describeCandidateRuleError(error, "Unable to load the Candidate Rule review queue."),
-      );
-      setStatus("error");
-    }
-  }, []);
+	useEffect(() => {
+		void loadDocuments();
+	}, [loadDocuments]);
 
-  useEffect(() => {
-    void loadReviews(appliedScopeFilters);
-  }, [appliedScopeFilters, loadReviews]);
+	const activeRuleFilters = useMemo(
+		() =>
+			buildRuleFilters(
+				{
+					documentId: appliedScopeFilters.documentId ?? "",
+					documentVersionId: appliedScopeFilters.documentVersionId ?? "",
+				},
+				extractionRunId,
+			),
+		[appliedScopeFilters, extractionRunId],
+	);
 
-  const customSelection = useMemo(
-    () => [...customLifecycleSelection],
-    [customLifecycleSelection],
-  );
+	useEffect(() => {
+		void loadRules(activeRuleFilters);
+	}, [activeRuleFilters, loadRules]);
 
-  const displayedReviews = useMemo(
-    () => filterReviewsForTab(reviews, lifecycleTab, customSelection),
-    [customSelection, lifecycleTab, reviews],
-  );
+	useEffect(() => {
+		if (extractionRunId) {
+			void loadActiveRun(extractionRunId);
+		} else {
+			setActiveRun(null);
+		}
+		setView({ screen: "rules" });
+	}, [extractionRunId, loadActiveRun]);
 
-  const tabCounts = useMemo(() => {
-    if (status !== "ready") {
-      return {} as Partial<Record<LifecycleTabId, number>>;
-    }
+	const customSelection = useMemo(
+		() => [...customLifecycleSelection],
+		[customLifecycleSelection],
+	);
 
-    const counts: Partial<Record<LifecycleTabId, number>> = {};
-    for (const tab of LIFECYCLE_TABS) {
-      counts[tab.id] = filterReviewsForTab(reviews, tab.id, customSelection).length;
-    }
-    return counts;
-  }, [customSelection, reviews, status]);
+	const displayedReviews = useMemo(
+		() => filterReviewsForTab(reviews, lifecycleTab, customSelection),
+		[customSelection, lifecycleTab, reviews],
+	);
 
-  function applyLifecycleTab(tab: LifecycleTabId): void {
-    setLifecycleTab(tab);
-  }
+	const tabCounts = useMemo(() => {
+		if (rulesStatus !== "ready") {
+			return {} as Partial<Record<LifecycleTabId, number>>;
+		}
 
-  function handleCustomLifecycleToggle(state: LifecycleState): void {
-    setCustomLifecycleSelection((current) => {
-      const next = new Set(current);
-      if (next.has(state)) {
-        next.delete(state);
-      } else {
-        next.add(state);
-      }
-      return next;
-    });
-    setLifecycleTab("custom");
-  }
+		const counts: Partial<Record<LifecycleTabId, number>> = {};
+		for (const tab of LIFECYCLE_TABS) {
+			counts[tab.id] = filterReviewsForTab(
+				reviews,
+				tab.id,
+				customSelection,
+			).length;
+		}
+		return counts;
+	}, [customSelection, reviews, rulesStatus]);
 
-  function handleScopeSubmit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    setAppliedScopeFilters(buildScopeFilters(scopeDraft));
-  }
+	function applyLifecycleTab(tab: LifecycleTabId): void {
+		setLifecycleTab(tab);
+	}
 
-  function handleClearScope(): void {
-    const clearedScope: ScopeFilters = {
-      documentId: "",
-      documentVersionId: "",
-      extractionRunId: "",
-    };
-    setScopeDraft(clearedScope);
-    setAppliedScopeFilters(buildScopeFilters(clearedScope));
-  }
+	function handleCustomLifecycleToggle(state: LifecycleState): void {
+		setCustomLifecycleSelection((current) => {
+			const next = new Set(current);
+			if (next.has(state)) {
+				next.delete(state);
+			} else {
+				next.add(state);
+			}
+			return next;
+		});
+		setLifecycleTab("custom");
+	}
 
-  const scopeFilterCount = countScopeFilters(appliedScopeFilters);
+	function handleScopeSubmit(event: FormEvent<HTMLFormElement>): void {
+		event.preventDefault();
+		setAppliedScopeFilters(buildRuleFilters(scopeDraft));
+	}
 
-  const scopeActiveInDraft =
-    Boolean(scopeDraft.documentId.trim()) ||
-    Boolean(scopeDraft.documentVersionId.trim()) ||
-    Boolean(scopeDraft.extractionRunId.trim());
+	function handleClearScope(): void {
+		const clearedScope: RuleScopeFilters = {
+			documentId: "",
+			documentVersionId: "",
+		};
+		setScopeDraft(clearedScope);
+		setAppliedScopeFilters({});
+	}
 
-  const hasNonDefaultFilters =
-    scopeFilterCount > 0 ||
-    (lifecycleTab === "custom" && !isDefaultCustomSelection(customSelection));
+	const scopeFilterCount = countScopeFilters(appliedScopeFilters);
 
-  useEffect(() => {
-    if (status !== "ready") {
-      return;
-    }
-    if (displayedReviews.length === 0) {
-      if (selectedCandidateRuleId !== null) {
-        setSelectedCandidateRuleId(null);
-      }
-      if (selectionDismissed) {
-        setSelectionDismissed(false);
-      }
-      return;
-    }
-    if (
-      selectedCandidateRuleId !== null &&
-      !displayedReviews.some((review) => review.candidate_rule_id === selectedCandidateRuleId)
-    ) {
-      setSelectionDismissed(false);
-      setSelectedCandidateRuleId(displayedReviews[0].candidate_rule_id);
-      return;
-    }
-    if (selectedCandidateRuleId === null && !selectionDismissed) {
-      setSelectedCandidateRuleId(displayedReviews[0].candidate_rule_id);
-    }
-  }, [displayedReviews, selectedCandidateRuleId, selectionDismissed, status]);
+	const scopeActiveInDraft =
+		Boolean(scopeDraft.documentId.trim()) ||
+		Boolean(scopeDraft.documentVersionId.trim());
 
-  return (
-    <div className="catalog-page review-catalog content-enter">
-      <header className="review-catalog-head reveal">
-        <span className="folio">Approval desk · triage</span>
-        <h2>Candidate Rules</h2>
-        <p className="review-catalog-lede">
-          Extracted Candidate Rules await review before publication. QA flags and lifecycle
-          state guide triage.
-        </p>
-      </header>
+	const hasNonDefaultLifecycleFilters =
+		lifecycleTab === "custom" && !isDefaultCustomSelection(customSelection);
 
-      <div className="review-toolbar reveal">
-        <div
-          className="catalog-tabs"
-          role="tablist"
-          aria-label="Filter by lifecycle state"
-        >
-          {LIFECYCLE_TABS.map((tab) => {
-            const isSelected = lifecycleTab === tab.id;
-            const count = tabCounts[tab.id];
+	const emptyContext = useMemo(
+		() => ({
+			lifecycleTab,
+			reviews,
+			displayedReviews,
+			scopeFilterCount,
+			extractionRunId,
+			hasNonDefaultLifecycleFilters,
+		}),
+		[
+			displayedReviews,
+			extractionRunId,
+			hasNonDefaultLifecycleFilters,
+			lifecycleTab,
+			reviews,
+			scopeFilterCount,
+		],
+	);
 
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                id={`review-lifecycle-tab-${tab.id}`}
-                className={`catalog-tab${isSelected ? " active" : ""}${tab.id !== "all" && tab.id !== "custom" ? ` ${tab.id}` : ""}`}
-                aria-selected={isSelected}
-                aria-controls="review-rule-panel"
-                onClick={() => applyLifecycleTab(tab.id)}
-              >
-                <span>{tab.label}</span>
-                {count !== undefined && (count > 0 || isSelected) ? (
-                  <span className="catalog-tab-count">{count}</span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+	if (view.screen === "detail") {
+		return (
+			<CandidateRuleDetail
+				candidateRuleId={view.candidateRuleId}
+				principal={principal}
+				backLabel="← Back to rules"
+				onBack={() => setView({ screen: "rules" })}
+				onReviewChange={(updatedReview) => {
+					setReviews((current) =>
+						current.map((review) =>
+							review.candidate_rule_id === updatedReview.candidate_rule_id
+								? updatedReview
+								: review,
+						),
+					);
+				}}
+			/>
+		);
+	}
 
-        {lifecycleTab === "custom" ? (
-          <fieldset className="review-lifecycle-custom">
-            <legend>Custom lifecycle</legend>
-            {ALL_LIFECYCLE_STATES.map((state) => (
-              <label key={state} className="review-lifecycle-option">
-                <input
-                  type="checkbox"
-                  checked={customLifecycleSelection.has(state)}
-                  onChange={() => handleCustomLifecycleToggle(state)}
-                />
-                <span>{formatLifecycleState(state)}</span>
-              </label>
-            ))}
-          </fieldset>
-        ) : null}
+	return (
+		<div className="catalog-page review-catalog content-enter">
+			<details className="review-scope-panel reveal">
+				<summary>
+					Scope filters
+					{scopeFilterCount > 0 ? (
+						<span className="review-scope-panel-badge">
+							{scopeFilterCount} active
+						</span>
+					) : null}
+				</summary>
+				<form className="review-scope-form" onSubmit={handleScopeSubmit}>
+					<div className="review-filter-grid">
+						<DocumentFilterPicker
+							value={scopeDraft.documentId}
+							documents={documents}
+							onChange={(value) =>
+								setScopeDraft((current) => ({ ...current, documentId: value }))
+							}
+						/>
+						<label htmlFor="review-filter-version">
+							Document version id
+							<input
+								id="review-filter-version"
+								name="review-filter-version"
+								value={scopeDraft.documentVersionId}
+								placeholder="docv-…"
+								spellCheck={false}
+								onChange={(event) =>
+									setScopeDraft((current) => ({
+										...current,
+										documentVersionId: event.target.value,
+									}))
+								}
+							/>
+						</label>
+					</div>
+					<div className="review-filter-actions">
+						<button type="submit" className="review-filter-apply">
+							Apply scope
+						</button>
+						<button
+							type="button"
+							className="review-filter-clear"
+							disabled={scopeFilterCount === 0 && !scopeActiveInDraft}
+							onClick={handleClearScope}
+						>
+							Clear scope
+						</button>
+					</div>
+				</form>
+			</details>
 
-        <details className="review-scope-panel">
-          <summary>
-            Scope filters
-            {scopeFilterCount > 0 ? (
-              <span className="review-scope-panel-badge">{scopeFilterCount} active</span>
-            ) : null}
-          </summary>
-          <form className="review-scope-form" onSubmit={handleScopeSubmit}>
-            <div className="review-filter-grid">
-              <DocumentFilterPicker
-                value={scopeDraft.documentId}
-                documents={documents}
-                onChange={(value) => setScopeDraft((current) => ({ ...current, documentId: value }))}
-              />
-              <label htmlFor="review-filter-version">
-                Document version id
-                <input
-                  id="review-filter-version"
-                  name="review-filter-version"
-                  value={scopeDraft.documentVersionId}
-                  placeholder="docv-…"
-                  spellCheck={false}
-                  onChange={(event) =>
-                    setScopeDraft((current) => ({
-                      ...current,
-                      documentVersionId: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              {scopeDraft.documentId.trim() ? (
-                <label htmlFor="review-filter-extraction-run">
-                  Extraction run id
-                  <input
-                    id="review-filter-extraction-run"
-                    name="review-filter-extraction-run"
-                    value={scopeDraft.extractionRunId}
-                    placeholder="extract-…"
-                    spellCheck={false}
-                    onChange={(event) =>
-                      setScopeDraft((current) => ({
-                        ...current,
-                        extractionRunId: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-              ) : null}
-            </div>
-            <div className="review-filter-actions">
-              <button type="submit" className="review-filter-apply">
-                Apply scope
-              </button>
-              <button
-                type="button"
-                className="review-filter-clear"
-                disabled={scopeFilterCount === 0 && !scopeActiveInDraft}
-                onClick={handleClearScope}
-              >
-                Clear scope
-              </button>
-            </div>
-          </form>
-        </details>
-      </div>
+			{scopeFilterCount > 0 || extractionRunId ? (
+				<div className="review-active-scope reveal">
+					{scopeFilterCount > 0 ? (
+						<p className="review-scope-chips">
+							{appliedScopeFilters.documentId ?? null}
+							{appliedScopeFilters.documentId &&
+							appliedScopeFilters.documentVersionId
+								? " · "
+								: null}
+							{appliedScopeFilters.documentVersionId ?? null}
+						</p>
+					) : null}
+					{extractionRunId ? (
+						<p className="review-scope-chips review-run-scope-chip">
+							<span>{activeRun?.document_id ?? "Extraction run"}</span>
+							<span aria-hidden="true"> · </span>
+							<code title={extractionRunId}>{shortenId(extractionRunId)}</code>
+							{onClearExtractionRunScope ? (
+								<button
+									type="button"
+									className="review-scope-chip-action"
+									onClick={onClearExtractionRunScope}
+								>
+									Show all rules
+								</button>
+							) : null}
+						</p>
+					) : null}
+				</div>
+			) : null}
 
-      {status === "loading" ? (
-        <p className="catalog-status">
-          <span className="catalog-status-rule" aria-hidden="true" />
-          Indexing Candidate Rules…
-        </p>
-      ) : null}
+			<div className="review-toolbar reveal">
+				<div
+					className="catalog-tabs"
+					role="tablist"
+					aria-label="Filter by lifecycle state"
+				>
+					{LIFECYCLE_TABS.map((tab) => {
+						const isSelected = lifecycleTab === tab.id;
+						const count = tabCounts[tab.id];
 
-      {status === "error" ? <p className="error-banner">{errorMessage}</p> : null}
+						return (
+							<button
+								key={tab.id}
+								type="button"
+								role="tab"
+								id={`review-lifecycle-tab-${tab.id}`}
+								className={`catalog-tab${isSelected ? " active" : ""}`}
+								data-tab-id={tab.id}
+								aria-selected={isSelected}
+								aria-controls="review-rule-panel"
+								onClick={() => applyLifecycleTab(tab.id)}
+							>
+								<span>{tab.label}</span>
+								{count !== undefined ? (
+									<span className="catalog-tab-count">{count}</span>
+								) : null}
+							</button>
+						);
+					})}
+				</div>
 
-      {status === "ready" ? (
-        <>
-          {scopeFilterCount > 0 ? (
-            <p className="review-scope-chips">
-              {appliedScopeFilters.documentId ? appliedScopeFilters.documentId : null}
-              {appliedScopeFilters.documentId && appliedScopeFilters.documentVersionId ? " · " : null}
-              {appliedScopeFilters.documentVersionId ? appliedScopeFilters.documentVersionId : null}
-              {(appliedScopeFilters.documentId || appliedScopeFilters.documentVersionId) &&
-              appliedScopeFilters.extractionRunId
-                ? " · "
-                : null}
-              {appliedScopeFilters.extractionRunId ? appliedScopeFilters.extractionRunId : null}
-            </p>
-          ) : null}
-          <div
-            id="review-rule-panel"
-            className="review-workbench"
-            role="tabpanel"
-            aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
-          >
-            <section className="review-workbench-ledger">
-              <CandidateRuleLedger
-                reviews={displayedReviews}
-                selectedCandidateRuleId={selectedCandidateRuleId}
-                onOpenReview={(candidateRuleId) => {
-                  setSelectionDismissed(false);
-                  setSelectedCandidateRuleId(candidateRuleId);
-                }}
-                emptyMessage={emptyMessageForLifecycleTab(lifecycleTab, hasNonDefaultFilters)}
-                showEmptyHint={showEmptyStateHint(lifecycleTab)}
-              />
-            </section>
+				{lifecycleTab === "custom" ? (
+					<fieldset className="review-lifecycle-custom">
+						<legend>Custom lifecycle</legend>
+						{ALL_LIFECYCLE_STATES.map((state) => (
+							<label key={state} className="review-lifecycle-option">
+								<input
+									type="checkbox"
+									checked={customLifecycleSelection.has(state)}
+									onChange={() => handleCustomLifecycleToggle(state)}
+								/>
+								<span>{formatLifecycleState(state)}</span>
+							</label>
+						))}
+					</fieldset>
+				) : null}
+			</div>
 
-            <section className="review-workbench-detail">
-              {selectedCandidateRuleId ? (
-                <CandidateRuleDetail
-                  candidateRuleId={selectedCandidateRuleId}
-                  principal={principal}
-                  onBack={() => {
-                    setSelectionDismissed(true);
-                    setSelectedCandidateRuleId(null);
-                  }}
-                  onReviewChange={(updatedReview) => {
-                    setReviews((current) =>
-                      current.map((review) =>
-                        review.candidate_rule_id === updatedReview.candidate_rule_id
-                          ? updatedReview
-                          : review,
-                      ),
-                    );
-                  }}
-                />
-              ) : (
-                <div className="review-selection-empty reveal">
-                  <span className="folio">Candidate Rule edit desk</span>
-                  <p>Select a Candidate Rule from the queue to compare extracted values, make edits, and save a reviewed Rule.</p>
-                </div>
-              )}
-            </section>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
+			{rulesStatus === "loading" ? (
+				<p className="catalog-status">
+					<span className="catalog-status-rule" aria-hidden="true" />
+					Loading Candidate Rules…
+				</p>
+			) : null}
+
+			{rulesStatus === "error" ? (
+				<p className="error-banner">{errorMessage}</p>
+			) : null}
+
+			{rulesStatus === "ready" ? (
+				<div
+					id="review-rule-panel"
+					role="tabpanel"
+					aria-labelledby={`review-lifecycle-tab-${lifecycleTab}`}
+				>
+					<CandidateRuleLedger
+						reviews={displayedReviews}
+						onOpenReview={(candidateRuleId) =>
+							setView({ screen: "detail", candidateRuleId })
+						}
+						emptyMessage={resolveReviewEmptyMessage(emptyContext)}
+						emptyHint={resolveReviewEmptyHint(emptyContext)}
+					/>
+				</div>
+			) : null}
+		</div>
+	);
 }

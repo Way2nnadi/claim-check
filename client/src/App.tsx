@@ -87,7 +87,7 @@ const shellSections: readonly ShellSection[] = [
 	},
 	{
 		id: "review",
-		label: "Review",
+		label: "Review Rules",
 		kicker: "Approval Desk",
 		actions: [],
 		ledger: ["Preserve an auditable rationale before publication."],
@@ -150,6 +150,9 @@ export default function App() {
 		null,
 	);
 	const [activeSection, setActiveSection] = useState<SectionId>("documents");
+	const [reviewExtractionRunId, setReviewExtractionRunId] = useState<
+		string | null
+	>(null);
 	const [customToken, setCustomToken] = useState("");
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -359,7 +362,12 @@ export default function App() {
 											? "nav-link active"
 											: "nav-link"
 									}
-									onClick={() => setActiveSection(section.id)}
+									onClick={() => {
+										if (section.id === "review") {
+											setReviewExtractionRunId(null);
+										}
+										setActiveSection(section.id);
+									}}
 									tabIndex={sidebarOpen ? undefined : -1}
 								>
 									<span>{section.label}</span>
@@ -446,9 +454,20 @@ export default function App() {
 					{activeSection === "documents" ? (
 						<DocumentCatalog principal={principal} />
 					) : activeSection === "extraction-runs" ? (
-						<ExtractionRunCatalog />
+						<ExtractionRunCatalog
+							onOpenRun={(extractionRunId) => {
+								setReviewExtractionRunId(extractionRunId);
+								setActiveSection("review");
+							}}
+						/>
 					) : activeSection === "review" ? (
-						<CandidateRuleCatalog principal={principal} />
+						<CandidateRuleCatalog
+							principal={principal}
+							extractionRunId={reviewExtractionRunId}
+							onClearExtractionRunScope={() =>
+								setReviewExtractionRunId(null)
+							}
+						/>
 					) : activeSection === "policy-versions" ? (
 						<PolicyVersionCatalog
 							principal={principal}

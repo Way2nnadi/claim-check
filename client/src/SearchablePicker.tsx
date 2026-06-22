@@ -27,6 +27,9 @@ interface SearchablePickerProps {
   clearable?: boolean;
   allowFreeText?: boolean;
   mono?: boolean;
+  hideLabel?: boolean;
+  inputId?: string;
+  showAllOnOpen?: boolean;
   onChange: (value: string) => void;
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -85,12 +88,15 @@ export default function SearchablePicker({
   clearable = false,
   allowFreeText = false,
   mono = false,
+  hideLabel = false,
+  inputId: inputIdProp,
+  showAllOnOpen = false,
   onChange,
   isOpen: controlledOpen,
   onOpenChange,
 }: SearchablePickerProps) {
   const fieldId = useId();
-  const inputId = `${fieldId}-input`;
+  const inputId = inputIdProp ?? `${fieldId}-input`;
   const listboxId = `${fieldId}-listbox`;
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
@@ -223,7 +229,7 @@ export default function SearchablePicker({
     if (disabled) {
       return;
     }
-    setQuery(closedDisplayValue);
+    setQuery(showAllOnOpen ? "" : closedDisplayValue);
     setOpen(true);
   }
 
@@ -335,9 +341,11 @@ export default function SearchablePicker({
         }${disabled ? " disabled" : ""}`}
       >
         <div className="searchable-picker-field">
-          <label className="searchable-picker-label" htmlFor={inputId}>
-            {label}
-          </label>
+          {hideLabel ? null : (
+            <label className="searchable-picker-label" htmlFor={inputId}>
+              {label}
+            </label>
+          )}
           <div ref={controlRef} className="searchable-picker-control">
             <input
               ref={inputRef}
