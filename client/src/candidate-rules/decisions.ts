@@ -13,6 +13,15 @@ export const CANDIDATE_RULE_QUEUE_LIFECYCLE_STATES = new Set([
 
 const APPROVAL_BLOCKING_QA_CODES = new Set(["unresolvable_citation"]);
 
+export const CITATION_APPROVAL_BLOCKER =
+	"Citation is not anchored to the policy document.";
+
+export const CITATION_APPROVAL_GUIDANCE = [
+	"Browse the source document and confirm the statement matches the policy text.",
+	"Edit the statement if needed, then save — citation will be re-anchored automatically.",
+	"If the rule cannot be sourced, reject it.",
+] as const;
+
 export type CandidateRuleDecisionMode = "approve" | "reject";
 
 function normalizeStatement(value: string): string {
@@ -36,6 +45,19 @@ export function canResolveCandidateRule(
 	return canEdit && CANDIDATE_RULE_QUEUE_LIFECYCLE_STATES.has(review.lifecycle_state);
 }
 
+export function hasUnresolvedCitationIssue(
+	review: CandidateRuleReview,
+	rule: CandidateRuleValue,
+): boolean {
+	if (rule.citation === null) {
+		return true;
+	}
+
+	return review.qa_flags.some((flag) =>
+		APPROVAL_BLOCKING_QA_CODES.has(flag.code),
+	);
+}
+
 export function approvalBlockersForRule(
 	review: CandidateRuleReview,
 	rule: CandidateRuleValue,
@@ -56,14 +78,8 @@ export function approvalBlockersForRule(
 		blockers.add("Remove the machine-checkable condition before approval.");
 	}
 
-	if (rule.citation === null) {
-		blockers.add("Resolve the Citation issue before approving this Candidate Rule.");
-	}
-
-	for (const flag of review.qa_flags) {
-		if (APPROVAL_BLOCKING_QA_CODES.has(flag.code)) {
-			blockers.add("Resolve the Citation issue before approving this Candidate Rule.");
-		}
+	if (hasUnresolvedCitationIssue(review, rule)) {
+		blockers.add(CITATION_APPROVAL_BLOCKER);
 	}
 
 	return [...blockers];

@@ -103,6 +103,7 @@ async def test_admin_imports_expense_report_csv_and_persists_normalized_rows(
             "manager_approval": True,
             "receipt_attached": True,
             "trip_id": "trip-7",
+            "submission_days": None,
         }
 
         assert list_response.status_code == 200

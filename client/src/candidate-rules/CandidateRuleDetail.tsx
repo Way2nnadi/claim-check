@@ -2,12 +2,13 @@ import { fetchCandidateRule, updateCandidateRule } from "./api";
 import type { CandidateRuleReview, CandidateRuleReviewUpdateRequest } from "./types";
 import { fetchDocumentSections } from "../policy-documents/api";
 import type { DocumentSection } from "../policy-documents/types";
+import { fetchExtractionRuns } from "../extraction-runs/api";
 import { formatEnforceabilityClass, formatLifecycleState } from "../rules/format";
 import type { AggregationPeriod, EnforceabilityClass, CandidateRuleValue, Citation, QAFlag } from "../rules/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import { ApiError } from "../shared/api/client";
-import { approvalBlockersForRule, canEditCandidateRules, canResolveCandidateRule, resolveCandidateRuleDecision, resolveDecisionErrorMessage, validateDecisionComment } from "./decisions";
+import { approvalBlockersForRule, canEditCandidateRules, canResolveCandidateRule, CITATION_APPROVAL_BLOCKER, CITATION_APPROVAL_GUIDANCE, hasUnresolvedCitationIssue, resolveCandidateRuleDecision, resolveDecisionErrorMessage, validateDecisionComment } from "./decisions";
 import { describeCandidateRuleError, formatQAFlagCode, formatQAFlagDomain, qaFlagDomain } from "./format";
 import { formatDocumentTitle } from "../policy-documents/format";
 import { RuleFormFields, type RuleFormFieldWrapperProps } from "../rules/RuleFormFields";
@@ -256,6 +257,184 @@ function QaFlagsBanner({ flags }: { flags: QAFlag[] }) {
 	);
 }
 
+interface UnresolvedCitationSourceProps {
+	currentStatement: string;
+	documentId: string | null;
+	sections: DocumentSection[];
+	sectionsStatus: "idle" | "loading" | "ready" | "error";
+	sectionsError: string | null;
+	selectedSection: DocumentSection | null;
+	sectionsOpen: boolean;
+	sectionFilter: string;
+	sourceBodyRef: RefObject<HTMLElement | null>;
+	onBrowseSections: () => void;
+	onSectionFilterChange: (value: string) => void;
+	onSectionSelect: (sectionId: string) => void;
+	onCloseSections: () => void;
+}
+
+function UnresolvedCitationSource({
+	currentStatement,
+	documentId,
+	sections,
+	sectionsStatus,
+	sectionsError,
+	selectedSection,
+	sectionsOpen,
+	sectionFilter,
+	sourceBodyRef,
+	onBrowseSections,
+	onSectionFilterChange,
+	onSectionSelect,
+	onCloseSections,
+}: UnresolvedCitationSourceProps) {
+	const canBrowse = sections.length > 0;
+	const locationLabel = selectedSection
+		? sectionLocation(selectedSection)
+		: documentId
+			? formatDocumentTitle(documentId)
+			: "Source document";
+
+	let stripBody: ReactNode = null;
+
+	if (sectionsStatus === "loading") {
+		stripBody = (
+			<p className="review-citation-status">
+				<span className="catalog-status-rule" aria-hidden="true" />
+				Loading source…
+			</p>
+		);
+	} else if (sectionsStatus === "error") {
+		stripBody = (
+			<p className="review-citation-status error">{sectionsError}</p>
+		);
+	} else if (selectedSection) {
+		stripBody = (
+			<div className="review-source-text">
+				{cleanSourceFragment(selectedSection.content)}
+			</div>
+		);
+	} else if (currentStatement.trim().length > 0) {
+		stripBody = (
+			<div className="review-source-passage">{currentStatement.trim()}</div>
+		);
+	}
+
+	return (
+		<section
+			className="review-citation-strip review-source-group reveal"
+			aria-label="Source document"
+		>
+			<header className="review-citation-strip-head">
+				<div className="review-citation-strip-intro">
+					<span className="review-citation-kicker">Source</span>
+					<p className="review-citation-location">{locationLabel}</p>
+				</div>
+				<div className="review-citation-strip-actions">
+					{canBrowse ? (
+						<button
+							type="button"
+							className="review-source-browse-toggle"
+							onClick={onBrowseSections}
+						>
+							Browse sections ({sections.length})
+						</button>
+					) : null}
+				</div>
+			</header>
+
+			<p className="review-citation-empty">
+				No citation is linked yet. Compare the statement against the source
+				document below.
+			</p>
+
+			{stripBody ? (
+				<div
+					ref={sourceBodyRef as RefObject<HTMLDivElement>}
+					className="review-citation-strip-body"
+				>
+					{stripBody}
+				</div>
+			) : null}
+
+			{canBrowse && documentId ? (
+				<SectionBrowserDrawer
+					open={sectionsOpen}
+					documentId={documentId}
+					sections={sections}
+					filter={sectionFilter}
+					selectedSectionId={selectedSection?.section_id ?? null}
+					citedSectionId=""
+					onFilterChange={onSectionFilterChange}
+					onSelect={onSectionSelect}
+					onClose={onCloseSections}
+				/>
+			) : null}
+		</section>
+	);
+}
+
+interface ApprovalBlockersCalloutProps {
+	blockers: string[];
+	hasCitationIssue: boolean;
+}
+
+function ApprovalBlockersCallout({
+	blockers,
+	hasCitationIssue,
+}: ApprovalBlockersCalloutProps) {
+	if (blockers.length === 0) {
+		return null;
+	}
+
+	const nonCitationBlockers = blockers.filter(
+		(blocker) => blocker !== CITATION_APPROVAL_BLOCKER,
+	);
+
+	if (hasCitationIssue) {
+		return (
+			<div
+				className="notion-callout error reveal"
+				aria-label="Approval blockers"
+				style={{ "--reveal-delay": "140ms" } as CSSProperties}
+			>
+				<p className="review-blocker-lede">
+					Approval is blocked until citation is anchored.
+				</p>
+				<ul className="review-blocker-list">
+					{CITATION_APPROVAL_GUIDANCE.map((step) => (
+						<li key={step}>{step}</li>
+					))}
+				</ul>
+				{nonCitationBlockers.length > 0 ? (
+					<ul className="review-blocker-list">
+						{nonCitationBlockers.map((blocker) => (
+							<li key={blocker}>{blocker}</li>
+						))}
+					</ul>
+				) : null}
+			</div>
+		);
+	}
+
+	return (
+		<div
+			className="notion-callout error reveal"
+			aria-label="Approval blockers"
+			style={{ "--reveal-delay": "140ms" } as CSSProperties}
+		>
+			<p className="review-blocker-lede">
+				Complete these items before approving this Candidate Rule.
+			</p>
+			<ul className="review-blocker-list">
+				{blockers.map((blocker) => (
+					<li key={blocker}>{blocker}</li>
+				))}
+			</ul>
+		</div>
+	);
+}
+
 interface CitationStripProps {
 	citation: Citation;
 	currentStatement: string;
@@ -435,6 +614,64 @@ export default function CandidateRuleDetail({
 
 	const canEdit = canEditCandidateRules(principal);
 
+	const loadSourceDocumentSections = useCallback(
+		async (response: CandidateRuleReview): Promise<void> => {
+			const citation = response.current_rule.citation;
+			let documentId = citation?.document_id ?? null;
+			let documentVersionId = citation?.document_version_id ?? null;
+
+			if (!documentId || !documentVersionId) {
+				const extractionRunId =
+					response.current_rule.origin.extraction_run_id;
+				if (!extractionRunId) {
+					return;
+				}
+
+				try {
+					const runsResponse = await fetchExtractionRuns();
+					const extractionRun = runsResponse.items.find(
+						(run) => run.extraction_run_id === extractionRunId,
+					);
+					if (!extractionRun) {
+						return;
+					}
+					documentId = extractionRun.document_id;
+					documentVersionId = extractionRun.document_version_id;
+				} catch {
+					return;
+				}
+			}
+
+			setSectionsStatus("loading");
+
+			try {
+				const sectionsResponse = await fetchDocumentSections(
+					documentId,
+					documentVersionId,
+				);
+				const loadedSections = Array.isArray(sectionsResponse.items)
+					? sectionsResponse.items
+					: [];
+				setSections(loadedSections);
+				setSectionsStatus("ready");
+				if (citation) {
+					setSelectedSectionId(citation.section_id);
+				} else if (loadedSections.length > 0) {
+					setSelectedSectionId(loadedSections[0].section_id);
+				}
+			} catch (error: unknown) {
+				setSectionsStatus("error");
+				setSectionsError(
+					describeCandidateRuleError(
+						error,
+						"Unable to load document sections for this citation.",
+					),
+				);
+			}
+		},
+		[],
+	);
+
 	const loadReview = useCallback(async (): Promise<void> => {
 		setStatus("loading");
 		setErrorMessage(null);
@@ -457,32 +694,7 @@ export default function CandidateRuleDetail({
 			setDraft(createRuleDraft(response.current_rule));
 			setStatus("ready");
 
-			const citation = response.current_rule.citation;
-			if (!citation) {
-				return;
-			}
-
-			setSelectedSectionId(citation.section_id);
-			setSectionsStatus("loading");
-
-			try {
-				const sectionsResponse = await fetchDocumentSections(
-					citation.document_id,
-					citation.document_version_id,
-				);
-				setSections(
-					Array.isArray(sectionsResponse.items) ? sectionsResponse.items : [],
-				);
-				setSectionsStatus("ready");
-			} catch (error: unknown) {
-				setSectionsStatus("error");
-				setSectionsError(
-					describeCandidateRuleError(
-						error,
-						"Unable to load document sections for this citation.",
-					),
-				);
-			}
+			await loadSourceDocumentSections(response);
 		} catch (error: unknown) {
 			if (error instanceof ApiError && error.status === 404) {
 				setReview(null);
@@ -500,7 +712,7 @@ export default function CandidateRuleDetail({
 			setDraft(null);
 			setStatus("error");
 		}
-	}, [candidateRuleId]);
+	}, [candidateRuleId, loadSourceDocumentSections]);
 
 	useEffect(() => {
 		void loadReview();
@@ -532,7 +744,16 @@ export default function CandidateRuleDetail({
 					draftAsRuleValue(draft, review.current_rule),
 				)
 			: [];
+	const hasCitationIssue =
+		review && draft
+			? hasUnresolvedCitationIssue(
+					review,
+					draftAsRuleValue(draft, review.current_rule),
+				)
+			: false;
 	const decisionBlockers = decisionBlockersFor(unsavedChangeCount);
+	const sourceDocumentId =
+		citation?.document_id ?? sections[0]?.document_id ?? null;
 
 	function clearFeedback(): void {
 		if (errorMessage !== null) {
@@ -955,6 +1176,22 @@ export default function CandidateRuleDetail({
 								onSectionSelect={handleSectionSelect}
 								onCloseSections={() => setSectionsOpen(false)}
 							/>
+						) : hasCitationIssue ? (
+							<UnresolvedCitationSource
+								currentStatement={draft.statement}
+								documentId={sourceDocumentId}
+								sections={sections}
+								sectionsStatus={sectionsStatus}
+								sectionsError={sectionsError}
+								selectedSection={selectedSection}
+								sectionsOpen={sectionsOpen}
+								sectionFilter={sectionFilter}
+								sourceBodyRef={sourceBodyRef}
+								onBrowseSections={() => setSectionsOpen(true)}
+								onSectionFilterChange={setSectionFilter}
+								onSectionSelect={handleSectionSelect}
+								onCloseSections={() => setSectionsOpen(false)}
+							/>
 						) : (
 							<div className="review-source-group reveal">
 								<p className="review-citation-empty">
@@ -978,22 +1215,10 @@ export default function CandidateRuleDetail({
 							panelDelayMs={40}
 						/>
 
-						{approvalBlockers.length > 0 ? (
-							<div
-								className="notion-callout error reveal"
-								aria-label="Approval blockers"
-								style={{ "--reveal-delay": "140ms" } as CSSProperties}
-							>
-								<p className="review-blocker-lede">
-									Resolve these issues before approving this Candidate Rule.
-								</p>
-								<ul className="review-blocker-list">
-									{approvalBlockers.map((blocker) => (
-										<li key={blocker}>{blocker}</li>
-									))}
-								</ul>
-							</div>
-						) : null}
+						<ApprovalBlockersCallout
+							blockers={approvalBlockers}
+							hasCitationIssue={hasCitationIssue}
+						/>
 
 						{decisionBlockers.length > 0 ? (
 							<div

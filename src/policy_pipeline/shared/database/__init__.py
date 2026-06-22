@@ -1,5 +1,7 @@
 from policy_pipeline.audit.records import AuditEventRecord
+from policy_pipeline.compliance_evaluation_runs.records import ComplianceEvaluationRunRecord
 from policy_pipeline.compiled_rule_sets.records import CompiledRuleSetRecord
+from policy_pipeline.rule_test_cases.records import RuleTestCaseRecord, RuleTestRunRecord
 from policy_pipeline.expense_report_records import ExpenseReportRecord
 from policy_pipeline.extraction.records import (
     ExtractionRunRecord,
@@ -18,6 +20,7 @@ from policy_pipeline.shared.database.base import Base, VectorType, clear_databas
 __all__ = [
     "AuditEventRecord",
     "Base",
+    "ComplianceEvaluationRunRecord",
     "CompiledRuleSetRecord",
     "DocumentSectionEmbeddingRecord",
     "DocumentSectionRecord",
@@ -28,6 +31,8 @@ __all__ = [
     "PolicyVersionRecord",
     "PromptTemplateRecord",
     "RuleRecord",
+    "RuleTestCaseRecord",
+    "RuleTestRunRecord",
     "VectorType",
     "clear_database_cache",
     "get_session",

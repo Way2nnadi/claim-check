@@ -1,6 +1,7 @@
 from policy_pipeline.shared.database import (
     AuditEventRecord,
     Base,
+    ComplianceEvaluationRunRecord,
     CompiledRuleSetRecord,
     DocumentSectionEmbeddingRecord,
     DocumentSectionRecord,
@@ -11,6 +12,8 @@ from policy_pipeline.shared.database import (
     PolicyVersionRecord,
     PromptTemplateRecord,
     RuleRecord,
+    RuleTestCaseRecord,
+    RuleTestRunRecord,
     VectorType,
     clear_database_cache,
     get_session,
@@ -19,6 +22,7 @@ from policy_pipeline.shared.database import (
 __all__ = [
     "AuditEventRecord",
     "Base",
+    "ComplianceEvaluationRunRecord",
     "CompiledRuleSetRecord",
     "DocumentSectionEmbeddingRecord",
     "DocumentSectionRecord",
@@ -29,6 +33,8 @@ __all__ = [
     "PolicyVersionRecord",
     "PromptTemplateRecord",
     "RuleRecord",
+    "RuleTestCaseRecord",
+    "RuleTestRunRecord",
     "VectorType",
     "clear_database_cache",
     "get_session",

@@ -562,7 +562,7 @@ export default function App() {
 					) : activeSection === "policy-versions" ? (
 						<PolicyVersionCatalog principal={principal} />
 					) : activeSection === "compliance" ? (
-						<CompiledRuleSetCatalog />
+						<CompiledRuleSetCatalog principal={principal} />
 					) : activeSection === "manual-rules" ? (
 						<ManualRulesPage principal={principal} />
 					) : activeSection === "audit" ? (

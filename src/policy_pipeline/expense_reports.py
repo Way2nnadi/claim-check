@@ -29,6 +29,7 @@ _OPTIONAL_COLUMNS = (
     "manager_approval",
     "receipt_attached",
     "trip_id",
+    "submission_days",
 )
 _ALLOWED_COLUMNS = frozenset((*_REQUIRED_COLUMNS, *_OPTIONAL_COLUMNS))
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
@@ -49,6 +50,7 @@ class ExpenseReportRow(BaseModel):
     manager_approval: bool | None = None
     receipt_attached: bool | None = None
     trip_id: str | None = None
+    submission_days: int | None = Field(default=None, ge=0)
 
 
 class ExpenseReportSummary(BaseModel):
@@ -247,6 +249,11 @@ def _parse_expense_report_rows(csv_bytes: bytes) -> list[ExpenseReportRow]:
                 current_row_errors,
             ),
             "trip_id": _parse_optional_string(raw_row, "trip_id"),
+            "submission_days": _parse_optional_integer(
+                raw_row,
+                "submission_days",
+                current_row_errors,
+            ),
         }
 
         if current_row_errors:
@@ -359,6 +366,25 @@ def _parse_optional_boolean(
         f"{field_name} must be a boolean value (true/false, yes/no, 1/0)."
     )
     return None
+
+
+def _parse_optional_integer(
+    raw_row: dict[str | None, str | None],
+    field_name: str,
+    errors: list[str],
+) -> int | None:
+    value = _normalize_optional_string(raw_row.get(field_name))
+    if value is None:
+        return None
+    try:
+        integer_value = int(value)
+    except ValueError:
+        errors.append(f"{field_name} must be a whole number.")
+        return None
+    if integer_value < 0:
+        errors.append(f"{field_name} must be zero or greater.")
+        return None
+    return integer_value
 
 
 def _normalize_optional_string(value: str | None) -> str | None:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchCompiledRuleSet, fetchCompiledRuleSets } from "./api";
 import {
   compileStatusVariant,
@@ -7,6 +7,23 @@ import {
   summarizeCompileCounts,
 } from "./format";
 import type { CompiledRuleEntry, CompiledRuleSet } from "./types";
+import {
+  disableRuleTestCase,
+  enableRuleTestCase,
+  downloadRuleTestRunReport,
+  executeRuleTestRun,
+  fetchRuleTestCases,
+  fetchRuleTestRuns,
+  generateRuleTestCases,
+} from "../rule-test-cases/api";
+import RuleTestCasesSection from "../rule-test-cases/RuleTestCasesSection";
+import type { RuleTestCaseStatusAction } from "../rule-test-cases/RuleTestCaseStatusModal";
+import type {
+  RuleTestCase,
+  RuleTestCaseGroup,
+  RuleTestRun,
+} from "../rule-test-cases/types";
+import { describeRuleTestCaseError } from "../rule-test-cases/format";
 import Breadcrumbs from "../shared/ui/Breadcrumbs";
 import RecordPageHeader, {
   type RecordPropertyGroup,
@@ -15,10 +32,16 @@ import StatusPill from "../shared/ui/StatusPill";
 import { PolicyVersionPageIcon, RecordPageIcon } from "../shared/ui/PageIcons";
 import { shortenId } from "../shared/format/common";
 import { formatRelativeTime } from "../shared/format/relativeTime";
+import { hasAnyRole } from "../shared/permissions";
+import type { AuthenticatedPrincipal, Role } from "../shared/auth/types";
 
 interface CompiledRuleSetCatalogProps {
+  principal: AuthenticatedPrincipal;
   initialCompiledRuleSetId?: string | null;
 }
+
+const GENERATE_ALLOWED_ROLES: readonly Role[] = ["admin"];
+const DISABLE_ALLOWED_ROLES: readonly Role[] = ["approver"];
 
 type CatalogStatus = "loading" | "ready" | "error";
 type DetailStatus = "loading" | "ready" | "error" | "not_found";
@@ -48,19 +71,181 @@ function CompileEntryRow({ entry }: { entry: CompiledRuleEntry }) {
 
 function CompiledRuleSetDetail({
   compiledRuleSetId,
+  principal,
   onBack,
 }: {
   compiledRuleSetId: string;
+  principal: AuthenticatedPrincipal;
   onBack: () => void;
 }) {
   const [status, setStatus] = useState<DetailStatus>("loading");
   const [compiledRuleSet, setCompiledRuleSet] = useState<CompiledRuleSet | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [ruleTestCaseGroups, setRuleTestCaseGroups] = useState<RuleTestCaseGroup[]>([]);
+  const [ruleTestCaseTotal, setRuleTestCaseTotal] = useState(0);
+  const [ruleTestCaseActiveCount, setRuleTestCaseActiveCount] = useState(0);
+  const [ruleTestCaseDisabledCount, setRuleTestCaseDisabledCount] = useState(0);
+  const [ruleTestCaseStatus, setRuleTestCaseStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [ruleTestCaseError, setRuleTestCaseError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
+  const [latestRuleTestRun, setLatestRuleTestRun] = useState<RuleTestRun | null>(null);
+  const [ruleTestRunStatus, setRuleTestRunStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [ruleTestRunError, setRuleTestRunError] = useState<string | null>(null);
+  const [statusActionTarget, setStatusActionTarget] = useState<{
+    testCase: RuleTestCase;
+    mode: RuleTestCaseStatusAction;
+  } | null>(null);
+  const [statusActionRationale, setStatusActionRationale] = useState("");
+  const [statusActionError, setStatusActionError] = useState<string | null>(null);
+  const [isStatusActionSubmitting, setIsStatusActionSubmitting] = useState(false);
+  const canGenerate = hasAnyRole(principal, GENERATE_ALLOWED_ROLES);
+  const canRun = canGenerate;
+  const canDisable = hasAnyRole(principal, DISABLE_ALLOWED_ROLES);
+
+  const applyRuleTestCaseList = useCallback(
+    (response: {
+      groups: RuleTestCaseGroup[];
+      total_count: number;
+      active_count: number;
+      disabled_count: number;
+    }) => {
+      setRuleTestCaseGroups(response.groups);
+      setRuleTestCaseTotal(response.total_count);
+      setRuleTestCaseActiveCount(response.active_count);
+      setRuleTestCaseDisabledCount(response.disabled_count);
+      setRuleTestCaseStatus("ready");
+    },
+    [],
+  );
+
+  const loadRuleTestCases = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setRuleTestCaseStatus("loading");
+    }
+    setRuleTestCaseError(null);
+    const response = await fetchRuleTestCases(compiledRuleSetId);
+    applyRuleTestCaseList(response);
+  };
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    setRuleTestCaseError(null);
+    try {
+      const response = await generateRuleTestCases(compiledRuleSetId);
+      applyRuleTestCaseList({
+        groups: response.groups,
+        total_count: response.generated_count,
+        active_count: response.generated_count,
+        disabled_count: 0,
+      });
+    } catch (error: unknown) {
+      setRuleTestCaseError(
+        describeRuleTestCaseError(error, "Unable to generate Rule Test Cases."),
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleRun = async () => {
+    setIsRunning(true);
+    setRuleTestRunError(null);
+    try {
+      const run = await executeRuleTestRun(compiledRuleSetId);
+      setLatestRuleTestRun(run);
+      setRuleTestRunStatus("ready");
+    } catch (error: unknown) {
+      setRuleTestRunError(
+        describeRuleTestCaseError(error, "Unable to execute Rule Test Run."),
+      );
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const handleDownloadReport = async () => {
+    if (latestRuleTestRun === null) {
+      return;
+    }
+    setIsDownloadingReport(true);
+    setRuleTestRunError(null);
+    try {
+      await downloadRuleTestRunReport(latestRuleTestRun.rule_test_run_id);
+    } catch (error: unknown) {
+      setRuleTestRunError(
+        describeRuleTestCaseError(error, "Unable to download Rule Test Run report."),
+      );
+    } finally {
+      setIsDownloadingReport(false);
+    }
+  };
+
+  const handleStatusActionRequest = (
+    testCase: RuleTestCase,
+    mode: RuleTestCaseStatusAction,
+  ) => {
+    setStatusActionTarget({ testCase, mode });
+    setStatusActionRationale("");
+    setStatusActionError(null);
+  };
+
+  const handleStatusActionCancel = () => {
+    if (isStatusActionSubmitting) {
+      return;
+    }
+    setStatusActionTarget(null);
+    setStatusActionRationale("");
+    setStatusActionError(null);
+  };
+
+  const handleStatusActionConfirm = async () => {
+    if (statusActionTarget === null || statusActionRationale.trim().length === 0) {
+      return;
+    }
+    setIsStatusActionSubmitting(true);
+    setStatusActionError(null);
+    try {
+      const rationale = statusActionRationale.trim();
+      if (statusActionTarget.mode === "disable") {
+        await disableRuleTestCase(statusActionTarget.testCase.rule_test_case_id, {
+          rationale,
+        });
+      } else {
+        await enableRuleTestCase(statusActionTarget.testCase.rule_test_case_id, {
+          rationale,
+        });
+      }
+      setStatusActionTarget(null);
+      setStatusActionRationale("");
+      await loadRuleTestCases({ silent: true });
+    } catch (error: unknown) {
+      setStatusActionError(
+        describeRuleTestCaseError(
+          error,
+          statusActionTarget.mode === "disable"
+            ? "Unable to disable Rule Test Case."
+            : "Unable to enable Rule Test Case.",
+        ),
+      );
+    } finally {
+      setIsStatusActionSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
     setErrorMessage(null);
+    setRuleTestCaseStatus("loading");
+    setRuleTestCaseError(null);
+    setRuleTestRunStatus("loading");
+    setRuleTestRunError(null);
 
     void fetchCompiledRuleSet(compiledRuleSetId)
       .then((response) => {
@@ -82,10 +267,45 @@ function CompiledRuleSetDetail({
         setStatus(message.includes("not found") ? "not_found" : "error");
       });
 
+    void fetchRuleTestCases(compiledRuleSetId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        applyRuleTestCaseList(response);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setRuleTestCaseError(
+          describeRuleTestCaseError(error, "Unable to load Rule Test Cases."),
+        );
+        setRuleTestCaseStatus("error");
+      });
+
+    void fetchRuleTestRuns(compiledRuleSetId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setLatestRuleTestRun(response.items[0] ?? null);
+        setRuleTestRunStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setRuleTestRunError(
+          describeRuleTestCaseError(error, "Unable to load Rule Test Runs."),
+        );
+        setRuleTestRunStatus("error");
+      });
+
     return () => {
       cancelled = true;
     };
-  }, [compiledRuleSetId]);
+  }, [applyRuleTestCaseList, compiledRuleSetId]);
 
   if (status === "loading") {
     return (
@@ -226,11 +446,42 @@ function CompiledRuleSetDetail({
           </tbody>
         </table>
       </div>
+
+      <RuleTestCasesSection
+        canGenerate={canGenerate}
+        canRun={canRun}
+        canDisable={canDisable}
+        compiledCount={compiledRuleSet.summary.compiled}
+        ruleTestCaseGroups={ruleTestCaseGroups}
+        ruleTestCaseTotal={ruleTestCaseTotal}
+        ruleTestCaseActiveCount={ruleTestCaseActiveCount}
+        ruleTestCaseDisabledCount={ruleTestCaseDisabledCount}
+        ruleTestCaseStatus={ruleTestCaseStatus}
+        ruleTestCaseError={ruleTestCaseError}
+        isGenerating={isGenerating}
+        isRunning={isRunning}
+        isDownloadingReport={isDownloadingReport}
+        latestRuleTestRun={latestRuleTestRun}
+        ruleTestRunStatus={ruleTestRunStatus}
+        ruleTestRunError={ruleTestRunError}
+        statusActionTarget={statusActionTarget}
+        statusActionRationale={statusActionRationale}
+        statusActionError={statusActionError}
+        isStatusActionSubmitting={isStatusActionSubmitting}
+        onGenerate={() => void handleGenerate()}
+        onRun={() => void handleRun()}
+        onDownloadReport={() => void handleDownloadReport()}
+        onStatusActionRequest={handleStatusActionRequest}
+        onStatusActionConfirm={() => void handleStatusActionConfirm()}
+        onStatusActionCancel={handleStatusActionCancel}
+        onStatusActionRationaleChange={setStatusActionRationale}
+      />
     </div>
   );
 }
 
 export default function CompiledRuleSetCatalog({
+  principal,
   initialCompiledRuleSetId = null,
 }: CompiledRuleSetCatalogProps) {
   const [status, setStatus] = useState<CatalogStatus>("loading");
@@ -273,6 +524,7 @@ export default function CompiledRuleSetCatalog({
     return (
       <CompiledRuleSetDetail
         compiledRuleSetId={selectedCompiledRuleSetId}
+        principal={principal}
         onBack={() => setSelectedCompiledRuleSetId(null)}
       />
     );

@@ -2,7 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from policy_pipeline.audit.router import router as audit_router
+from policy_pipeline.compliance_evaluation_runs.router import (
+    router as compliance_evaluation_runs_router,
+)
 from policy_pipeline.compiled_rule_sets.router import router as compiled_rule_sets_router
+from policy_pipeline.rule_test_cases.router import router as rule_test_cases_router
 from policy_pipeline.expense_reports_router import router as expense_reports_router
 from policy_pipeline.extraction.router_registry import router as extraction_registry_router
 from policy_pipeline.extraction.router_runs import router as extraction_runs_router
@@ -36,7 +40,9 @@ def create_app() -> FastAPI:
     app.include_router(manual_rules_router)
     app.include_router(policy_versions_router)
     app.include_router(compiled_rule_sets_router)
+    app.include_router(rule_test_cases_router)
     app.include_router(expense_reports_router)
+    app.include_router(compliance_evaluation_runs_router)
     app.include_router(audit_router)
 
     return app

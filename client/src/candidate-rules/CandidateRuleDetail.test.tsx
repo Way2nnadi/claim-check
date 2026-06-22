@@ -429,6 +429,14 @@ describe("CandidateRuleDetail", () => {
 
   it("surfaces approval blockers before submission and preserves backend errors after submission", async () => {
     const blockedReview = buildReview({
+      current_rule: {
+        ...buildReview().current_rule,
+        citation: null,
+      },
+      extracted_rule: {
+        ...buildReview().extracted_rule,
+        citation: null,
+      },
       qa_flags: [
         {
           code: "unresolvable_citation",
@@ -457,10 +465,15 @@ describe("CandidateRuleDetail", () => {
 
     await screen.findByDisplayValue("Meals are capped at $75 per day.");
     expect(
-      screen.getByText("Resolve these issues before approving this Candidate Rule."),
+      screen.getByText("Approval is blocked until citation is anchored."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Resolve the Citation issue before approving this Candidate Rule."),
+      screen.getByText(
+        "Edit the statement if needed, then save — citation will be re-anchored automatically.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No citation is linked yet. Compare the statement against the source document below."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
 

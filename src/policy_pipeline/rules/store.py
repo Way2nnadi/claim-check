@@ -6,12 +6,20 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from policy_pipeline.extraction.records import ExtractionRunRecord
+from policy_pipeline.policy_documents.records import DocumentVersionRecord
+from policy_pipeline.policy_documents.citations import (
+    CitationMatchKind,
+    resolve_citation_anchor_with_fallback,
+)
 from policy_pipeline.rules.models import (
     CandidateRule,
     CandidateRuleReview,
     CandidateRuleValue,
+    Citation,
     LifecycleState,
     QAFlag,
+    QAFlagCode,
     ReingestionDiffCategory,
     Rule,
     RuleOriginType,
@@ -146,10 +154,16 @@ def update_candidate_rule_review(
         )
     except ValidationError as exc:
         raise InvalidCandidateRuleReviewError(_first_validation_message(exc)) from exc
+    next_rule, qa_flags = _reconcile_citation_and_qa_flags(
+        session,
+        record=record,
+        rule=next_rule,
+    )
     _persist_candidate_rule_review(
         record,
         current_rule=next_rule,
         committed_rule=next_rule,
+        qa_flags=qa_flags,
     )
     session.flush()
     if commit:
@@ -319,12 +333,15 @@ def _persist_candidate_rule_review(
     *,
     current_rule: CandidateRuleValue,
     committed_rule: CandidateRuleValue | None,
+    qa_flags: list[QAFlag] | None = None,
 ) -> None:
     payload = deepcopy(record.payload)
     current_payload = current_rule.model_dump(mode="json")
     for field in _CANDIDATE_RULE_METADATA_FIELDS:
         current_payload.pop(field, None)
     payload.update(current_payload)
+    if qa_flags is not None:
+        payload["qa_flags"] = [flag.model_dump(mode="json") for flag in qa_flags]
     payload["extracted_rule"] = payload.get("extracted_rule") or _rule_value_payload(
         CandidateRuleValue.model_validate(record.payload)
     )
@@ -332,6 +349,100 @@ def _persist_candidate_rule_review(
         committed_rule.model_dump(mode="json") if committed_rule is not None else None
     )
     record.payload = payload
+
+
+def _reconcile_citation_and_qa_flags(
+    session: Session,
+    *,
+    record: RuleRecord,
+    rule: CandidateRuleValue,
+) -> tuple[CandidateRuleValue, list[QAFlag]]:
+    qa_flags = [
+        QAFlag.model_validate(flag) for flag in record.payload.get("qa_flags", [])
+    ]
+    has_unresolvable = any(
+        flag.code is QAFlagCode.UNRESOLVABLE_CITATION for flag in qa_flags
+    )
+    if rule.citation is not None and not has_unresolvable:
+        return rule, qa_flags
+
+    if rule.citation is not None:
+        qa_flags = [
+            flag
+            for flag in qa_flags
+            if flag.code is not QAFlagCode.UNRESOLVABLE_CITATION
+        ]
+        return rule, qa_flags
+
+    extraction_run_id = rule.origin.extraction_run_id
+    if extraction_run_id is None:
+        return rule, qa_flags
+
+    extraction_run = session.get(ExtractionRunRecord, extraction_run_id)
+    if extraction_run is None:
+        return rule, qa_flags
+
+    document_version = session.get(
+        DocumentVersionRecord,
+        extraction_run.document_version_id,
+    )
+    if document_version is None:
+        return rule, qa_flags
+
+    resolution = resolve_citation_anchor_with_fallback(
+        session,
+        document_id=document_version.document_id,
+        document_version_id=document_version.document_version_id,
+        quote=rule.statement,
+    )
+    if resolution is None:
+        if not has_unresolvable:
+            qa_flags.append(
+                QAFlag(
+                    code=QAFlagCode.UNRESOLVABLE_CITATION,
+                    detail=(
+                        "Candidate Rule Citation quote could not be resolved: "
+                        f"{rule.statement!r}."
+                    ),
+                )
+            )
+        return rule, qa_flags
+
+    qa_flags = [
+        flag
+        for flag in qa_flags
+        if flag.code
+        not in {QAFlagCode.UNRESOLVABLE_CITATION, QAFlagCode.APPROXIMATE_CITATION}
+    ]
+    if resolution.match_kind is not CitationMatchKind.EXACT:
+        qa_flags.append(
+            QAFlag(
+                code=QAFlagCode.APPROXIMATE_CITATION,
+                detail=(
+                    "Candidate Rule citation was resolved via "
+                    f"{resolution.match_kind.value} matching. LLM quote "
+                    f"{resolution.requested_quote!r} anchored to document text "
+                    f"{resolution.anchor.quote!r}."
+                ),
+            )
+        )
+
+    anchor = resolution.anchor
+    return (
+        rule.model_copy(
+            update={
+                "citation": Citation(
+                    document_id=anchor.document_id,
+                    document_version_id=anchor.document_version_id,
+                    section_id=anchor.section_id,
+                    quote=anchor.quote,
+                    start_char=anchor.start_char,
+                    end_char=anchor.end_char,
+                )
+            }
+        ),
+        qa_flags,
+    )
 
 
 def _rule_value_payload(rule: CandidateRuleValue) -> dict[str, object]:
