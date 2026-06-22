@@ -13,6 +13,7 @@ import ManualRulesPage from "./ManualRulesPage";
 import PolicyVersionCatalog from "./PolicyVersionCatalog";
 import AuditLogPage from "./AuditLogPage";
 import DashboardPage from "./DashboardPage";
+import ExpenseReportsPage from "./ExpenseReportsPage";
 import ThemeToggle from "./ThemeToggle";
 import { hasAnyRole } from "./permissions";
 import type { AuthenticatedPrincipal, Role } from "./types";
@@ -21,6 +22,7 @@ type AuthStatus = "booting" | "signed_out" | "authenticating" | "authenticated";
 type SectionId =
 	| "dashboard"
 	| "documents"
+	| "expense-reports"
 	| "extraction-runs"
 	| "review"
 	| "policy-versions"
@@ -86,6 +88,13 @@ const shellSections: readonly ShellSection[] = [
 		kicker: "Source Intake",
 		actions: [],
 		ledger: ["Preserve Citation fidelity before any Candidate Rule enters review."],
+	},
+	{
+		id: "expense-reports",
+		label: "Expense Reports",
+		kicker: "Expense Intake",
+		actions: [],
+		ledger: ["Imports are immutable and rejected as a whole when any CSV row fails validation."],
 	},
 	{
 		id: "extraction-runs",
@@ -445,6 +454,8 @@ export default function App() {
 					) : null}
 					{activeSection === "documents" ? (
 						<DocumentCatalog principal={principal} />
+					) : activeSection === "expense-reports" ? (
+						<ExpenseReportsPage principal={principal} />
 					) : activeSection === "dashboard" ? (
 						<DashboardPage
 							onOpenSection={(section) => {

@@ -79,6 +79,11 @@ function createAppFetchMock(
         ],
       });
     }
+    if (url === "/api/expense-reports") {
+      return jsonResponse({
+        items: [],
+      });
+    }
 
     return Promise.reject(new Error(`Unexpected fetch: ${url}`));
   });
@@ -562,5 +567,30 @@ describe("App", () => {
     expect(
       screen.getByText(/The review queue is empty — no extracted Rules are waiting for triage/),
     ).toBeInTheDocument();
+  });
+
+  it("adds Expense Reports to navigation and opens the import page", async () => {
+    window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
+    vi.stubGlobal(
+      "fetch",
+      createAppFetchMock({
+        subject: "admin-user",
+        roles: ["admin"],
+        auth_backend: "local",
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Expense Reports/i },
+      ),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Expense Reports" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import Expense Report" })).toBeInTheDocument();
   });
 });

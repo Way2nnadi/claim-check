@@ -134,6 +134,45 @@ export interface ReingestionResult {
   diff: PolicyVersionDiff;
 }
 
+export interface ExpenseReportRow {
+  employee_id: string;
+  expense_date: string;
+  expense_category: string;
+  amount: string;
+  currency: string;
+  country: string | null;
+  travel_type: string | null;
+  business_purpose: string | null;
+  attendee_list: string | null;
+  manager_approval: boolean | null;
+  receipt_attached: boolean | null;
+  trip_id: string | null;
+}
+
+export interface ExpenseReport {
+  expense_report_id: string;
+  imported_by: string;
+  source_filename: string;
+  row_count: number;
+  rows: ExpenseReportRow[];
+  created_at: string;
+}
+
+export interface ExpenseReportListResponse {
+  items: ExpenseReport[];
+}
+
+export interface ExpenseReportImportRowError {
+  row_number: number;
+  errors: string[];
+}
+
+export interface ExpenseReportImportErrorResponse {
+  detail: string;
+  file_errors: string[];
+  row_errors: ExpenseReportImportRowError[];
+}
+
 export interface PolicyVersionSummary {
   policy_version_id: string;
   published_by: string;
