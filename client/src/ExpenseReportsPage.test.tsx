@@ -50,6 +50,7 @@ describe("ExpenseReportsPage", () => {
       manager_approval: true,
       receipt_attached: true,
       trip_id: null,
+      submission_days: null,
     }));
   }
 
@@ -70,6 +71,7 @@ describe("ExpenseReportsPage", () => {
               manager_approval: true,
               receipt_attached: true,
               trip_id: "trip-7",
+              submission_days: 14,
             },
           ]
         : buildExpenseRows(rowCount);
@@ -79,6 +81,11 @@ describe("ExpenseReportsPage", () => {
       source_filename: "expenses.csv",
       row_count: rowCount,
       created_at: "2026-06-22T11:00:00Z",
+      input_fingerprint: {
+        source_filename: "expenses.csv",
+        row_count: rowCount,
+        content_hash: "a".repeat(64),
+      },
       rows,
     };
   }
@@ -252,6 +259,8 @@ describe("ExpenseReportsPage", () => {
 
     expect(await screen.findByRole("heading", { name: "expense-report-1" })).toBeInTheDocument();
     expect(screen.getByText("Team dinner")).toBeInTheDocument();
+    expect(screen.getByText("Alice; Bob")).toBeInTheDocument();
+    expect(screen.getByText("14")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/expense-reports/expense-report-1",
       expect.any(Object),
@@ -325,5 +334,51 @@ describe("ExpenseReportsPage", () => {
         "An administrator must import CSV files before reports appear here.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("shows immutability messaging and optional evaluator fields on detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url === "/api/expense-reports") {
+          return jsonResponse({
+            items: [
+              {
+                expense_report_id: "expense-report-1",
+                imported_by: "admin-user",
+                source_filename: "expenses.csv",
+                row_count: 1,
+                created_at: "2026-06-22T11:00:00Z",
+              },
+            ],
+          });
+        }
+        if (url === "/api/expense-reports/expense-report-1") {
+          return jsonResponse(mockExpenseReportDetail("expense-report-1"));
+        }
+        if (url === "/api/compiled-rule-sets") {
+          return jsonResponse({ items: [] });
+        }
+        if (
+          url === "/api/expense-reports/expense-report-1/compliance-evaluation-runs"
+        ) {
+          return jsonResponse({ expense_report_id: "expense-report-1", items: [] });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      }),
+    );
+
+    render(<ExpenseReportsPage principal={viewerPrincipal} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Open expense-report-1" }));
+
+    expect(
+      await screen.findByText(/Imported reports are immutable/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Immutable")).toBeInTheDocument();
+    expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Country" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Submission days" })).toBeInTheDocument();
+    expect(screen.getByText("us")).toBeInTheDocument();
   });
 });

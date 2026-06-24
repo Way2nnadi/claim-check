@@ -41,6 +41,12 @@ Return a single JSON object with this shape:
         "expense_category": "<optional>",
         "travel_type": "<optional>",
         "employee_group": "<optional>",
+        "department": "<optional>",
+        "role": "<optional>",
+        "seniority": "<optional>",
+        "state": "<optional>",
+        "city": "<optional>",
+        "region": "<optional>",
         "effective_start_date": "<optional ISO date>",
         "effective_end_date": "<optional ISO date>"
       },

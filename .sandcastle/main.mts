@@ -8,7 +8,6 @@ import {
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -49,53 +48,20 @@ const loadSandcastleEnv = (): void => {
 
 loadSandcastleEnv();
 
-const getCodexAccessToken = (): string | undefined => {
-	const token = process.env.CODEX_ACCESS_TOKEN?.trim();
-	if (token) {
-		return token;
-	}
-
-	const authPath = join(homedir(), ".codex", "auth.json");
-	if (!existsSync(authPath)) {
-		return undefined;
-	}
-
+const assertCodexAuth = (): void => {
 	try {
-		const auth = JSON.parse(readFileSync(authPath, "utf8")) as {
-			tokens?: { access_token?: string };
-		};
-		const accessToken = auth.tokens?.access_token?.trim();
-		return accessToken || undefined;
-	} catch {
-		return undefined;
-	}
-};
-
-const refreshCodexAuthFromAccessToken = (accessToken: string): void => {
-	try {
-		execFileSync("codex", ["login", "--with-access-token"], {
-			input: accessToken,
+		execFileSync("codex", ["login", "status"], {
 			encoding: "utf8",
-			stdio: ["pipe", "pipe", "pipe"],
+			stdio: ["ignore", "pipe", "pipe"],
 		});
-		console.log("Refreshed host Codex auth from access token.");
-	} catch (error) {
-		const message =
-			error instanceof Error ? error.message.trim() : String(error);
+	} catch {
 		throw new Error(
-			`Failed to refresh Codex auth from CODEX_ACCESS_TOKEN: ${message}`,
+			"Missing Codex authentication. Run `codex login` on the host.",
 		);
 	}
 };
 
-const codexAccessToken = getCodexAccessToken();
-if (codexAccessToken) {
-	refreshCodexAuthFromAccessToken(codexAccessToken);
-} else {
-	throw new Error(
-		"Missing Codex access token. Run `codex login` on the host, or set CODEX_ACCESS_TOKEN in .sandcastle/.env.",
-	);
-}
+assertCodexAuth();
 
 const runGh = (args: string[]): string =>
 	execFileSync("gh", args, {
@@ -484,9 +450,6 @@ const IMAGE_NAME = "sandcastle:claim-check";
 const PARALLEL_RUNS = 2;
 
 const sandboxEnv: Record<string, string> = { GH_TOKEN: githubToken };
-if (codexAccessToken) {
-	sandboxEnv.CODEX_ACCESS_TOKEN = codexAccessToken;
-}
 
 const sandboxProvider = docker({
 	imageName: IMAGE_NAME,
@@ -502,15 +465,6 @@ const sandboxProvider = docker({
 const hooks = {
 	sandbox: {
 		onSandboxReady: [
-			...(codexAccessToken
-				? [
-						{
-							command:
-								'printf "%s" "$CODEX_ACCESS_TOKEN" | codex login --with-access-token',
-							timeoutMs: 30_000,
-						},
-					]
-				: []),
 			{ command: "codex login status", timeoutMs: 15_000 },
 			{ command: "gh auth setup-git", timeoutMs: 30_000 },
 			{ command: "uv sync --all-extras", timeoutMs: 300_000 },
@@ -522,7 +476,7 @@ const hooks = {
 	},
 };
 
-const agent = codex("gpt-5.4");
+const agent = codex("gpt-5.3-codex");
 
 type ClaimedIssue = { issue: GhIssue; branch: string };
 

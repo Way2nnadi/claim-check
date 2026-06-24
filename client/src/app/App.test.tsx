@@ -84,6 +84,13 @@ function createAppFetchMock(
         items: [],
       });
     }
+    if (url === "/api/compliance-reviews") {
+      return jsonResponse({
+        items: [],
+        compliance_evaluation_run_id: null,
+        include_violations: true,
+      });
+    }
     if (url === "/api/compiled-rule-sets") {
       return jsonResponse({
         items: [],
@@ -112,7 +119,11 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
-    expect(await screen.findByText(/2 pending · latest policy-v4 · 1 run/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        /0 expense reports · 0 evaluation runs · 0 in review queue · 2 rules pending/i,
+      ),
+    ).toBeInTheDocument();
     expect(await screen.findByText("policy-v4")).toBeInTheDocument();
     expect(await screen.findByText("extract-expense-v2")).toBeInTheDocument();
     expect(
@@ -242,7 +253,9 @@ describe("App", () => {
       ),
     );
 
-    expect(await screen.findByRole("heading", { name: "Manual Rules" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Manual Rules" }),
+    ).toBeInTheDocument();
     const createButtons = screen.getAllByRole("button", {
       name: "Create Manual Rule",
     });
@@ -285,7 +298,12 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Dashboard" });
-    await userEvent.click(screen.getByRole("button", { name: "Audit" }));
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Audit/i },
+      ),
+    );
 
     expect(await screen.findByRole("heading", { name: "Audit" })).toBeInTheDocument();
     expect(screen.getByText("approver-user")).toBeInTheDocument();
@@ -572,11 +590,43 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByRole("navigation", { name: "Primary" });
-    await userEvent.click(screen.getByRole("button", { name: "Review Rules" }));
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Review Rules/i },
+      ),
+    );
 
     expect(await screen.findByRole("heading", { name: "Review Rules" })).toBeInTheDocument();
     expect(
       screen.getByText(/The review queue is empty — no extracted Rules are waiting for triage/),
+    ).toBeInTheDocument();
+  });
+
+  it("adds Rule Test Cases to navigation and opens the catalog", async () => {
+    window.sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, "admin-token");
+    vi.stubGlobal(
+      "fetch",
+      createAppFetchMock({
+        subject: "admin-user",
+        roles: ["admin"],
+        auth_backend: "local",
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await userEvent.click(
+      within(screen.getByRole("navigation", { name: "Primary" })).getByRole(
+        "button",
+        { name: /Rule Test Cases/i },
+      ),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Rule Test Cases" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Compile a published Policy Version first/i),
     ).toBeInTheDocument();
   });
 

@@ -6,18 +6,26 @@ import { formatPinningLabel } from "../extraction-runs/format";
 export const AUDIT_ENTITY_TYPE_OPTIONS = [
   { value: "", label: "All entity types" },
   { value: "candidate_rule", label: "Candidate Rule" },
+  { value: "compliance_evaluation_run", label: "Compliance Evaluation Run" },
+  { value: "compliance_review", label: "Compliance Review" },
   { value: "document_version", label: "Document Version" },
+  { value: "expense_report", label: "Expense Report" },
   { value: "extraction_run", label: "Extraction Run" },
   { value: "policy_version", label: "Policy Version" },
   { value: "rule", label: "Rule" },
+  { value: "rule_test_case", label: "Rule Test Case" },
 ] as const;
 
 const ENTITY_LABELS: Record<string, string> = {
   candidate_rule: "Candidate Rule",
+  compliance_evaluation_run: "Compliance Evaluation Run",
+  compliance_review: "Compliance Review",
   document_version: "Document Version",
+  expense_report: "Expense Report",
   extraction_run: "Extraction Run",
   policy_version: "Policy Version",
   rule: "Rule",
+  rule_test_case: "Rule Test Case",
 };
 
 export function formatAuditTimestamp(iso: string): string {
@@ -136,6 +144,44 @@ export function summarizeAuditPayload(event: AuditEvent): string {
   if (typeof payload.origin === "string") {
     parts.push(`Origin ${payload.origin}`);
   }
+  if (typeof payload.resolution_type === "string" && payload.resolution_type) {
+    parts.push(payload.resolution_type.replaceAll("_", " "));
+  }
+  if (typeof payload.compliance_evaluation_run_id === "string") {
+    parts.push(`Run ${shortenId(payload.compliance_evaluation_run_id)}`);
+  }
+  if (typeof payload.expense_report_id === "string") {
+    parts.push(`Report ${shortenId(payload.expense_report_id)}`);
+  }
+  if (typeof payload.employee_id === "string" && payload.employee_id) {
+    parts.push(`Employee ${payload.employee_id}`);
+  }
+  if (typeof payload.expense_date === "string" && payload.expense_date) {
+    parts.push(`Date ${payload.expense_date}`);
+  }
+  if (typeof payload.row_index === "number") {
+    parts.push(`Row ${payload.row_index}`);
+  }
+  if (
+    typeof payload.expense_input_fingerprint === "object" &&
+    payload.expense_input_fingerprint !== null &&
+    typeof (payload.expense_input_fingerprint as { content_hash?: unknown }).content_hash ===
+      "string"
+  ) {
+    const fingerprint = payload.expense_input_fingerprint as {
+      source_filename?: string;
+      content_hash?: string;
+    };
+    if (fingerprint.source_filename) {
+      parts.push(fingerprint.source_filename);
+    }
+    if (fingerprint.content_hash) {
+      parts.push(`Hash ${shortenId(fingerprint.content_hash, 12)}`);
+    }
+  }
+  if (typeof payload.policy_version_id === "string") {
+    parts.push(`Policy ${shortenId(payload.policy_version_id)}`);
+  }
   if (typeof payload.has_citation === "boolean") {
     parts.push(payload.has_citation ? "Citation attached" : "No Citation");
   }
@@ -148,15 +194,29 @@ export function summarizeAuditPayload(event: AuditEvent): string {
 }
 
 export function resolveAuditEmptyMessage(filters: AuditEventFilters): string {
-  if (filters.entityType || filters.entityId) {
+  if (
+    filters.entityType ||
+    filters.entityId ||
+    filters.complianceEvaluationRunId ||
+    filters.employeeId ||
+    filters.expenseDate ||
+    filters.rowIndex !== undefined
+  ) {
     return "No audit events match the current scope.";
   }
   return "No audit events have been recorded yet.";
 }
 
 export function resolveAuditEmptyHint(filters: AuditEventFilters): string {
-  if (filters.entityType || filters.entityId) {
+  if (
+    filters.entityType ||
+    filters.entityId ||
+    filters.complianceEvaluationRunId ||
+    filters.employeeId ||
+    filters.expenseDate ||
+    filters.rowIndex !== undefined
+  ) {
     return "Clear the scope or adjust the entity filters if you expected a matching event.";
   }
-  return "Events appear here after uploads, review decisions, Manual Rules, and Policy Version publication.";
+  return "Events appear here after uploads, review decisions, compliance runs, and Policy Version publication.";
 }

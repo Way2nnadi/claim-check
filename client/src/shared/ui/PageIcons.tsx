@@ -67,6 +67,28 @@ export function ExpenseReportPageIcon({ size = 16 }: IconProps) {
 	);
 }
 
+export function EvaluationRunPageIcon({ size = 16 }: IconProps) {
+	return (
+		<IconShell size={size}>
+			<svg viewBox="0 0 16 16" fill="currentColor" width={size} height={size}>
+				<title>Evaluation run</title>
+				<path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zm0 1.5a5 5 0 110 10 5 5 0 010-10zm-.75 2.25v3.19l2.72 1.59.78-1.33-2-1.17V5.25H7.25z" />
+			</svg>
+		</IconShell>
+	);
+}
+
+export function ComplianceReviewPageIcon({ size = 16 }: IconProps) {
+	return (
+		<IconShell size={size}>
+			<svg viewBox="0 0 16 16" fill="currentColor" width={size} height={size}>
+				<title>Compliance review</title>
+				<path d="M3 2h10v12H3V2zm1.5 1.5v9h7v-9h-7zM5 6h6v1.25H5V6zm0 2.5h4.5V9.75H5V8.5z" />
+			</svg>
+		</IconShell>
+	);
+}
+
 export function ExtractionRunPageIcon({ size = 16 }: IconProps) {
 	return (
 		<IconShell size={size}>

@@ -1,25 +1,20 @@
 import { deleteDocumentVersion, downloadDocumentVersion, fetchDocumentVersions } from "./api";
-import { describeFetchError, formatBytes, formatContentTypeLabel, formatDocumentTitle, formatUploadDate } from "./format";
+import { describeFetchError, formatDocumentTitle, formatUploadDate } from "./format";
 import type { DocumentVersion, PolicyDocumentSummary } from "./types";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
-import type { CSSProperties } from "react";
 import { ApiError } from "../shared/api/client";
 import { shortenId } from "../shared/format/common";
 
 import NewDocumentVersionDrawer from "./NewDocumentVersionDrawer";
-
 import ReingestionDrawer from "../reingestion/ReingestionDrawer";
-import VersionExtractionRuns from "./VersionExtractionRuns";
+import VersionArchiveDrawer from "./VersionArchiveDrawer";
+import VersionRegister, { type VersionTab } from "./VersionRegister";
+import VersionWorkspace from "./VersionWorkspace";
 import Breadcrumbs from "../shared/ui/Breadcrumbs";
 import RecordPageHeader, {
   type RecordPropertyGroup,
 } from "../shared/ui/RecordPageHeader";
-import RecordPropertyRow, {
-  type RecordProperty,
-} from "../shared/ui/RecordPropertyRow";
 import StatusPill from "../shared/ui/StatusPill";
-import FilterTabs from "../shared/ui/FilterTabs";
 import { DocumentPageIcon, RecordPageIcon } from "../shared/ui/PageIcons";
 
 type DetailStatus = "loading" | "ready" | "not_found" | "error";
@@ -34,12 +29,15 @@ interface DocumentDetailProps {
 const DELETE_REASON_REQUIRED = "Enter a reason before striking this version from the register.";
 const DELETE_REASON_MAX_LENGTH = 500;
 
-type VersionTab = "active" | "archived";
-
-const VERSION_TABS: readonly { id: VersionTab; label: string }[] = [
-  { id: "active", label: "Active" },
-  { id: "archived", label: "Archived" },
-];
+function pickDefaultVersionId(
+  versions: DocumentVersion[],
+  preferredId: string | undefined,
+): string | null {
+  if (preferredId && versions.some((version) => version.document_version_id === preferredId)) {
+    return preferredId;
+  }
+  return versions[0]?.document_version_id ?? null;
+}
 
 export default function DocumentDetail({
   documentId,
@@ -50,6 +48,7 @@ export default function DocumentDetail({
   const [status, setStatus] = useState<DetailStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [downloadingVersionId, setDownloadingVersionId] = useState<string | null>(null);
   const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({});
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
@@ -69,6 +68,7 @@ export default function DocumentDetail({
       const response = await fetchDocumentVersions(documentId, true);
       if (response.items.length === 0) {
         setVersions([]);
+        setSelectedVersionId(null);
         setStatus("not_found");
         return;
       }
@@ -100,11 +100,48 @@ export default function DocumentDetail({
     }
   }, [canUpload, status]);
 
+  const latestVersionId =
+    summary?.latest_document_version_id ??
+    versions.find((version) => !version.deleted_at)?.document_version_id;
+
+  const activeVersions = useMemo(
+    () => versions.filter((version) => !version.deleted_at),
+    [versions],
+  );
+  const archivedVersions = useMemo(
+    () => versions.filter((version) => Boolean(version.deleted_at)),
+    [versions],
+  );
+  const displayedVersions = versionTab === "active" ? activeVersions : archivedVersions;
+  const versionTabCounts: Record<VersionTab, number> = {
+    active: activeVersions.length,
+    archived: archivedVersions.length,
+  };
+
+  useEffect(() => {
+    if (status !== "ready") {
+      return;
+    }
+
+    setSelectedVersionId((current) => {
+      const preferredId =
+        versionTab === "active"
+          ? (latestVersionId ?? current ?? undefined)
+          : (current ?? undefined);
+      return pickDefaultVersionId(displayedVersions, preferredId);
+    });
+  }, [displayedVersions, latestVersionId, status, versionTab]);
+
+  const selectedVersion =
+    versions.find((version) => version.document_version_id === selectedVersionId) ?? null;
+
   async function handleVersionUploaded(documentVersionId: string): Promise<void> {
     setUploadDrawerOpen(false);
     setUploadSuccess(
       `Registered ${documentVersionId}. Prior Document Versions remain unchanged.`,
     );
+    setVersionTab("active");
+    setSelectedVersionId(documentVersionId);
     await loadVersions();
   }
 
@@ -140,7 +177,7 @@ export default function DocumentDetail({
     }
   }
 
-  function openArchiveForm(versionId: string): void {
+  function openArchiveDrawer(versionId: string): void {
     setArchivingVersionId(versionId);
     setArchiveReason("");
     setArchiveErrors((current) => {
@@ -150,17 +187,16 @@ export default function DocumentDetail({
     });
   }
 
-  function closeArchiveForm(): void {
+  function closeArchiveDrawer(): void {
     setArchivingVersionId(null);
     setArchiveReason("");
   }
 
-  async function handleArchiveSubmit(
-    event: FormEvent<HTMLFormElement>,
-    version: DocumentVersion,
-  ): Promise<void> {
-    event.preventDefault();
-    if (!canUpload || isArchiving || version.deleted_at) {
+  async function handleArchiveConfirm(): Promise<void> {
+    const version = versions.find(
+      (entry) => entry.document_version_id === archivingVersionId,
+    );
+    if (!version || !canUpload || isArchiving || version.deleted_at) {
       return;
     }
 
@@ -189,9 +225,10 @@ export default function DocumentDetail({
 
     try {
       await deleteDocumentVersion(version.document_id, version.document_version_id, reason);
-      closeArchiveForm();
-      await loadVersions();
+      closeArchiveDrawer();
       setVersionTab("archived");
+      setSelectedVersionId(version.document_version_id);
+      await loadVersions();
     } catch (error: unknown) {
       setArchiveErrors((current) => ({
         ...current,
@@ -202,22 +239,12 @@ export default function DocumentDetail({
     }
   }
 
-  const latestVersionId =
-    summary?.latest_document_version_id ?? versions.find((version) => !version.deleted_at)?.document_version_id;
-
-  const activeVersions = useMemo(
-    () => versions.filter((version) => !version.deleted_at),
-    [versions],
-  );
-  const archivedVersions = useMemo(
-    () => versions.filter((version) => Boolean(version.deleted_at)),
-    [versions],
-  );
-  const displayedVersions = versionTab === "active" ? activeVersions : archivedVersions;
-  const versionTabCounts: Record<VersionTab, number> = {
-    active: activeVersions.length,
-    archived: archivedVersions.length,
-  };
+  function handleVersionTabChange(tab: VersionTab): void {
+    setVersionTab(tab);
+    const nextVersions = tab === "active" ? activeVersions : archivedVersions;
+    const preferredId = tab === "active" ? latestVersionId : selectedVersionId ?? undefined;
+    setSelectedVersionId(pickDefaultVersionId(nextVersions, preferredId));
+  }
 
   const showAdminActions = canUpload && (status === "ready" || status === "not_found");
   const showReingestion = showAdminActions && status === "ready";
@@ -228,13 +255,22 @@ export default function DocumentDetail({
 
   const headerPropertyGroups: RecordPropertyGroup[] = [
     {
-      title: "Version ledger",
+      title: "Document",
       properties: [
         {
-          label: "Versions",
+          label: "Document ID",
+          value: <code className="db-mono">{documentId}</code>,
+        },
+        {
+          label: "Latest upload",
+          value: lastUpdated ? formatUploadDate(lastUpdated) : null,
+          empty: !lastUpdated,
+        },
+        {
+          label: "Register",
           value: summary
             ? `${summary.active_version_count} active · ${summary.version_count} total`
-            : `${activeVersions.length} active`,
+            : `${activeVersions.length} active · ${versions.length} total`,
         },
         {
           label: "Latest version",
@@ -247,25 +283,11 @@ export default function DocumentDetail({
         },
         {
           label: "Archive status",
-          value: summary?.has_deleted_versions ? (
+          value: summary?.has_deleted_versions || archivedVersions.length > 0 ? (
             <StatusPill label="Has archived versions" variant="warning" />
           ) : (
             <StatusPill label="All active" variant="success" />
           ),
-        },
-      ],
-    },
-    {
-      title: "Document",
-      properties: [
-        {
-          label: "Document ID",
-          value: <code className="db-mono">{documentId}</code>,
-        },
-        {
-          label: "Latest upload",
-          value: lastUpdated ? formatUploadDate(lastUpdated) : null,
-          empty: !lastUpdated,
         },
       ],
     },
@@ -305,6 +327,10 @@ export default function DocumentDetail({
     </>
   ) : undefined;
 
+  const archivingVersion = versions.find(
+    (version) => version.document_version_id === archivingVersionId,
+  );
+
   return (
     <div className="document-detail content-enter">
       <RecordPageHeader
@@ -323,11 +349,7 @@ export default function DocumentDetail({
             ]}
           />
         }
-        icon={
-          <RecordPageIcon
-            icon={<DocumentPageIcon size={28} />}
-          />
-        }
+        icon={<RecordPageIcon icon={<DocumentPageIcon size={28} />} />}
         title={formatDocumentTitle(documentId)}
         subtitle={documentId}
         lastUpdated={lastUpdated}
@@ -352,13 +374,24 @@ export default function DocumentDetail({
         onCompleted={() => void loadVersions()}
       />
 
+      {archivingVersion ? (
+        <VersionArchiveDrawer
+          versionId={archivingVersion.document_version_id}
+          filename={archivingVersion.filename}
+          reason={archiveReason}
+          error={archiveErrors[archivingVersion.document_version_id] ?? null}
+          isArchiving={isArchiving}
+          onReasonChange={setArchiveReason}
+          onConfirm={() => void handleArchiveConfirm()}
+          onCancel={closeArchiveDrawer}
+        />
+      ) : null}
+
       {uploadSuccess ? (
         <output className="version-upload-feedback success">{uploadSuccess}</output>
       ) : null}
 
-      {status === "loading" ? (
-        <p className="catalog-status">Loading…</p>
-      ) : null}
+      {status === "loading" ? <p className="catalog-status">Loading…</p> : null}
 
       {status === "error" ? <p className="error-banner">{errorMessage}</p> : null}
 
@@ -377,190 +410,29 @@ export default function DocumentDetail({
       {status === "ready" ? (
         <div className="version-view reveal">
           <h4 className="record-section-heading">Document versions</h4>
-          <FilterTabs
-            tabs={VERSION_TABS.map((tab) => ({
-              id: tab.id,
-              label: tab.label,
-              count: versionTabCounts[tab.id],
-            }))}
-            activeTabId={versionTab}
-            onTabChange={(tabId) => setVersionTab(tabId as VersionTab)}
-            ariaLabel="Filter by version status"
-            idPrefix="document-version-tab"
-            panelId="document-version-panel"
-          />
-
-          <div
-            id="document-version-panel"
-            role="tabpanel"
-            aria-labelledby={`document-version-tab-${versionTab}`}
-          >
-            {displayedVersions.length === 0 ? (
-              <p className="version-ledger-empty">
-                {versionTab === "active"
-                  ? "No active Document Versions on file."
-                  : "No archived Document Versions on file."}
-              </p>
+          <div className="version-register-layout">
+            <VersionRegister
+              documentId={documentId}
+              versions={displayedVersions}
+              versionTab={versionTab}
+              versionTabCounts={versionTabCounts}
+              selectedVersionId={selectedVersionId}
+              latestVersionId={latestVersionId}
+              onVersionTabChange={handleVersionTabChange}
+              onSelectVersion={setSelectedVersionId}
+            />
+            {selectedVersion ? (
+              <VersionWorkspace
+                version={selectedVersion}
+                latestVersionId={latestVersionId}
+                canUpload={canUpload}
+                isDownloading={downloadingVersionId === selectedVersion.document_version_id}
+                downloadError={downloadErrors[selectedVersion.document_version_id] ?? null}
+                onDownload={() => void handleDownload(selectedVersion)}
+                onOpenArchive={() => openArchiveDrawer(selectedVersion.document_version_id)}
+              />
             ) : (
-              <ol className="version-ledger-flat" aria-label={`Document Versions for ${documentId}`}>
-                {displayedVersions.map((version, index) => {
-              const isArchived = Boolean(version.deleted_at);
-              const isLatest = version.document_version_id === latestVersionId;
-              const downloadError = downloadErrors[version.document_version_id];
-              const isDownloading = downloadingVersionId === version.document_version_id;
-              const isArchiveFormOpen = archivingVersionId === version.document_version_id;
-              const archiveError = archiveErrors[version.document_version_id];
-              const versionProperties: RecordProperty[] = [
-                {
-                  label: "Format",
-                  value: formatContentTypeLabel(version.content_type),
-                },
-                {
-                  label: "Size",
-                  value: formatBytes(version.size_bytes),
-                },
-                {
-                  label: "Uploaded",
-                  value: (
-                    <time dateTime={version.created_at}>
-                      {formatUploadDate(version.created_at)}
-                    </time>
-                  ),
-                },
-                {
-                  label: "Version ID",
-                  value: (
-                    <code className="db-mono" title={version.document_version_id}>
-                      {version.document_version_id}
-                    </code>
-                  ),
-                },
-              ];
-              if (isArchived && version.deleted_at) {
-                versionProperties.push({
-                  label: "Archived",
-                  value: new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
-                    new Date(version.deleted_at),
-                  ),
-                });
-              }
-
-              return (
-                <li
-                  key={version.document_version_id}
-                  className={`version-flat-row reveal${isArchived ? " deleted" : ""}${
-                    isLatest && !isArchived ? " latest" : ""
-                  }`}
-                  style={{ "--reveal-delay": `${60 + index * 55}ms` } as CSSProperties}
-                >
-                  <div className="version-flat-head">
-                    <div className="version-flat-main">
-                      <p className="version-flat-title">{version.filename}</p>
-                    </div>
-                    <div className="version-flat-side">
-                      <div className="version-flat-badges">
-                        {isLatest && !isArchived ? (
-                          <StatusPill label="Latest" variant="success" />
-                        ) : null}
-                      </div>
-                      <div className="version-flat-actions">
-                        <button
-                          type="button"
-                          className="db-link"
-                          disabled={isArchived || isDownloading}
-                          onClick={() => void handleDownload(version)}
-                        >
-                          {isDownloading ? "Retrieving…" : "Retrieve source"}
-                        </button>
-                        {canUpload && !isArchived ? (
-                          <button
-                            type="button"
-                            className="db-link db-link-danger"
-                            disabled={isArchiveFormOpen || isArchiving}
-                            onClick={() => openArchiveForm(version.document_version_id)}
-                          >
-                            Strike from register
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="version-flat-body">
-                      <RecordPropertyRow
-                        properties={versionProperties}
-                        layout="stacked"
-                      />
-                      {version.deletion_reason ? (
-                        <p className="version-deletion">{version.deletion_reason}</p>
-                      ) : null}
-                      {downloadError ? (
-                        <p className="version-download-error">{downloadError}</p>
-                      ) : null}
-                      {isArchived ? (
-                        <p className="version-download-note">Source unavailable for archived versions</p>
-                      ) : null}
-                      {isArchiveFormOpen ? (
-                        <form
-                          className="version-archive-form"
-                          aria-label={`Archive ${version.document_version_id}`}
-                          onSubmit={(event) => void handleArchiveSubmit(event, version)}
-                        >
-                          <label htmlFor={`archive-reason-${version.document_version_id}`}>
-                            Deletion reason
-                          </label>
-                          <textarea
-                            id={`archive-reason-${version.document_version_id}`}
-                            name="archive-reason"
-                            rows={3}
-                            maxLength={DELETE_REASON_MAX_LENGTH}
-                            value={archiveReason}
-                            disabled={isArchiving}
-                            placeholder="Why is this version being struck from the register?"
-                            onChange={(event) => {
-                              setArchiveReason(event.target.value);
-                              setArchiveErrors((current) => {
-                                const next = { ...current };
-                                delete next[version.document_version_id];
-                                return next;
-                              });
-                            }}
-                          />
-                          <div className="version-archive-actions">
-                            <button
-                              type="submit"
-                              className="document-command document-command-accent"
-                              disabled={isArchiving}
-                            >
-                              {isArchiving ? "Archiving…" : "Confirm archive"}
-                            </button>
-                            <button
-                              type="button"
-                              className="document-command"
-                              disabled={isArchiving}
-                              onClick={closeArchiveForm}
-                            >
-                              Withdraw
-                            </button>
-                          </div>
-                          {archiveError ? (
-                            <p className="version-archive-error" role="alert">
-                              {archiveError}
-                            </p>
-                          ) : null}
-                        </form>
-                      ) : null}
-                      <VersionExtractionRuns
-                        documentId={version.document_id}
-                        documentVersionId={version.document_version_id}
-                        isArchived={isArchived}
-                        canTrigger={canUpload}
-                      />
-                    </div>
-                </li>
-              );
-            })}
-              </ol>
+              <p className="version-workspace-empty">Select a version to inspect details.</p>
             )}
           </div>
         </div>

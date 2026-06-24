@@ -2,6 +2,7 @@ import type {
   EvaluationOutcome,
   RuleTestCase,
   RuleTestCaseDisableRequest,
+  RuleTestCaseEditRequest,
   RuleTestCaseEnableRequest,
   RuleTestCaseGenerateResponse,
   RuleTestCaseListResponse,
@@ -43,6 +44,19 @@ export function enableRuleTestCase(
     `/api/rule-test-cases/${encodeURIComponent(ruleTestCaseId)}/enable`,
     {
       method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
+}
+
+export function editRuleTestCase(
+  ruleTestCaseId: string,
+  request: RuleTestCaseEditRequest,
+): Promise<RuleTestCase> {
+  return apiRequest<RuleTestCase>(
+    `/api/rule-test-cases/${encodeURIComponent(ruleTestCaseId)}`,
+    {
+      method: "PATCH",
       body: JSON.stringify(request),
     },
   );
@@ -96,6 +110,7 @@ export type {
   EvaluationOutcome,
   RuleTestCase,
   RuleTestCaseDisableRequest,
+  RuleTestCaseEditRequest,
   RuleTestCaseEnableRequest,
   RuleTestCaseGenerateResponse,
   RuleTestCaseGroup,

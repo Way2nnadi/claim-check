@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from policy_pipeline.compiled_rule_sets.compiler import compile_policy_version_snapshot
+from policy_pipeline.compiled_rule_sets.models import CompileStatus
 from policy_pipeline.rule_test_cases.generator import generate_rule_test_cases
 from policy_pipeline.rule_test_cases.models import EvaluationOutcome, RuleTestCaseVariant
 from policy_pipeline.rules.models import (
@@ -233,7 +234,7 @@ def test_generate_rule_test_cases_emits_exception_variants_when_required_evidenc
     assert evidence_absent.expense_fixture.manager_approval is False
 
 
-def test_generate_rule_test_cases_skips_unmapped_exception_evidence() -> None:
+def test_compile_rejects_unmapped_exception_evidence() -> None:
     rule = _build_meal_cap_rule_with_exception(rule_id="rule-meal-cap-unmapped")
     rule = rule.model_copy(
         update={
@@ -258,14 +259,9 @@ def test_generate_rule_test_cases_skips_unmapped_exception_evidence() -> None:
         compiled_at=datetime(2026, 6, 22, tzinfo=UTC),
     )
 
-    cases = generate_rule_test_cases(
-        compiled_rule_set,
-        generated_by="admin-user",
-        generated_at=datetime(2026, 6, 22, 12, 0, tzinfo=UTC),
-    )
-
-    assert len(cases) == 3
-    assert not any(case.variant is RuleTestCaseVariant.EXCEPTION for case in cases)
+    assert compiled_rule_set.summary.compile_error == 1
+    assert compiled_rule_set.entries[0].status is CompileStatus.COMPILE_ERROR
+    assert "director_approval" in (compiled_rule_set.entries[0].error_reason or "")
 
 
 def test_generate_rule_test_cases_skips_non_enforceable_rules() -> None:

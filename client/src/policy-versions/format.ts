@@ -71,6 +71,12 @@ export function summarizeRuleScope(scope: Scope): string {
     scope.travel_type,
     scope.country,
     scope.employee_group,
+    scope.department,
+    scope.role,
+    scope.seniority,
+    scope.state,
+    scope.city,
+    scope.region,
   ].filter(Boolean);
 
   if (segments.length === 0) {

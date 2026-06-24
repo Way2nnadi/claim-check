@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from policy_pipeline.extraction.registry import save_model_configuration, save_prompt_template
 from policy_pipeline.main import create_app
 from policy_pipeline.shared.database import Base, ExtractionRunRecord, RuleRecord
+from tests.rule_scope_helpers import full_rule_scope
 
 
 def _configure_local_auth(
@@ -226,14 +227,7 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
                 "extraction_run_id": "extract-expense-policy-v1",
                 "rationale": None,
             },
-            "scope": {
-                "country": None,
-                "expense_category": "meals",
-                "travel_type": None,
-                "employee_group": None,
-                "effective_start_date": None,
-                "effective_end_date": None,
-            },
+            "scope": full_rule_scope(expense_category="meals"),
             "citation": {
                 "document_id": "expense-policy",
                 "document_version_id": document_version_id,
@@ -266,14 +260,7 @@ async def test_admin_creates_extraction_run_and_persists_extracted_candidate_rul
                 "extraction_run_id": "extract-expense-policy-v1",
                 "rationale": None,
             },
-            "scope": {
-                "country": None,
-                "expense_category": "lodging",
-                "travel_type": None,
-                "employee_group": None,
-                "effective_start_date": None,
-                "effective_end_date": None,
-            },
+            "scope": full_rule_scope(expense_category="lodging"),
             "citation": {
                 "document_id": "expense-policy",
                 "document_version_id": document_version_id,

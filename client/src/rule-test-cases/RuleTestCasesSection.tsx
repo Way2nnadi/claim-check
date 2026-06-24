@@ -2,11 +2,11 @@ import { useMemo, useState } from "react";
 import RuleTestCaseStatusModal, {
   type RuleTestCaseStatusAction,
 } from "./RuleTestCaseStatusModal";
+import RuleTestCaseEditModal from "./RuleTestCaseEditModal";
+import type { RuleTestCaseEditDraft } from "./edits";
 import {
-  casePassFailTone,
   evaluationOutcomeTone,
   filterRuleTestCaseGroups,
-  formatCasePassFail,
   formatEvaluationOutcome,
   formatFixtureDetail,
   formatRuleTestCaseStatus,
@@ -14,14 +14,13 @@ import {
   ruleTestCaseStatusTone,
   ruleTestCaseVariantTone,
   summarizeRuleTestCaseCoverage,
-  summarizeRuleTestRun,
   type RuleTestCaseStatusFilter,
 } from "./format";
+import RuleTestCoverageReadinessView from "./RuleTestCoverageReadinessView";
 import type { RuleTestCase, RuleTestCaseGroup, RuleTestRun } from "./types";
 import FilterTabs from "../shared/ui/FilterTabs";
 import StatusPill from "../shared/ui/StatusPill";
 import { shortenId } from "../shared/format/common";
-import { formatRelativeTime } from "../shared/format/relativeTime";
 
 export type { RuleTestCaseStatusFilter };
 
@@ -30,46 +29,6 @@ function RuleTestId({ value, visible = 10 }: { value: string; visible?: number }
     <code className="rule-test-id" title={value}>
       {shortenId(value, visible)}
     </code>
-  );
-}
-
-function RuleTestRunCaseResultRow({
-  result,
-  statement,
-}: {
-  result: RuleTestRun["case_results"][number];
-  statement?: string;
-}) {
-  return (
-    <tr>
-      <td className="rule-test-run-rule-cell" title={result.rule_id}>
-        {statement ?? <code className="rule-test-id">{result.rule_id}</code>}
-      </td>
-      <td>
-        <StatusPill
-          label={formatRuleTestCaseVariant(result.variant)}
-          variant={ruleTestCaseVariantTone(result.variant)}
-        />
-      </td>
-      <td>
-        <StatusPill
-          label={formatEvaluationOutcome(result.expected_outcome)}
-          variant={evaluationOutcomeTone(result.expected_outcome)}
-        />
-      </td>
-      <td>
-        <StatusPill
-          label={formatEvaluationOutcome(result.actual_outcome)}
-          variant={evaluationOutcomeTone(result.actual_outcome)}
-        />
-      </td>
-      <td>
-        <StatusPill
-          label={formatCasePassFail(result.passed)}
-          variant={casePassFailTone(result.passed)}
-        />
-      </td>
-    </tr>
   );
 }
 
@@ -96,22 +55,27 @@ function RuleTestCaseColGroup({
 function RuleTestCaseLedger({
   groups,
   canDisable,
+  canEdit,
   showStatus,
   onDisable,
   onEnable,
+  onEdit,
 }: {
   groups: RuleTestCaseGroup[];
   canDisable: boolean;
+  canEdit: boolean;
   showStatus: boolean;
   onDisable: (testCase: RuleTestCase) => void;
   onEnable: (testCase: RuleTestCase) => void;
+  onEdit: (testCase: RuleTestCase) => void;
 }) {
-  const columnCount = (showStatus ? 1 : 0) + 5 + (canDisable ? 1 : 0);
+  const showActions = canDisable || canEdit;
+  const columnCount = (showStatus ? 1 : 0) + 5 + (showActions ? 1 : 0);
 
   return (
     <div className="db-table-wrap rule-test-table-wrap">
       <table className="db-table rule-test-case-ledger" aria-label="Rule Test Cases">
-        <RuleTestCaseColGroup showStatus={showStatus} showActions={canDisable} />
+        <RuleTestCaseColGroup showStatus={showStatus} showActions={showActions} />
         <thead>
           <tr>
             {showStatus ? <th scope="col">Status</th> : null}
@@ -120,7 +84,7 @@ function RuleTestCaseLedger({
             <th scope="col" className="rule-test-category">Category</th>
             <th scope="col" className="rule-test-fixture">Fixture</th>
             <th scope="col">Notes</th>
-            {canDisable ? <th scope="col">Actions</th> : null}
+            {showActions ? <th scope="col">Actions</th> : null}
           </tr>
         </thead>
         {groups.map((group) => (
@@ -150,9 +114,11 @@ function RuleTestCaseLedger({
                 key={testCase.rule_test_case_id}
                 testCase={testCase}
                 canDisable={canDisable}
+                canEdit={canEdit}
                 showStatus={showStatus}
                 onDisable={onDisable}
                 onEnable={onEnable}
+                onEdit={onEdit}
               />
             ))}
           </tbody>
@@ -165,26 +131,40 @@ function RuleTestCaseLedger({
 function RuleTestCaseRow({
   testCase,
   canDisable,
+  canEdit,
   showStatus,
   onDisable,
   onEnable,
+  onEdit,
 }: {
   testCase: RuleTestCase;
   canDisable: boolean;
+  canEdit: boolean;
   showStatus: boolean;
   onDisable: (testCase: RuleTestCase) => void;
   onEnable: (testCase: RuleTestCase) => void;
+  onEdit: (testCase: RuleTestCase) => void;
 }) {
   const isDisabled = testCase.status === "disabled";
+  const isEdited = testCase.edited_at != null;
+  const showActions = canDisable || canEdit;
+  const noteText = isDisabled
+    ? testCase.disable_rationale ?? null
+    : testCase.edit_rationale ?? null;
 
   return (
     <tr className={isDisabled ? "rule-test-case-row-disabled" : undefined}>
       {showStatus ? (
         <td>
-          <StatusPill
-            label={formatRuleTestCaseStatus(testCase.status)}
-            variant={ruleTestCaseStatusTone(testCase.status)}
-          />
+          <div className="rule-test-case-status-cell">
+            <StatusPill
+              label={formatRuleTestCaseStatus(testCase.status)}
+              variant={ruleTestCaseStatusTone(testCase.status)}
+            />
+            {!isDisabled && isEdited ? (
+              <StatusPill label="Edited" variant="warning" />
+            ) : null}
+          </div>
         </td>
       ) : null}
       <td>
@@ -207,33 +187,44 @@ function RuleTestCaseRow({
         {formatFixtureDetail(testCase.expense_fixture)}
       </td>
       <td className="rule-test-row-notes">
-        {isDisabled && testCase.disable_rationale ? (
-          <span className="rule-test-rationale" title={testCase.disable_rationale}>
-            {testCase.disable_rationale}
+        {noteText ? (
+          <span className="rule-test-rationale" title={noteText}>
+            {noteText}
           </span>
         ) : (
           "—"
         )}
       </td>
-      {canDisable ? (
+      {showActions ? (
         <td className="rule-test-row-actions">
-          {!isDisabled ? (
+          {!isDisabled && canEdit ? (
             <button
               type="button"
               className="rule-test-inline-action"
-              onClick={() => onDisable(testCase)}
+              onClick={() => onEdit(testCase)}
             >
-              Disable
+              Edit
             </button>
-          ) : (
-            <button
-              type="button"
-              className="rule-test-inline-action rule-test-inline-action-enable"
-              onClick={() => onEnable(testCase)}
-            >
-              Enable
-            </button>
-          )}
+          ) : null}
+          {canDisable ? (
+            !isDisabled ? (
+              <button
+                type="button"
+                className="rule-test-inline-action"
+                onClick={() => onDisable(testCase)}
+              >
+                Disable
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rule-test-inline-action rule-test-inline-action-enable"
+                onClick={() => onEnable(testCase)}
+              >
+                Enable
+              </button>
+            )
+          ) : null}
         </td>
       ) : null}
     </tr>
@@ -244,6 +235,7 @@ export interface RuleTestCasesSectionProps {
   canGenerate: boolean;
   canRun: boolean;
   canDisable: boolean;
+  canEdit: boolean;
   compiledCount: number;
   ruleTestCaseGroups: RuleTestCaseGroup[];
   ruleTestCaseTotal: number;
@@ -261,6 +253,10 @@ export interface RuleTestCasesSectionProps {
   statusActionRationale: string;
   statusActionError: string | null;
   isStatusActionSubmitting: boolean;
+  editTarget: RuleTestCase | null;
+  editDraft: RuleTestCaseEditDraft | null;
+  editError: string | null;
+  isEditSubmitting: boolean;
   onGenerate: () => void;
   onRun: () => void;
   onDownloadReport: () => void;
@@ -268,12 +264,17 @@ export interface RuleTestCasesSectionProps {
   onStatusActionConfirm: () => void;
   onStatusActionCancel: () => void;
   onStatusActionRationaleChange: (value: string) => void;
+  onEditRequest: (testCase: RuleTestCase) => void;
+  onEditConfirm: () => void;
+  onEditCancel: () => void;
+  onEditDraftChange: (draft: RuleTestCaseEditDraft) => void;
 }
 
 export default function RuleTestCasesSection({
   canGenerate,
   canRun,
   canDisable,
+  canEdit,
   compiledCount,
   ruleTestCaseGroups,
   ruleTestCaseTotal,
@@ -291,6 +292,10 @@ export default function RuleTestCasesSection({
   statusActionRationale,
   statusActionError,
   isStatusActionSubmitting,
+  editTarget,
+  editDraft,
+  editError,
+  isEditSubmitting,
   onGenerate,
   onRun,
   onDownloadReport,
@@ -298,15 +303,15 @@ export default function RuleTestCasesSection({
   onStatusActionConfirm,
   onStatusActionCancel,
   onStatusActionRationaleChange,
+  onEditRequest,
+  onEditConfirm,
+  onEditCancel,
+  onEditDraftChange,
 }: RuleTestCasesSectionProps) {
   const [statusFilter, setStatusFilter] = useState<RuleTestCaseStatusFilter>("all");
   const filteredGroups = useMemo(
     () => filterRuleTestCaseGroups(ruleTestCaseGroups, statusFilter),
     [ruleTestCaseGroups, statusFilter],
-  );
-  const statementByRuleId = useMemo(
-    () => new Map(ruleTestCaseGroups.map((group) => [group.rule_id, group.statement])),
-    [ruleTestCaseGroups],
   );
   const showStatusColumn = statusFilter === "all" || ruleTestCaseDisabledCount > 0;
   const filterTabs = [
@@ -385,7 +390,17 @@ export default function RuleTestCasesSection({
       ) : null}
 
       {ruleTestCaseStatus === "ready" && ruleTestCaseTotal > 0 ? (
-        <div className="extraction-ledger-wrap rule-test-ledger-wrap">
+        <>
+          <RuleTestCoverageReadinessView
+            activeCaseCount={ruleTestCaseActiveCount}
+            groups={ruleTestCaseGroups}
+            latestRuleTestRun={latestRuleTestRun}
+            ruleTestRunStatus={ruleTestRunStatus}
+            isDownloadingReport={isDownloadingReport}
+            onDownloadReport={onDownloadReport}
+          />
+
+          <div className="extraction-ledger-wrap rule-test-ledger-wrap">
           <div className="review-ledger-head">
             <FilterTabs
               tabs={filterTabs}
@@ -415,63 +430,16 @@ export default function RuleTestCasesSection({
               <RuleTestCaseLedger
                 groups={filteredGroups}
                 canDisable={canDisable}
+                canEdit={canEdit}
                 showStatus={showStatusColumn}
                 onDisable={(testCase) => onStatusActionRequest(testCase, "disable")}
                 onEnable={(testCase) => onStatusActionRequest(testCase, "enable")}
+                onEdit={onEditRequest}
               />
             )}
           </div>
         </div>
-      ) : null}
-
-      {ruleTestRunStatus === "ready" && latestRuleTestRun !== null ? (
-        <details className="rule-test-run-panel notion-collapsible" open>
-          <summary className="rule-test-run-summary">
-            <span className="rule-test-run-summary-title">Latest run</span>
-            <span className="rule-test-run-summary-meta">
-              {summarizeRuleTestRun(latestRuleTestRun.summary)} ·{" "}
-              {latestRuleTestRun.executed_by} ·{" "}
-              {formatRelativeTime(latestRuleTestRun.executed_at)}
-            </span>
-          </summary>
-          <div className="rule-test-run-body">
-            <div className="rule-test-run-toolbar">
-              <p className="review-ledger-scope">
-                Per-case results from the most recent execution.
-              </p>
-              <button
-                type="button"
-                className="document-command compact"
-                onClick={onDownloadReport}
-                disabled={isDownloadingReport}
-              >
-                {isDownloadingReport ? "Downloading…" : "Download JSON"}
-              </button>
-            </div>
-            <div className="db-table-wrap rule-test-table-wrap">
-              <table className="db-table" aria-label="Rule Test Run results">
-                <thead>
-                  <tr>
-                    <th scope="col">Rule</th>
-                    <th scope="col">Variant</th>
-                    <th scope="col">Expected</th>
-                    <th scope="col">Actual</th>
-                    <th scope="col">Result</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {latestRuleTestRun.case_results.map((result) => (
-                    <RuleTestRunCaseResultRow
-                      key={result.rule_test_case_id}
-                      result={result}
-                      statement={statementByRuleId.get(result.rule_id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </details>
+        </>
       ) : null}
 
       {statusActionTarget !== null ? (
@@ -484,6 +452,18 @@ export default function RuleTestCasesSection({
           onRationaleChange={onStatusActionRationaleChange}
           onConfirm={onStatusActionConfirm}
           onCancel={onStatusActionCancel}
+        />
+      ) : null}
+
+      {editTarget !== null && editDraft !== null ? (
+        <RuleTestCaseEditModal
+          testCase={editTarget}
+          draft={editDraft}
+          isSubmitting={isEditSubmitting}
+          error={editError}
+          onDraftChange={onEditDraftChange}
+          onConfirm={onEditConfirm}
+          onCancel={onEditCancel}
         />
       ) : null}
     </section>

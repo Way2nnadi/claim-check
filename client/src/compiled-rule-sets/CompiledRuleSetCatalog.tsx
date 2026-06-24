@@ -9,6 +9,7 @@ import {
 import type { CompiledRuleEntry, CompiledRuleSet } from "./types";
 import {
   disableRuleTestCase,
+  editRuleTestCase,
   enableRuleTestCase,
   downloadRuleTestRunReport,
   executeRuleTestRun,
@@ -24,6 +25,12 @@ import type {
   RuleTestRun,
 } from "../rule-test-cases/types";
 import { describeRuleTestCaseError } from "../rule-test-cases/format";
+import {
+  buildEditDraft,
+  buildEditRequest,
+  validateEditDraft,
+  type RuleTestCaseEditDraft,
+} from "../rule-test-cases/edits";
 import Breadcrumbs from "../shared/ui/Breadcrumbs";
 import RecordPageHeader, {
   type RecordPropertyGroup,
@@ -38,10 +45,12 @@ import type { AuthenticatedPrincipal, Role } from "../shared/auth/types";
 interface CompiledRuleSetCatalogProps {
   principal: AuthenticatedPrincipal;
   initialCompiledRuleSetId?: string | null;
+  variant?: "full" | "rule-test-cases";
 }
 
 const GENERATE_ALLOWED_ROLES: readonly Role[] = ["admin"];
 const DISABLE_ALLOWED_ROLES: readonly Role[] = ["approver"];
+const EDIT_ALLOWED_ROLES: readonly Role[] = ["approver"];
 
 type CatalogStatus = "loading" | "ready" | "error";
 type DetailStatus = "loading" | "ready" | "error" | "not_found";
@@ -73,10 +82,12 @@ function CompiledRuleSetDetail({
   compiledRuleSetId,
   principal,
   onBack,
+  variant = "full",
 }: {
   compiledRuleSetId: string;
   principal: AuthenticatedPrincipal;
   onBack: () => void;
+  variant?: "full" | "rule-test-cases";
 }) {
   const [status, setStatus] = useState<DetailStatus>("loading");
   const [compiledRuleSet, setCompiledRuleSet] = useState<CompiledRuleSet | null>(null);
@@ -104,9 +115,14 @@ function CompiledRuleSetDetail({
   const [statusActionRationale, setStatusActionRationale] = useState("");
   const [statusActionError, setStatusActionError] = useState<string | null>(null);
   const [isStatusActionSubmitting, setIsStatusActionSubmitting] = useState(false);
+  const [editTarget, setEditTarget] = useState<RuleTestCase | null>(null);
+  const [editDraft, setEditDraft] = useState<RuleTestCaseEditDraft | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const canGenerate = hasAnyRole(principal, GENERATE_ALLOWED_ROLES);
   const canRun = canGenerate;
   const canDisable = hasAnyRole(principal, DISABLE_ALLOWED_ROLES);
+  const canEdit = hasAnyRole(principal, EDIT_ALLOWED_ROLES);
 
   const applyRuleTestCaseList = useCallback(
     (response: {
@@ -235,6 +251,48 @@ function CompiledRuleSetDetail({
       );
     } finally {
       setIsStatusActionSubmitting(false);
+    }
+  };
+
+  const handleEditRequest = (testCase: RuleTestCase) => {
+    setEditTarget(testCase);
+    setEditDraft(buildEditDraft(testCase));
+    setEditError(null);
+  };
+
+  const handleEditCancel = () => {
+    if (isEditSubmitting) {
+      return;
+    }
+    setEditTarget(null);
+    setEditDraft(null);
+    setEditError(null);
+  };
+
+  const handleEditConfirm = async () => {
+    if (editTarget === null || editDraft === null) {
+      return;
+    }
+    const validationError = validateEditDraft(editTarget, editDraft);
+    if (validationError) {
+      setEditError(validationError);
+      return;
+    }
+
+    setIsEditSubmitting(true);
+    setEditError(null);
+    try {
+      const request = buildEditRequest(editTarget, editDraft);
+      await editRuleTestCase(editTarget.rule_test_case_id, request);
+      setEditTarget(null);
+      setEditDraft(null);
+      await loadRuleTestCases({ silent: true });
+    } catch (error: unknown) {
+      setEditError(
+        describeRuleTestCaseError(error, "Unable to edit Rule Test Case."),
+      );
+    } finally {
+      setIsEditSubmitting(false);
     }
   };
 
@@ -401,6 +459,9 @@ function CompiledRuleSetDetail({
     },
   ];
 
+  const listLabel =
+    variant === "rule-test-cases" ? "Rule Test Cases" : "Compiled Rule Sets";
+
   return (
     <div className="policy-version-detail content-enter">
       <RecordPageHeader
@@ -408,7 +469,7 @@ function CompiledRuleSetDetail({
           <Breadcrumbs
             items={[
               {
-                label: "Compliance",
+                label: listLabel,
                 icon: <PolicyVersionPageIcon size={14} />,
                 onClick: onBack,
               },
@@ -428,29 +489,34 @@ function CompiledRuleSetDetail({
         propertyLayout="stacked"
       />
 
-      <h4 className="record-section-heading">Per-rule compile status</h4>
-      <div className="db-table-wrap">
-        <table className="db-table" aria-label="Compiled rule entries">
-          <thead>
-            <tr>
-              <th scope="col">Rule</th>
-              <th scope="col">Statement</th>
-              <th scope="col">Status</th>
-              <th scope="col">Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {compiledRuleSet.entries.map((entry) => (
-              <CompileEntryRow key={entry.rule_id} entry={entry} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {variant === "full" ? (
+        <>
+          <h4 className="record-section-heading">Per-rule compile status</h4>
+          <div className="db-table-wrap">
+            <table className="db-table" aria-label="Compiled rule entries">
+              <thead>
+                <tr>
+                  <th scope="col">Rule</th>
+                  <th scope="col">Statement</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compiledRuleSet.entries.map((entry) => (
+                  <CompileEntryRow key={entry.rule_id} entry={entry} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
 
       <RuleTestCasesSection
         canGenerate={canGenerate}
         canRun={canRun}
         canDisable={canDisable}
+        canEdit={canEdit}
         compiledCount={compiledRuleSet.summary.compiled}
         ruleTestCaseGroups={ruleTestCaseGroups}
         ruleTestCaseTotal={ruleTestCaseTotal}
@@ -468,6 +534,10 @@ function CompiledRuleSetDetail({
         statusActionRationale={statusActionRationale}
         statusActionError={statusActionError}
         isStatusActionSubmitting={isStatusActionSubmitting}
+        editTarget={editTarget}
+        editDraft={editDraft}
+        editError={editError}
+        isEditSubmitting={isEditSubmitting}
         onGenerate={() => void handleGenerate()}
         onRun={() => void handleRun()}
         onDownloadReport={() => void handleDownloadReport()}
@@ -475,6 +545,10 @@ function CompiledRuleSetDetail({
         onStatusActionConfirm={() => void handleStatusActionConfirm()}
         onStatusActionCancel={handleStatusActionCancel}
         onStatusActionRationaleChange={setStatusActionRationale}
+        onEditRequest={handleEditRequest}
+        onEditConfirm={() => void handleEditConfirm()}
+        onEditCancel={handleEditCancel}
+        onEditDraftChange={setEditDraft}
       />
     </div>
   );
@@ -483,6 +557,7 @@ function CompiledRuleSetDetail({
 export default function CompiledRuleSetCatalog({
   principal,
   initialCompiledRuleSetId = null,
+  variant = "full",
 }: CompiledRuleSetCatalogProps) {
   const [status, setStatus] = useState<CatalogStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -526,6 +601,7 @@ export default function CompiledRuleSetCatalog({
         compiledRuleSetId={selectedCompiledRuleSetId}
         principal={principal}
         onBack={() => setSelectedCompiledRuleSetId(null)}
+        variant={variant}
       />
     );
   }
@@ -546,16 +622,24 @@ export default function CompiledRuleSetCatalog({
           <div className="catalog-toolbar">
             <p className="catalog-scope">
               {compiledRuleSets.length === 0
-                ? "No compiled rule sets"
+                ? variant === "rule-test-cases"
+                  ? "No compiled rule sets to test"
+                  : "No compiled rule sets"
                 : `${compiledRuleSets.length} compiled rule set${compiledRuleSets.length === 1 ? "" : "s"}`}
             </p>
           </div>
 
           {compiledRuleSets.length === 0 ? (
             <div className="catalog-empty reveal">
-              <h3>No Compiled Rule Sets yet</h3>
+              <h3>
+                {variant === "rule-test-cases"
+                  ? "No Compiled Rule Sets to test yet"
+                  : "No Compiled Rule Sets yet"}
+              </h3>
               <p>
-                An admin compiles a published Policy Version into an immutable executable artifact.
+                {variant === "rule-test-cases"
+                  ? "Compile a published Policy Version first, then generate and run Rule Test Cases here."
+                  : "An admin compiles a published Policy Version into an immutable executable artifact."}
               </p>
             </div>
           ) : (

@@ -15,6 +15,12 @@ class CompileStatus(StrEnum):
     COMPILE_ERROR = "compile_error"
 
 
+class RuleCompileEvidence(BaseModel):
+    rule_currency: str | None = None
+    effective_start_date: str | None = None
+    effective_end_date: str | None = None
+
+
 class CompiledExecutableRule(BaseModel):
     rule_id: str = Field(min_length=1)
     statement: str = Field(min_length=1)
@@ -32,6 +38,7 @@ class CompiledRuleEntry(BaseModel):
     compiled_rule: CompiledExecutableRule | None = None
     skip_reason: str | None = None
     error_reason: str | None = None
+    compile_evidence: RuleCompileEvidence | None = None
 
 
 class CompiledRuleSetSummary(BaseModel):

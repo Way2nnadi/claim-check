@@ -55,6 +55,12 @@ export interface Scope {
   expense_category: string | null;
   travel_type: string | null;
   employee_group: string | null;
+  department?: string | null;
+  role?: string | null;
+  seniority?: string | null;
+  state?: string | null;
+  city?: string | null;
+  region?: string | null;
   effective_start_date: string | null;
   effective_end_date: string | null;
 }

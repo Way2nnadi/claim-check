@@ -1,5 +1,6 @@
 export {
   disableRuleTestCase,
+  editRuleTestCase,
   enableRuleTestCase,
   downloadRuleTestRunReport,
   executeRuleTestRun,
@@ -8,11 +9,14 @@ export {
   fetchRuleTestRuns,
   generateRuleTestCases,
 } from "./api";
+export { default as RuleTestCaseCatalog } from "./RuleTestCaseCatalog";
+export { default as RuleTestCoverageReadinessView } from "./RuleTestCoverageReadinessView";
 export type {
   EvaluationOutcome,
   ExpenseFixture,
   RuleTestCase,
   RuleTestCaseDisableRequest,
+  RuleTestCaseEditRequest,
   RuleTestCaseEnableRequest,
   RuleTestCaseGenerateResponse,
   RuleTestCaseGroup,

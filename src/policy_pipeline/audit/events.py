@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import Select, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
 from policy_pipeline.shared.database import AuditEventRecord
@@ -56,13 +56,72 @@ def list_audit_events(
     *,
     entity_type: str | None = None,
     entity_id: str | None = None,
+    compliance_evaluation_run_id: str | None = None,
+    employee_id: str | None = None,
+    expense_date: str | None = None,
+    row_index: int | None = None,
 ) -> list[AuditEventItem]:
     statement: Select[tuple[AuditEventRecord]] = select(AuditEventRecord)
     statement = statement.order_by(AuditEventRecord.id)
-    if entity_type is not None:
-        statement = statement.where(AuditEventRecord.entity_type == entity_type)
-    if entity_id is not None:
-        statement = statement.where(AuditEventRecord.entity_id == entity_id)
+    row_identity_filters = any(
+        (
+            compliance_evaluation_run_id is not None,
+            employee_id is not None,
+            expense_date is not None,
+            row_index is not None,
+        )
+    )
+    if row_identity_filters:
+        statement = statement.where(
+            AuditEventRecord.action == "compliance_review.resolved"
+        )
+        if compliance_evaluation_run_id is not None:
+            statement = statement.where(
+                AuditEventRecord.payload["compliance_evaluation_run_id"].as_string()
+                == compliance_evaluation_run_id
+            )
+        if employee_id is not None:
+            statement = statement.where(
+                AuditEventRecord.payload["employee_id"].as_string() == employee_id
+            )
+        if expense_date is not None:
+            statement = statement.where(
+                AuditEventRecord.payload["expense_date"].as_string() == expense_date
+            )
+        if row_index is not None:
+            statement = statement.where(
+                AuditEventRecord.payload["row_index"].as_integer() == row_index
+            )
+    if entity_type == "compliance_evaluation_run" and entity_id is not None:
+        statement = statement.where(
+            or_(
+                (
+                    (AuditEventRecord.entity_type == entity_type)
+                    & (AuditEventRecord.entity_id == entity_id)
+                ),
+                (
+                    (AuditEventRecord.entity_type == "compliance_review")
+                    & AuditEventRecord.entity_id.like(f"{entity_id}:%")
+                ),
+                AuditEventRecord.payload["compliance_evaluation_run_id"].as_string()
+                == entity_id,
+            )
+        )
+    elif entity_type == "expense_report" and entity_id is not None:
+        statement = statement.where(
+            or_(
+                (
+                    (AuditEventRecord.entity_type == entity_type)
+                    & (AuditEventRecord.entity_id == entity_id)
+                ),
+                AuditEventRecord.payload["expense_report_id"].as_string() == entity_id,
+            )
+        )
+    elif entity_type is not None or entity_id is not None:
+        if entity_type is not None:
+            statement = statement.where(AuditEventRecord.entity_type == entity_type)
+        if entity_id is not None:
+            statement = statement.where(AuditEventRecord.entity_id == entity_id)
 
     items = session.scalars(statement).all()
     return [

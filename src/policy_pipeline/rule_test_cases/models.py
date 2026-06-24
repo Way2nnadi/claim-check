@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from policy_pipeline.expense_reports import ExpenseReportRow
 
@@ -40,6 +40,9 @@ class RuleTestCase(BaseModel):
     disabled_at: datetime | None = None
     disabled_by: str | None = None
     disable_rationale: str | None = None
+    edited_at: datetime | None = None
+    edited_by: str | None = None
+    edit_rationale: str | None = None
 
 
 class RuleTestCaseGroup(BaseModel):
@@ -66,6 +69,20 @@ class RuleTestCaseDisableRequest(BaseModel):
 
 class RuleTestCaseEnableRequest(BaseModel):
     rationale: str = Field(min_length=1)
+
+
+class RuleTestCaseEditRequest(BaseModel):
+    rationale: str = Field(min_length=1)
+    expense_fixture: ExpenseReportRow | None = None
+    expected_outcome: EvaluationOutcome | None = None
+
+    @model_validator(mode="after")
+    def require_editable_field(self) -> RuleTestCaseEditRequest:
+        if self.expense_fixture is None and self.expected_outcome is None:
+            raise ValueError(
+                "At least one of expense_fixture or expected_outcome must be provided.",
+            )
+        return self
 
 
 class RuleTestCaseGenerateResponse(BaseModel):

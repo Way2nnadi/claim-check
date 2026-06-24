@@ -12,9 +12,6 @@ import {
   summarizeApplicability,
   summarizeRuleScope,
 } from "../policy-versions/format";
-import RecordPageHeader from "../shared/ui/RecordPageHeader";
-import { RecordPageIcon, RulePageIcon } from "../shared/ui/PageIcons";
-
 interface ManualRulesPageProps {
   principal: AuthenticatedPrincipal;
 }
@@ -141,24 +138,7 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
   const previewRule = createdRule;
 
   return (
-    <div className="review-detail content-enter">
-      <RecordPageHeader
-        icon={<RecordPageIcon icon={<RulePageIcon size={22} />} />}
-        title="Manual Rules"
-        subtitle="Author a rule when policy knowledge exists before the document catches up. Rationale is required; citation and exceptions are optional."
-        actions={
-          <button
-            type="submit"
-            form="manual-rule-form"
-            className="document-command document-command-accent"
-            disabled={!canCreate || isSubmitting}
-          >
-            {isSubmitting ? "Creating…" : "Create Manual Rule"}
-          </button>
-        }
-        meta={<span className="review-enforceability guidance">Human-authored</span>}
-      />
-
+    <div className="catalog-page manual-rules-page review-detail content-enter">
       <div className="review-detail-body">
         {submitError ? (
           <p className="error-banner" role="alert">
@@ -411,6 +391,15 @@ export default function ManualRulesPage({ principal }: ManualRulesPageProps) {
                 <p className="review-save-note">
                   Manual rules are committed as approved entries with manual origin.
                 </p>
+              </div>
+              <div className="review-save-actions">
+                <button
+                  type="submit"
+                  className="document-command document-command-accent"
+                  disabled={!canCreate || isSubmitting}
+                >
+                  {isSubmitting ? "Creating…" : "Create Manual Rule"}
+                </button>
               </div>
             </footer>
           </form>

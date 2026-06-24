@@ -21,6 +21,7 @@ from policy_pipeline.rules.models import (
 )
 from policy_pipeline.rules.store import create_rule
 from policy_pipeline.shared.database import Base, PolicyVersionRecord, RuleRecord
+from tests.rule_scope_helpers import full_rule_scope
 
 
 def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
@@ -210,14 +211,10 @@ async def test_approver_publishes_first_policy_version_and_reads_it(
                     "extraction_run_id": None,
                     "rationale": payload["rationale"],
                 },
-                "scope": {
-                    "country": None,
-                    "expense_category": "meals",
-                    "travel_type": None,
-                    "employee_group": "employees",
-                    "effective_start_date": None,
-                    "effective_end_date": None,
-                },
+                "scope": full_rule_scope(
+                    expense_category="meals",
+                    employee_group="employees",
+                ),
                 "citation": None,
                 "condition": payload["condition"],
                 "applicability": payload["applicability"],

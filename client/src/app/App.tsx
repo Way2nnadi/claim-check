@@ -1,17 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import {
-	Blocks,
-	ClipboardCheck,
-	FileOutput,
-	FileText,
-	GitBranch,
-	LayoutDashboard,
-	PenLine,
-	Receipt,
-	ScrollText,
-	ShieldCheck,
-	type LucideIcon,
-} from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import type { LucideIcon } from "lucide-react";
 import {
 	ApiError,
 	clearStoredToken,
@@ -26,46 +14,30 @@ import { ManualRulesPage } from "../manual-rules";
 import { PolicyVersionCatalog } from "../policy-versions";
 import { CompiledRuleSetCatalog } from "../compiled-rule-sets";
 import { ComplianceEvaluationRunCatalog } from "../compliance-evaluation-runs";
+import { ComplianceReviewCatalog } from "../compliance-review";
+import { RuleTestCaseCatalog } from "../rule-test-cases";
 import { AuditLogPage } from "../audit";
 import { DashboardPage } from "../dashboard";
 import ThemeToggle from "../shared/ui/ThemeToggle";
-import { hasAnyRole } from "../shared/permissions";
 import type { AuthenticatedPrincipal, Role } from "../shared/auth/types";
 import ExpenseReportsPage from "../ExpenseReportsPage";
+import GuidedTourRail from "./GuidedTourRail";
+import {
+	getShellSection,
+	getVisibleGuidedTourSteps,
+	getVisibleNavGroups,
+	isSectionVisible,
+	type SectionId,
+	type ShellSection,
+} from "./navigation";
 
 type AuthStatus = "booting" | "signed_out" | "authenticating" | "authenticated";
-type SectionId =
-	| "dashboard"
-	| "documents"
-	| "expense-reports"
-	| "evaluation-runs"
-	| "extraction-runs"
-	| "review"
-	| "policy-versions"
-	| "compliance"
-	| "manual-rules"
-	| "audit";
 
 interface PersonaOption {
 	label: string;
 	role: Role;
 	token: string;
 	blurb: string;
-}
-
-interface SectionAction {
-	label: string;
-	allowedRoles: readonly Role[];
-	unavailableBehavior: "hide" | "disable";
-}
-
-interface ShellSection {
-	id: SectionId;
-	label: string;
-	kicker: string;
-	icon: LucideIcon;
-	actions: readonly SectionAction[];
-	ledger: readonly string[];
 }
 
 function NavIcon({ icon: Icon }: { icon: LucideIcon }) {
@@ -75,99 +47,6 @@ function NavIcon({ icon: Icon }: { icon: LucideIcon }) {
 		</span>
 	);
 }
-
-const shellSections: readonly ShellSection[] = [
-	{
-		id: "dashboard",
-		label: "Dashboard",
-		kicker: "Front Desk",
-		icon: LayoutDashboard,
-		actions: [],
-		ledger: [],
-	},
-	{
-		id: "documents",
-		label: "Documents",
-		kicker: "Source Intake",
-		icon: FileText,
-		actions: [],
-		ledger: [
-			"Preserve Citation fidelity before any Candidate Rule enters review.",
-		],
-	},
-	{
-		id: "expense-reports",
-		label: "Expense Reports",
-		kicker: "Expense Intake",
-		icon: Receipt,
-		actions: [],
-		ledger: [
-			"Imported rows become the expense facts compliance checks run against.",
-		],
-	},
-	{
-		id: "evaluation-runs",
-		label: "Evaluation Runs",
-		kicker: "Compliance Batch",
-		icon: ShieldCheck,
-		actions: [],
-		ledger: [
-			"Batch compliance checks against imported Expense Reports using pinned Compiled Rule Sets.",
-		],
-	},
-	{
-		id: "extraction-runs",
-		label: "Extraction Runs",
-		kicker: "Machine Dossier",
-		icon: FileOutput,
-		actions: [],
-		ledger: [
-			"Failed runs surface validation detail so editors can retry with corrected configuration.",
-		],
-	},
-	{
-		id: "review",
-		label: "Review Rules",
-		kicker: "Approval Desk",
-		icon: ClipboardCheck,
-		actions: [],
-		ledger: ["Preserve an auditable rationale before publication."],
-	},
-	{
-		id: "policy-versions",
-		label: "Policy Versions",
-		kicker: "Version Ledger",
-		icon: GitBranch,
-		actions: [],
-		ledger: ["Change summaries explain why a Policy Version was published."],
-	},
-	{
-		id: "compliance",
-		label: "Compliance",
-		kicker: "Rule Compiler",
-		icon: Blocks,
-		actions: [],
-		ledger: [
-			"Compiled Rule Sets are immutable artifacts pinned to one Policy Version.",
-		],
-	},
-	{
-		id: "manual-rules",
-		label: "Manual Rules",
-		kicker: "Manual Override",
-		icon: PenLine,
-		actions: [],
-		ledger: ["Rationale matters because Citation may be absent for this path."],
-	},
-	{
-		id: "audit",
-		label: "Audit",
-		kicker: "Trace Archive",
-		icon: ScrollText,
-		actions: [],
-		ledger: ["Immutable record of what changed and who recorded it."],
-	},
-];
 
 const personaOptions: readonly PersonaOption[] = [
 	{
@@ -222,9 +101,23 @@ export default function App() {
 	const [selectedEvaluationRunId, setSelectedEvaluationRunId] = useState<
 		string | null
 	>(null);
+	const [selectedComplianceReviewRunId, setSelectedComplianceReviewRunId] =
+		useState<string | null>(null);
 	const [customToken, setCustomToken] = useState("");
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
+	const [guidedTourActive, setGuidedTourActive] = useState(false);
+	const [guidedTourStepIndex, setGuidedTourStepIndex] = useState(0);
+
+	const visibleTourSteps = useMemo(
+		() => (principal ? getVisibleGuidedTourSteps(principal) : []),
+		[principal],
+	);
+	const visibleNavGroups = useMemo(
+		() => (principal ? getVisibleNavGroups(principal) : []),
+		[principal],
+	);
+	const dashboardSection = getShellSection("dashboard");
 
 	useEffect(() => {
 		const token = getStoredToken();
@@ -260,6 +153,55 @@ export default function App() {
 		};
 	}, []);
 
+	const tourExcludedSections: readonly SectionId[] = ["dashboard", "audit"];
+	const showGuidedTourRail =
+		guidedTourActive &&
+		visibleTourSteps.length > 0 &&
+		!tourExcludedSections.includes(activeSection);
+
+	function navigateToSection(sectionId: SectionId): void {
+		if (principal && !isSectionVisible(principal, sectionId)) {
+			return;
+		}
+		if (sectionId === "review") {
+			setReviewExtractionRunId(null);
+		}
+		if (sectionId === "evaluation-runs") {
+			setSelectedEvaluationRunId(null);
+		}
+		if (sectionId === "compliance-review") {
+			setSelectedComplianceReviewRunId(null);
+		}
+		if (sectionId === "dashboard" || sectionId === "audit") {
+			setGuidedTourActive(false);
+			setGuidedTourStepIndex(0);
+		}
+		setActiveSection(sectionId);
+	}
+
+	function startGuidedTour(): void {
+		if (visibleTourSteps.length === 0) {
+			return;
+		}
+		setGuidedTourActive(true);
+		setGuidedTourStepIndex(0);
+		navigateToSection(visibleTourSteps[0].sectionId);
+	}
+
+	function goToTourStep(stepIndex: number): void {
+		const step = visibleTourSteps[stepIndex];
+		if (!step) {
+			return;
+		}
+		setGuidedTourStepIndex(stepIndex);
+		navigateToSection(step.sectionId);
+	}
+
+	function dismissGuidedTour(): void {
+		setGuidedTourActive(false);
+		setGuidedTourStepIndex(0);
+	}
+
 	async function authenticate(token: string): Promise<void> {
 		const nextToken = token.trim();
 		if (!nextToken) {
@@ -276,6 +218,8 @@ export default function App() {
 			setPrincipal(nextPrincipal);
 			setCustomToken("");
 			setActiveSection("dashboard");
+			setGuidedTourActive(false);
+			setGuidedTourStepIndex(0);
 			setStatus("authenticated");
 		} catch (error: unknown) {
 			clearStoredToken();
@@ -295,6 +239,8 @@ export default function App() {
 		setPrincipal(null);
 		setCustomToken("");
 		setErrorMessage(null);
+		setGuidedTourActive(false);
+		setGuidedTourStepIndex(0);
 		setStatus("signed_out");
 	}
 
@@ -303,11 +249,16 @@ export default function App() {
 		(status === "authenticating" && principal === null)
 	) {
 		return (
-			<main className="loading-stage">
-				<section className="loading-card page-enter">
-					<h1>Policy Nexus</h1>
-					<p>Resolving credentials and loading your workspace.</p>
-					<div className="loading-indicator" aria-hidden="true">
+			<main className="signin-page signin-page-loading page-enter">
+				<section className="signin-surface signin-surface-loading reveal">
+					<header className="signin-head">
+						<span className="signin-kicker">Policy operations</span>
+						<h1>Policy Nexus</h1>
+						<p className="signin-lede">
+							Resolving credentials and loading your workspace.
+						</p>
+					</header>
+					<div className="signin-loading-indicator" aria-hidden="true">
 						<span />
 						<span />
 						<span />
@@ -321,26 +272,36 @@ export default function App() {
 		return (
 			<main className="signin-page page-enter">
 				<header className="signin-toolbar">
-					<span className="folio">Local development</span>
+					<span className="signin-toolbar-kicker">Local development</span>
 					<ThemeToggle />
 				</header>
 
 				<section className="signin-surface reveal">
-					<h1>Policy Nexus</h1>
-					<p className="signin-lede">Select a role to sign in.</p>
+					<header className="signin-head">
+						<span className="signin-kicker">Policy operations</span>
+						<h1>Policy Nexus</h1>
+						<p className="signin-lede">Select a role to sign in.</p>
+					</header>
 
-					<ul className="clearance-list">
-						{personaOptions.map((persona) => (
-							<li key={persona.role}>
+					<ul className="signin-personas">
+						{personaOptions.map((persona, index) => (
+							<li
+								key={persona.role}
+								className="signin-persona-item reveal"
+								style={{ animationDelay: `${80 + index * 60}ms` }}
+							>
 								<button
 									type="button"
-									className={`clearance-chip${persona.role === "admin" ? " is-primary" : ""}`}
+									className={`signin-persona${persona.role === "admin" ? " is-primary" : ""}`}
 									onClick={() => void authenticate(persona.token)}
 									disabled={status === "authenticating"}
 									title={persona.blurb}
 									aria-label={`Enter as ${persona.label}`}
 								>
-									{persona.label}
+									<span className="signin-persona-label">
+										{persona.label}
+									</span>
+									<span className="signin-persona-blurb">{persona.blurb}</span>
 								</button>
 							</li>
 						))}
@@ -350,40 +311,66 @@ export default function App() {
 						<p className="error-banner signin-error">{errorMessage}</p>
 					) : null}
 
-					<details className="custom-token-gate">
-						<summary>Custom bearer token</summary>
-						<p className="custom-token-note">
-							The client stores the bearer token in session storage and sends it
-							on every API request.
-						</p>
-						<form className="token-form" onSubmit={handleCustomTokenSubmit}>
-							<label htmlFor="custom-token">Bearer token</label>
-							<textarea
-								id="custom-token"
-								name="custom-token"
-								value={customToken}
-								onChange={(event) => setCustomToken(event.target.value)}
-								placeholder="Paste a custom token"
-								rows={3}
-							/>
-							<button type="submit" disabled={status === "authenticating"}>
-								Sign in with custom token
-							</button>
-						</form>
-					</details>
+					<footer className="signin-footer">
+						<details className="custom-token-gate">
+							<summary>Custom bearer token</summary>
+							<p className="custom-token-note">
+								The client stores the bearer token in session storage and sends it
+								on every API request.
+							</p>
+							<form className="token-form" onSubmit={handleCustomTokenSubmit}>
+								<label htmlFor="custom-token">Bearer token</label>
+								<textarea
+									id="custom-token"
+									name="custom-token"
+									value={customToken}
+									onChange={(event) => setCustomToken(event.target.value)}
+									placeholder="Paste a custom token"
+									rows={3}
+								/>
+								<button
+									type="submit"
+									className="guided-tour-btn guided-tour-btn-primary"
+									disabled={status === "authenticating"}
+								>
+									Sign in with custom token
+								</button>
+							</form>
+						</details>
+					</footer>
 				</section>
 			</main>
 		);
 	}
 
-	const currentSection =
-		shellSections.find((section) => section.id === activeSection) ??
-		shellSections[0];
+	const currentSection = getShellSection(activeSection);
 	const roleLabel = principal.roles.map(formatRole).join(" + ");
-	const visibleActions = currentSection.actions.filter((action) => {
-		const allowed = hasAnyRole(principal, action.allowedRoles);
-		return allowed || action.unavailableBehavior !== "hide";
-	});
+	const activeTourStepIndex = guidedTourActive
+		? visibleTourSteps.findIndex((step) => step.sectionId === activeSection)
+		: -1;
+	const resolvedTourStepIndex =
+		activeTourStepIndex >= 0 ? activeTourStepIndex : guidedTourStepIndex;
+
+	function renderNavLink(section: ShellSection) {
+		return (
+			<li key={section.id}>
+				<button
+					type="button"
+					className={
+						section.id === activeSection ? "nav-link active" : "nav-link"
+					}
+					onClick={() => navigateToSection(section.id)}
+					tabIndex={sidebarOpen ? undefined : -1}
+				>
+					<NavIcon icon={section.icon} />
+					<span className="nav-link-copy">
+						<span className="nav-link-label">{section.label}</span>
+						<small>{section.kicker}</small>
+					</span>
+				</button>
+			</li>
+		);
+	}
 
 	return (
 		<main
@@ -409,33 +396,16 @@ export default function App() {
 				</div>
 
 				<nav aria-label="Primary">
-					<ul className="nav-list">
-						{shellSections.map((section) => (
-							<li key={section.id}>
-								<button
-									type="button"
-									className={
-										section.id === activeSection
-											? "nav-link active"
-											: "nav-link"
-									}
-									onClick={() => {
-										if (section.id === "review") {
-											setReviewExtractionRunId(null);
-										}
-										if (section.id === "evaluation-runs") {
-											setSelectedEvaluationRunId(null);
-										}
-										setActiveSection(section.id);
-									}}
-									tabIndex={sidebarOpen ? undefined : -1}
-								>
-									<NavIcon icon={section.icon} />
-									<span>{section.label}</span>
-								</button>
-							</li>
-						))}
-					</ul>
+					<ul className="nav-list">{renderNavLink(dashboardSection)}</ul>
+
+					{visibleNavGroups.map((group) => (
+						<div key={group.id} className="nav-group">
+							<p className="nav-group-label">{group.label}</p>
+							<ul className="nav-list">
+								{group.sections.map((section) => renderNavLink(section))}
+							</ul>
+						</div>
+					))}
 				</nav>
 
 				<footer className="sidebar-footer">
@@ -473,8 +443,18 @@ export default function App() {
 					</button>
 				) : null}
 
+				{showGuidedTourRail ? (
+					<GuidedTourRail
+						steps={visibleTourSteps}
+						activeStepIndex={resolvedTourStepIndex}
+						onGoToStep={goToTourStep}
+						onDismiss={dismissGuidedTour}
+					/>
+				) : null}
+
 				<header className="shell-header">
 					<div className="shell-header-copy">
+						<p className="shell-section-kicker">{currentSection.kicker}</p>
 						<h2>{currentSection.label}</h2>
 						{currentSection.ledger[0] ? (
 							<p className="shell-section-lede">{currentSection.ledger[0]}</p>
@@ -486,26 +466,6 @@ export default function App() {
 					key={activeSection}
 					className="section-card workflow-surface content-enter"
 				>
-					{visibleActions.length > 0 ? (
-						<div className="action-row">
-							{visibleActions.map((action) => {
-								const allowed = hasAnyRole(principal, action.allowedRoles);
-								return (
-									<button
-										key={action.label}
-										type="button"
-										className="action-chip"
-										disabled={!allowed}
-										onClick={() => {
-											// Section-specific actions are handled inside each catalog view.
-										}}
-									>
-										{action.label}
-									</button>
-								);
-							})}
-						</div>
-					) : null}
 					{activeSection === "documents" ? (
 						<DocumentCatalog principal={principal} />
 					) : activeSection === "expense-reports" ? (
@@ -521,18 +481,21 @@ export default function App() {
 							principal={principal}
 							initialRunId={selectedEvaluationRunId}
 						/>
+					) : activeSection === "compliance-review" ? (
+						<ComplianceReviewCatalog
+							principal={principal}
+							initialRunId={selectedComplianceReviewRunId}
+						/>
+					) : activeSection === "rule-test-cases" ? (
+						<RuleTestCaseCatalog principal={principal} />
 					) : activeSection === "dashboard" ? (
 						<DashboardPage
-							onOpenSection={(section) => {
-								if (section === "review") {
-									setReviewExtractionRunId(null);
-								}
-								setActiveSection(section);
-							}}
+							onOpenSection={(section) => navigateToSection(section)}
 							onOpenRun={(extractionRunId) => {
 								setReviewExtractionRunId(extractionRunId);
 								setActiveSection("review");
 							}}
+							onStartGuidedTour={startGuidedTour}
 						/>
 					) : activeSection === "extraction-runs" ? (
 						<ExtractionRunCatalog

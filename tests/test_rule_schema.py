@@ -63,6 +63,31 @@ def test_extracted_enforceable_quantitative_rule_payload_is_valid() -> None:
     assert rule.exceptions[0].required_evidence == ["manager_approval"]
 
 
+def test_scope_accepts_deferred_employee_and_jurisdiction_dimensions() -> None:
+    payload = build_extracted_rule_payload()
+    payload["scope"] = {
+        "country": "US",
+        "expense_category": "meals",
+        "employee_group": "executives",
+        "department": "sales",
+        "role": "manager",
+        "seniority": "director",
+        "state": "CA",
+        "city": "San Francisco",
+        "region": "west",
+    }
+
+    rule = Rule.model_validate(payload)
+
+    assert rule.scope.employee_group == "executives"
+    assert rule.scope.department == "sales"
+    assert rule.scope.role == "manager"
+    assert rule.scope.seniority == "director"
+    assert rule.scope.state == "CA"
+    assert rule.scope.city == "San Francisco"
+    assert rule.scope.region == "west"
+
+
 def test_invalid_currency_is_cleared_instead_of_rejected() -> None:
     payload = build_extracted_rule_payload()
     payload["applicability"]["currency"] = "100"

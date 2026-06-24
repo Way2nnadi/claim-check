@@ -34,7 +34,14 @@ _FIELD_ALIASES: dict[str, str] = {
     "receipt_attached": "receipt_attached",
 }
 
-_EVIDENCE_FIELDS = frozenset({"manager_approval", "receipt_attached"})
+_EVIDENCE_FIELDS = frozenset(
+    {
+        "manager_approval",
+        "receipt_attached",
+        "business_purpose",
+        "attendee_list",
+    }
+)
 
 
 class ConditionValueKind(StrEnum):
@@ -104,6 +111,11 @@ def _generate_cases_for_rule(
         variant=RuleTestCaseVariant.NEGATIVE,
         target=target,
     )
+    negative_outcome = (
+        EvaluationOutcome.MISSING_EVIDENCE
+        if compiled_rule.exceptions
+        else EvaluationOutcome.VIOLATION
+    )
     cases = [
         RuleTestCase(
             rule_test_case_id=f"rtc-{uuid4().hex}",
@@ -129,7 +141,7 @@ def _generate_cases_for_rule(
                 target=target,
                 value=negative_value,
             ),
-            expected_outcome=EvaluationOutcome.VIOLATION,
+            expected_outcome=negative_outcome,
             generated_by=generated_by,
             generated_at=generated_at,
         ),
@@ -167,6 +179,34 @@ def _generate_cases_for_rule(
         )
     )
     return cases
+
+
+def validate_condition_field(field: str) -> str | None:
+    try:
+        _resolve_condition_target(field)
+    except UnsupportedConditionFieldError as exc:
+        return (
+            f"Condition field {exc.field!r} is not supported by the "
+            "Compliance Evaluator."
+        )
+    return None
+
+
+def validate_exception_evidence(exceptions: list[dict[str, object]]) -> str | None:
+    for exception in exceptions:
+        raw_evidence = exception.get("required_evidence")
+        if not isinstance(raw_evidence, list):
+            continue
+        for item in raw_evidence:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()
+            if normalized and normalized not in _EVIDENCE_FIELDS:
+                return (
+                    f"Exception evidence field {normalized!r} is not supported by "
+                    "the Compliance Evaluator."
+                )
+    return None
 
 
 def _resolve_condition_target(field: str) -> ConditionTarget:

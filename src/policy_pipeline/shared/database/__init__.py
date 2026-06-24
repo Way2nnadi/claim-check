@@ -1,5 +1,6 @@
 from policy_pipeline.audit.records import AuditEventRecord
 from policy_pipeline.compliance_evaluation_runs.records import ComplianceEvaluationRunRecord
+from policy_pipeline.compliance_review.records import ComplianceReviewDecisionRecord
 from policy_pipeline.compiled_rule_sets.records import CompiledRuleSetRecord
 from policy_pipeline.rule_test_cases.records import RuleTestCaseRecord, RuleTestRunRecord
 from policy_pipeline.expense_report_records import ExpenseReportRecord
@@ -21,6 +22,7 @@ __all__ = [
     "AuditEventRecord",
     "Base",
     "ComplianceEvaluationRunRecord",
+    "ComplianceReviewDecisionRecord",
     "CompiledRuleSetRecord",
     "DocumentSectionEmbeddingRecord",
     "DocumentSectionRecord",

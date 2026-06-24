@@ -22,6 +22,7 @@ from policy_pipeline.rules.models import (
 )
 from policy_pipeline.rules.store import create_rule
 from policy_pipeline.shared.database import Base, RuleRecord
+from tests.rule_scope_helpers import full_rule_scope
 
 
 def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
@@ -186,14 +187,10 @@ async def test_approver_reads_candidate_rule_details_with_qa_flags_and_separate_
                 "extraction_run_id": "extract-2026-06-21",
                 "rationale": None,
             },
-            "scope": {
-                "country": None,
-                "expense_category": "meals",
-                "travel_type": None,
-                "employee_group": "employees",
-                "effective_start_date": None,
-                "effective_end_date": None,
-            },
+            "scope": full_rule_scope(
+                expense_category="meals",
+                employee_group="employees",
+            ),
             "citation": {
                 "document_id": "expense-policy",
                 "document_version_id": "expense-policy-v1",
@@ -225,14 +222,10 @@ async def test_approver_reads_candidate_rule_details_with_qa_flags_and_separate_
                 "extraction_run_id": "extract-2026-06-21",
                 "rationale": None,
             },
-            "scope": {
-                "country": None,
-                "expense_category": "meals",
-                "travel_type": None,
-                "employee_group": "employees",
-                "effective_start_date": None,
-                "effective_end_date": None,
-            },
+            "scope": full_rule_scope(
+                expense_category="meals",
+                employee_group="employees",
+            ),
             "citation": {
                 "document_id": "expense-policy",
                 "document_version_id": "expense-policy-v1",

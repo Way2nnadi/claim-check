@@ -328,7 +328,9 @@ describe("CandidateRuleCatalog", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
 
-    expect(await screen.findByText("rule-meals-cap")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy ID rule-meals-cap" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("tabpanel", { name: "Candidate Rule review queue" })).not.toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "QA flags" })).toBeInTheDocument();
     expect(
@@ -358,7 +360,7 @@ describe("CandidateRuleCatalog", () => {
     render(<CandidateRuleCatalog principal={principal} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    await userEvent.click(await screen.findByRole("button", { name: "← Queue" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Queue" }));
 
     expect(await screen.findByText(/Meals are capped at \$75 per day/)).toBeInTheDocument();
     expect(document.getElementById("review-rule-panel")).toBeInTheDocument();

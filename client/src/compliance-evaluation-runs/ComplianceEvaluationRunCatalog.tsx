@@ -6,12 +6,17 @@ import {
   fetchComplianceEvaluationRun,
 } from "./api";
 import {
+  citationDuplicatesReason,
   complianceOutcomeTone,
   describeComplianceEvaluationRunError,
   formatComplianceOutcome,
+  formatEvaluationEvidenceContext,
+  formatMatchingRuleIds,
+  hasAggregationWindowContext,
   summarizeComplianceEvaluationRun,
 } from "./format";
-import type { ComplianceEvaluationRun } from "./types";
+import AggregationWindowDetail from "./AggregationWindowDetail";
+import type { ComplianceEvaluationRowOutcome, ComplianceEvaluationRun } from "./types";
 import Breadcrumbs from "../shared/ui/Breadcrumbs";
 import RecordPageHeader, {
   type RecordPropertyGroup,
@@ -33,6 +38,155 @@ interface ComplianceEvaluationRunCatalogProps {
 
 type CatalogStatus = "loading" | "ready" | "error";
 type DetailStatus = "loading" | "ready" | "error" | "not_found";
+
+function ComplianceEvaluationRuleId({ ruleId }: { ruleId: string }) {
+  return (
+    <code className="db-mono compliance-evaluation-rule-id" title={ruleId}>
+      {shortenId(ruleId, 16)}
+    </code>
+  );
+}
+
+function ComplianceEvaluationComparisonCell({
+  value,
+}: {
+  value: string | null;
+}) {
+  if (value === null || value.trim() === "") {
+    return <>—</>;
+  }
+  return (
+    <span className="compliance-evaluation-comparison-value">{value}</span>
+  );
+}
+
+function ComplianceEvaluationOutcomeDetail({
+  outcome,
+}: {
+  outcome: ComplianceEvaluationRowOutcome;
+}) {
+  const secondaryRules = formatMatchingRuleIds(
+    outcome.rule_id,
+    outcome.matching_rule_ids ?? [],
+  );
+  const citation = outcome.evidence[0] ?? null;
+  const reason = outcome.reason?.trim() ?? null;
+  const missingFields =
+    outcome.missing_evidence_fields.length > 0
+      ? outcome.missing_evidence_fields.join(", ")
+      : null;
+  const scopeContext = formatEvaluationEvidenceContext(outcome);
+  const showAggregation = hasAggregationWindowContext(outcome.aggregation_context);
+  const showPolicySource =
+    citation !== null &&
+    !citationDuplicatesReason(reason, citation.quote);
+  const detailClassName =
+    outcome.outcome === "needs_review"
+      ? "compliance-evaluation-outcome-detail compliance-evaluation-review-detail"
+      : outcome.outcome === "missing_evidence"
+        ? "compliance-evaluation-outcome-detail compliance-evaluation-missing-evidence-detail"
+        : "compliance-evaluation-outcome-detail compliance-evaluation-violation-detail";
+
+  if (!reason && !missingFields && !secondaryRules && !showPolicySource && !scopeContext && !showAggregation) {
+    return <>—</>;
+  }
+
+  return (
+    <div className={detailClassName}>
+      {showAggregation ? (
+        <AggregationWindowDetail context={outcome.aggregation_context} />
+      ) : null}
+      {reason ? (
+        <p className="compliance-evaluation-outcome-statement">{reason}</p>
+      ) : null}
+      {scopeContext ? (
+        <p className="compliance-evaluation-scope-context">{scopeContext}</p>
+      ) : null}
+      {missingFields ? (
+        <p className="compliance-evaluation-missing-evidence-fields">
+          <span className="compliance-evaluation-detail-label">Missing</span>
+          {missingFields}
+        </p>
+      ) : null}
+      {secondaryRules ? (
+        <p className="compliance-evaluation-secondary-rules">{secondaryRules}</p>
+      ) : null}
+      {showPolicySource && citation ? (
+        <details className="compliance-evaluation-outcome-source">
+          <summary>Policy source</summary>
+          <blockquote
+            className="compliance-evaluation-outcome-citation"
+            cite={`${citation.document_id}#${citation.section_id}`}
+          >
+            {citation.quote}
+          </blockquote>
+          <p className="compliance-evaluation-outcome-source-meta">
+            {citation.document_id} · {citation.section_id}
+          </p>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ComplianceEvaluationOutcomesColGroup() {
+  return (
+    <colgroup>
+      <col className="compliance-evaluation-col-row" />
+      <col className="compliance-evaluation-col-employee" />
+      <col className="compliance-evaluation-col-date" />
+      <col className="compliance-evaluation-col-outcome" />
+      <col className="compliance-evaluation-col-rule" />
+      <col className="compliance-evaluation-col-limit" />
+      <col className="compliance-evaluation-col-actual" />
+      <col className="compliance-evaluation-col-detail" />
+    </colgroup>
+  );
+}
+
+function ComplianceEvaluationOutcomeRow({
+  runId,
+  outcome,
+}: {
+  runId: string;
+  outcome: ComplianceEvaluationRowOutcome;
+}) {
+  return (
+    <tr key={`${runId}:${outcome.row_index}`}>
+      <td className="db-mono">{outcome.row_index + 1}</td>
+      <td className="db-mono">{outcome.employee_id}</td>
+      <td>{outcome.expense_date}</td>
+      <td>
+        <StatusPill
+          label={formatComplianceOutcome(outcome.outcome)}
+          variant={complianceOutcomeTone(outcome.outcome)}
+        />
+      </td>
+      <td>
+        {outcome.rule_id ? (
+          <ComplianceEvaluationRuleId ruleId={outcome.rule_id} />
+        ) : (
+          "—"
+        )}
+      </td>
+      <td>
+        <ComplianceEvaluationComparisonCell value={outcome.policy_limit} />
+      </td>
+      <td>
+        <ComplianceEvaluationComparisonCell value={outcome.actual_value} />
+      </td>
+      <td>
+        {outcome.outcome === "violation" ||
+        outcome.outcome === "needs_review" ||
+        outcome.outcome === "missing_evidence" ? (
+          <ComplianceEvaluationOutcomeDetail outcome={outcome} />
+        ) : (
+          "—"
+        )}
+      </td>
+    </tr>
+  );
+}
 
 function ComplianceEvaluationRunDetail({
   complianceEvaluationRunId,
@@ -181,6 +335,26 @@ function ComplianceEvaluationRunDetail({
           label: "Expense Report",
           value: <code className="db-mono">{run.expense_report_id}</code>,
         },
+        ...(run.expense_input_fingerprint
+          ? [
+              {
+                label: "Source file",
+                value: run.expense_input_fingerprint.source_filename,
+              },
+              {
+                label: "Row count",
+                value: String(run.expense_input_fingerprint.row_count),
+              },
+              {
+                label: "Content hash",
+                value: (
+                  <code className="db-mono" title={run.expense_input_fingerprint.content_hash}>
+                    {run.expense_input_fingerprint.content_hash}
+                  </code>
+                ),
+              },
+            ]
+          : []),
         {
           label: "Policy Version",
           value: <code className="db-mono">{run.policy_version_id}</code>,
@@ -251,6 +425,7 @@ function ComplianceEvaluationRunDetail({
               : undefined
           }
         >
+          <ComplianceEvaluationOutcomesColGroup />
           <thead>
             <tr>
               <th scope="col">Row</th>
@@ -258,24 +433,18 @@ function ComplianceEvaluationRunDetail({
               <th scope="col">Date</th>
               <th scope="col">Outcome</th>
               <th scope="col">Rule</th>
-              <th scope="col">Reason</th>
+              <th scope="col">Limit</th>
+              <th scope="col">Actual</th>
+              <th scope="col">Detail</th>
             </tr>
           </thead>
           <tbody>
             {paginatedOutcomes.items.map((outcome) => (
-              <tr key={`${run.compliance_evaluation_run_id}:${outcome.row_index}`}>
-                <td className="db-mono">{outcome.row_index + 1}</td>
-                <td className="db-mono">{outcome.employee_id}</td>
-                <td>{outcome.expense_date}</td>
-                <td>
-                  <StatusPill
-                    label={formatComplianceOutcome(outcome.outcome)}
-                    variant={complianceOutcomeTone(outcome.outcome)}
-                  />
-                </td>
-                <td className="db-mono">{outcome.rule_id ?? "—"}</td>
-                <td>{outcome.reason ?? "—"}</td>
-              </tr>
+              <ComplianceEvaluationOutcomeRow
+                key={`${run.compliance_evaluation_run_id}:${outcome.row_index}`}
+                runId={run.compliance_evaluation_run_id}
+                outcome={outcome}
+              />
             ))}
           </tbody>
         </table>
@@ -431,6 +600,22 @@ export default function ComplianceEvaluationRunCatalog({
                             variant={
                               run.summary.violation_count > 0
                                 ? "danger"
+                                : "neutral"
+                            }
+                          />
+                          <StatusPill
+                            label={`${run.summary.needs_review_count} needs review`}
+                            variant={
+                              run.summary.needs_review_count > 0
+                                ? "warning"
+                                : "neutral"
+                            }
+                          />
+                          <StatusPill
+                            label={`${run.summary.missing_evidence_count} missing evidence`}
+                            variant={
+                              run.summary.missing_evidence_count > 0
+                                ? "warning"
                                 : "neutral"
                             }
                           />

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from policy_pipeline.compiled_rule_sets.models import (
-    CompileStatus,
     CompiledExecutableRule,
     CompiledRuleEntry,
     CompiledRuleSet,
     CompiledRuleSetSummary,
+    CompileStatus,
+    RuleCompileEvidence,
+)
+from policy_pipeline.compliance_evaluation_runs.evaluator import (
+    build_unavailable_scope_skip_reason,
+    unavailable_v1_scope_dimensions,
+)
+from policy_pipeline.rule_test_cases.generator import (
+    validate_condition_field,
+    validate_exception_evidence,
 )
 from policy_pipeline.rules.models import EnforceabilityClass, PolicyVersionSnapshot, Rule
 
@@ -40,12 +49,14 @@ def compile_policy_version_snapshot(
 
 
 def _compile_rule(rule: Rule) -> CompiledRuleEntry:
+    compile_evidence = _build_compile_evidence(rule)
     if rule.enforceability_class is EnforceabilityClass.GUIDANCE:
         return CompiledRuleEntry(
             rule_id=rule.rule_id,
             status=CompileStatus.SKIPPED_NON_ENFORCEABLE,
             source_rule=rule,
             skip_reason="Guidance Rules are not machine-checkable.",
+            compile_evidence=compile_evidence,
         )
     if rule.enforceability_class is EnforceabilityClass.SUBJECTIVE:
         return CompiledRuleEntry(
@@ -53,6 +64,19 @@ def _compile_rule(rule: Rule) -> CompiledRuleEntry:
             status=CompileStatus.SKIPPED_NON_ENFORCEABLE,
             source_rule=rule,
             skip_reason="Subjective Rules require human judgment.",
+            compile_evidence=compile_evidence,
+        )
+
+    unavailable_scope_dimensions = unavailable_v1_scope_dimensions(
+        rule.scope.model_dump(mode="json")
+    )
+    if unavailable_scope_dimensions:
+        return CompiledRuleEntry(
+            rule_id=rule.rule_id,
+            status=CompileStatus.SKIPPED_NON_ENFORCEABLE,
+            source_rule=rule,
+            skip_reason=build_unavailable_scope_skip_reason(unavailable_scope_dimensions),
+            compile_evidence=compile_evidence,
         )
 
     error_reason = _validate_enforceable_rule(rule)
@@ -62,6 +86,7 @@ def _compile_rule(rule: Rule) -> CompiledRuleEntry:
             status=CompileStatus.COMPILE_ERROR,
             source_rule=rule,
             error_reason=error_reason,
+            compile_evidence=compile_evidence,
         )
 
     assert rule.condition is not None
@@ -79,6 +104,17 @@ def _compile_rule(rule: Rule) -> CompiledRuleEntry:
             exceptions=[exception.model_dump(mode="json") for exception in rule.exceptions],
             citation=rule.citation.model_dump(mode="json") if rule.citation else None,
         ),
+        compile_evidence=compile_evidence,
+    )
+
+
+def _build_compile_evidence(rule: Rule) -> RuleCompileEvidence:
+    return RuleCompileEvidence(
+        rule_currency=(
+            rule.applicability.currency if rule.applicability is not None else None
+        ),
+        effective_start_date=rule.scope.effective_start_date,
+        effective_end_date=rule.scope.effective_end_date,
     )
 
 
@@ -94,4 +130,13 @@ def _validate_enforceable_rule(rule: Rule) -> str | None:
         )
     if not rule.condition.field.strip():
         return "Condition field must not be empty."
+    field_error = validate_condition_field(rule.condition.field)
+    if field_error is not None:
+        return field_error
+    exception_payloads = [
+        exception.model_dump(mode="json") for exception in rule.exceptions
+    ]
+    evidence_error = validate_exception_evidence(exception_payloads)
+    if evidence_error is not None:
+        return evidence_error
     return None

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchCompiledRuleSets } from "../compiled-rule-sets/api";
-import CompiledRuleSetPicker from "../compiled-rule-sets/CompiledRuleSetPicker";
+import { fetchCompiledRuleSetsForPolicyVersion } from "../compiled-rule-sets/api";
 import type { CompiledRuleSet } from "../compiled-rule-sets/types";
+import { fetchPolicyVersions } from "../policy-versions/api";
+import PolicyVersionPicker from "../policy-versions/PolicyVersionPicker";
+import type { PolicyVersionSummary } from "../policy-versions/types";
 import { hasAnyRole } from "../shared/permissions";
 import type { AuthenticatedPrincipal, Role } from "../shared/auth/types";
 import StatusPill from "../shared/ui/StatusPill";
@@ -11,12 +13,16 @@ import TablePagination, {
   paginateItems,
   TABLE_PAGE_SIZE,
 } from "../shared/ui/TablePagination";
+import { fetchRuleTestRuns } from "../rule-test-cases/api";
+import type { RuleTestRun } from "../rule-test-cases/types";
 import {
   executeComplianceEvaluationRun,
   fetchComplianceEvaluationRuns,
 } from "./api";
 import {
   describeComplianceEvaluationRunError,
+  describeRuleTestRunGate,
+  resolveRuleTestRunGateStatus,
   summarizeComplianceEvaluationRun,
 } from "./format";
 import type { ComplianceEvaluationRun } from "./types";
@@ -28,6 +34,7 @@ export interface ComplianceEvaluationSectionProps {
   rowCount: number;
   principal: AuthenticatedPrincipal;
   onOpenRun?: (complianceEvaluationRunId: string) => void;
+  onOpenCompiledRuleSet?: (compiledRuleSetId: string) => void;
 }
 
 export default function ComplianceEvaluationSection({
@@ -35,16 +42,25 @@ export default function ComplianceEvaluationSection({
   rowCount,
   principal,
   onOpenRun,
+  onOpenCompiledRuleSet,
 }: ComplianceEvaluationSectionProps) {
   const canExecute = hasAnyRole(principal, EXECUTE_ALLOWED_ROLES);
-  const [compiledRuleSets, setCompiledRuleSets] = useState<CompiledRuleSet[]>([]);
+  const [policyVersions, setPolicyVersions] = useState<PolicyVersionSummary[]>([]);
+  const [policyVersionStatus, setPolicyVersionStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [policyVersionError, setPolicyVersionError] = useState<string | null>(
+    null,
+  );
+  const [selectedPolicyVersionId, setSelectedPolicyVersionId] = useState("");
+  const [resolvedCompiledRuleSet, setResolvedCompiledRuleSet] =
+    useState<CompiledRuleSet | null>(null);
   const [compiledRuleSetStatus, setCompiledRuleSetStatus] = useState<
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [compiledRuleSetError, setCompiledRuleSetError] = useState<string | null>(
     null,
   );
-  const [selectedCompiledRuleSetId, setSelectedCompiledRuleSetId] = useState("");
   const [runs, setRuns] = useState<ComplianceEvaluationRun[]>([]);
   const [runStatus, setRunStatus] = useState<
     "idle" | "loading" | "ready" | "error"
@@ -53,36 +69,53 @@ export default function ComplianceEvaluationSection({
   const [isExecuting, setIsExecuting] = useState(false);
   const [executeError, setExecuteError] = useState<string | null>(null);
   const [runsPage, setRunsPage] = useState(1);
+  const [ruleTestRuns, setRuleTestRuns] = useState<RuleTestRun[]>([]);
+  const [ruleTestRunStatus, setRuleTestRunStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [ruleTestRunError, setRuleTestRunError] = useState<string | null>(null);
 
-  const runnableRuleSets = useMemo(
-    () => compiledRuleSets.filter((item) => item.summary.compiled > 0),
-    [compiledRuleSets],
-  );
+  const latestRuleTestRun = ruleTestRuns[0] ?? null;
+  const hasResolvedCompiledRuleSet = resolvedCompiledRuleSet !== null;
+  const ruleTestRunGateStatus = resolveRuleTestRunGateStatus({
+    enforceableRuleCount: resolvedCompiledRuleSet?.summary.compiled ?? 0,
+    latestRun: latestRuleTestRun,
+    status: hasResolvedCompiledRuleSet ? ruleTestRunStatus : "ready",
+  });
+  const ruleTestRunGate = describeRuleTestRunGate({
+    gateStatus: ruleTestRunGateStatus,
+    latestRun: latestRuleTestRun,
+    hasCompiledRuleSet: hasResolvedCompiledRuleSet,
+  });
+  const isRuleTestGateClosed =
+    hasResolvedCompiledRuleSet &&
+    (ruleTestRunGateStatus === "missing_run" ||
+      ruleTestRunGateStatus === "failed_run");
 
   useEffect(() => {
     let cancelled = false;
-    setCompiledRuleSetStatus("loading");
-    setCompiledRuleSetError(null);
+    setPolicyVersionStatus("loading");
+    setPolicyVersionError(null);
 
-    void fetchCompiledRuleSets()
+    void fetchPolicyVersions()
       .then((response) => {
         if (cancelled) {
           return;
         }
-        setCompiledRuleSets(response.items);
-        setCompiledRuleSetStatus("ready");
+        setPolicyVersions(response.items);
+        setPolicyVersionStatus("ready");
       })
       .catch((error: unknown) => {
         if (cancelled) {
           return;
         }
-        setCompiledRuleSetError(
+        setPolicyVersionError(
           describeComplianceEvaluationRunError(
             error,
-            "Unable to load Compiled Rule Sets.",
+            "Unable to load Policy Versions.",
           ),
         );
-        setCompiledRuleSetStatus("error");
+        setPolicyVersionStatus("error");
       });
 
     return () => {
@@ -122,6 +155,89 @@ export default function ComplianceEvaluationSection({
   }, [expenseReportId]);
 
   useEffect(() => {
+    if (!selectedPolicyVersionId) {
+      setResolvedCompiledRuleSet(null);
+      setCompiledRuleSetStatus("ready");
+      setCompiledRuleSetError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCompiledRuleSetStatus("loading");
+    setCompiledRuleSetError(null);
+
+    void fetchCompiledRuleSetsForPolicyVersion(selectedPolicyVersionId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setResolvedCompiledRuleSet(response.items[0] ?? null);
+        setCompiledRuleSetStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setCompiledRuleSetError(
+          describeComplianceEvaluationRunError(
+            error,
+            "Unable to load Compiled Rule Set for this Policy Version.",
+          ),
+        );
+        setCompiledRuleSetStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPolicyVersionId]);
+
+  useEffect(() => {
+    const compiledRuleSetId = resolvedCompiledRuleSet?.compiled_rule_set_id;
+    if (
+      !compiledRuleSetId ||
+      resolvedCompiledRuleSet?.summary.compiled === 0
+    ) {
+      setRuleTestRuns([]);
+      setRuleTestRunStatus("ready");
+      setRuleTestRunError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setRuleTestRunStatus("loading");
+    setRuleTestRunError(null);
+
+    void fetchRuleTestRuns(compiledRuleSetId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setRuleTestRuns(response.items);
+        setRuleTestRunStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setRuleTestRunError(
+          describeComplianceEvaluationRunError(
+            error,
+            "Unable to load Rule Test Runs for this Policy Version.",
+          ),
+        );
+        setRuleTestRunStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    resolvedCompiledRuleSet?.compiled_rule_set_id,
+    resolvedCompiledRuleSet?.summary.compiled,
+  ]);
+
+  useEffect(() => {
     setRunsPage(1);
   }, [expenseReportId]);
 
@@ -132,21 +248,22 @@ export default function ComplianceEvaluationSection({
 
   useEffect(() => {
     if (
-      selectedCompiledRuleSetId ||
-      runnableRuleSets.length === 0 ||
-      compiledRuleSetStatus !== "ready"
+      selectedPolicyVersionId ||
+      policyVersions.length === 0 ||
+      policyVersionStatus !== "ready"
     ) {
       return;
     }
-    setSelectedCompiledRuleSetId(runnableRuleSets[0].compiled_rule_set_id);
-  }, [
-    compiledRuleSetStatus,
-    runnableRuleSets,
-    selectedCompiledRuleSetId,
-  ]);
+    setSelectedPolicyVersionId(policyVersions[0].policy_version_id);
+  }, [policyVersionStatus, policyVersions, selectedPolicyVersionId]);
 
   async function handleExecute(): Promise<void> {
-    if (!canExecute || !selectedCompiledRuleSetId || rowCount === 0) {
+    if (
+      !canExecute ||
+      !selectedPolicyVersionId ||
+      rowCount === 0 ||
+      isRuleTestGateClosed
+    ) {
       return;
     }
 
@@ -155,10 +272,17 @@ export default function ComplianceEvaluationSection({
 
     try {
       const run = await executeComplianceEvaluationRun(expenseReportId, {
-        compiled_rule_set_id: selectedCompiledRuleSetId,
+        policy_version_id: selectedPolicyVersionId,
       });
       setRuns((current) => [run, ...current]);
       setRunsPage(1);
+
+      if (!hasResolvedCompiledRuleSet) {
+        const compiledRuleSets = await fetchCompiledRuleSetsForPolicyVersion(
+          selectedPolicyVersionId,
+        );
+        setResolvedCompiledRuleSet(compiledRuleSets.items[0] ?? null);
+      }
     } catch (error: unknown) {
       setExecuteError(
         describeComplianceEvaluationRunError(
@@ -185,7 +309,9 @@ export default function ComplianceEvaluationSection({
         <div>
           <h4 className="record-section-heading">Compliance Evaluation</h4>
           <p className="review-ledger-scope">
-            Batch-check expense rows against a pinned Compiled Rule Set.
+            Batch-check expense rows against a pinned Policy Version. The
+            server compiles on first run when needed and records the Compiled
+            Rule Set on the run for reproducibility.
           </p>
         </div>
       </div>
@@ -198,24 +324,24 @@ export default function ComplianceEvaluationSection({
 
       {canExecute ? (
         <div className="compliance-evaluation-trigger extraction-trigger reveal">
-          {compiledRuleSetStatus === "loading" ? (
+          {policyVersionStatus === "loading" ? (
             <p className="catalog-status compact">
               <span className="catalog-status-rule" aria-hidden="true" />
-              Loading Compiled Rule Sets…
+              Loading Policy Versions…
             </p>
           ) : null}
-          {compiledRuleSetError ? (
+          {policyVersionError ? (
             <p className="error-banner" role="alert">
-              {compiledRuleSetError}
+              {policyVersionError}
             </p>
           ) : null}
-          {compiledRuleSetStatus === "ready" && runnableRuleSets.length === 0 ? (
+          {policyVersionStatus === "ready" && policyVersions.length === 0 ? (
             <p className="extraction-trigger-empty">
-              No Compiled Rule Sets with enforceable rules are available. Compile
-              a published Policy Version first.
+              No published Policy Versions are available. Publish a Policy
+              Version first.
             </p>
           ) : null}
-          {compiledRuleSetStatus === "ready" && runnableRuleSets.length > 0 ? (
+          {policyVersionStatus === "ready" && policyVersions.length > 0 ? (
             <form
               className="extraction-trigger-form"
               onSubmit={(event) => {
@@ -223,12 +349,52 @@ export default function ComplianceEvaluationSection({
                 void handleExecute();
               }}
             >
+              {compiledRuleSetError ? (
+                <p className="extraction-trigger-feedback error" role="alert">
+                  {compiledRuleSetError}
+                </p>
+              ) : null}
+              {selectedPolicyVersionId ? (
+                <div
+                  className={`compliance-evaluation-gate notion-callout${
+                    isRuleTestGateClosed ? " error" : ""
+                  }`}
+                  role="status"
+                >
+                  <p className="compliance-evaluation-gate-title">
+                    {ruleTestRunGate.title}
+                  </p>
+                  <p className="review-ledger-scope">{ruleTestRunGate.detail}</p>
+                  {ruleTestRunError ? (
+                    <p className="extraction-trigger-feedback error" role="alert">
+                      {ruleTestRunError}
+                    </p>
+                  ) : null}
+                  {onOpenCompiledRuleSet &&
+                  resolvedCompiledRuleSet &&
+                  (isRuleTestGateClosed || latestRuleTestRun !== null) ? (
+                    <button
+                      type="button"
+                      className="rule-test-inline-action"
+                      onClick={() =>
+                        onOpenCompiledRuleSet(
+                          resolvedCompiledRuleSet.compiled_rule_set_id,
+                        )
+                      }
+                    >
+                      {isRuleTestGateClosed
+                        ? "Review Rule Test failures"
+                        : "View Rule Test Run"}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="extraction-trigger-fields">
-                <CompiledRuleSetPicker
-                  value={selectedCompiledRuleSetId}
-                  compiledRuleSets={runnableRuleSets}
+                <PolicyVersionPicker
+                  value={selectedPolicyVersionId}
+                  policyVersions={policyVersions}
                   disabled={isExecuting}
-                  onChange={setSelectedCompiledRuleSetId}
+                  onChange={setSelectedPolicyVersionId}
                 />
                 <div className="extraction-trigger-actions">
                   <button
@@ -237,7 +403,10 @@ export default function ComplianceEvaluationSection({
                     disabled={
                       isExecuting ||
                       rowCount === 0 ||
-                      selectedCompiledRuleSetId.length === 0
+                      selectedPolicyVersionId.length === 0 ||
+                      compiledRuleSetStatus === "loading" ||
+                      ruleTestRunGateStatus === "loading" ||
+                      isRuleTestGateClosed
                     }
                   >
                     {isExecuting ? "Running…" : "Run compliance check"}
@@ -312,6 +481,20 @@ export default function ComplianceEvaluationSection({
                         label={`${run.summary.violation_count} violation`}
                         variant={
                           run.summary.violation_count > 0 ? "danger" : "neutral"
+                        }
+                      />
+                      <StatusPill
+                        label={`${run.summary.needs_review_count} needs review`}
+                        variant={
+                          run.summary.needs_review_count > 0 ? "warning" : "neutral"
+                        }
+                      />
+                      <StatusPill
+                        label={`${run.summary.missing_evidence_count} missing evidence`}
+                        variant={
+                          run.summary.missing_evidence_count > 0
+                            ? "warning"
+                            : "neutral"
                         }
                       />
                     </span>

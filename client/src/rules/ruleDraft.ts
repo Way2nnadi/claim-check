@@ -7,6 +7,12 @@ export interface ScopeDraft {
 	expense_category: string;
 	travel_type: string;
 	employee_group: string;
+	department: string;
+	role: string;
+	seniority: string;
+	state: string;
+	city: string;
+	region: string;
 	effective_start_date: string;
 	effective_end_date: string;
 }
@@ -97,6 +103,12 @@ export const SCOPE_FIELDS: readonly {
 		label: "Employee group",
 		placeholder: "Employee group",
 	},
+	{ key: "department", label: "Department", placeholder: "Department" },
+	{ key: "role", label: "Role", placeholder: "Role" },
+	{ key: "seniority", label: "Seniority", placeholder: "Seniority" },
+	{ key: "state", label: "State", placeholder: "State" },
+	{ key: "city", label: "City", placeholder: "City" },
+	{ key: "region", label: "Region", placeholder: "Region" },
 	{
 		key: "effective_start_date",
 		label: "Effective start",
@@ -176,6 +188,12 @@ export function createRuleDraft(rule: CandidateRuleValue): RuleDraft {
 			expense_category: rule.scope.expense_category ?? "",
 			travel_type: rule.scope.travel_type ?? "",
 			employee_group: rule.scope.employee_group ?? "",
+			department: rule.scope.department ?? "",
+			role: rule.scope.role ?? "",
+			seniority: rule.scope.seniority ?? "",
+			state: rule.scope.state ?? "",
+			city: rule.scope.city ?? "",
+			region: rule.scope.region ?? "",
 			effective_start_date: rule.scope.effective_start_date ?? "",
 			effective_end_date: rule.scope.effective_end_date ?? "",
 		},
@@ -212,6 +230,12 @@ export function createEmptyManualRuleDraft(): ManualRuleDraft {
 			expense_category: "",
 			travel_type: "",
 			employee_group: "",
+			department: "",
+			role: "",
+			seniority: "",
+			state: "",
+			city: "",
+			region: "",
 			effective_start_date: "",
 			effective_end_date: "",
 		},
@@ -244,6 +268,12 @@ export function buildScopeFromDraft(scope: ScopeDraft): Scope {
 		expense_category: normalizeOptionalString(scope.expense_category),
 		travel_type: normalizeOptionalString(scope.travel_type),
 		employee_group: normalizeOptionalString(scope.employee_group),
+		department: normalizeOptionalString(scope.department),
+		role: normalizeOptionalString(scope.role),
+		seniority: normalizeOptionalString(scope.seniority),
+		state: normalizeOptionalString(scope.state),
+		city: normalizeOptionalString(scope.city),
+		region: normalizeOptionalString(scope.region),
 		effective_start_date: normalizeOptionalString(scope.effective_start_date),
 		effective_end_date: normalizeOptionalString(scope.effective_end_date),
 	};

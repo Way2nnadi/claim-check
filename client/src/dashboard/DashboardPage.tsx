@@ -4,22 +4,29 @@ import { fetchExtractionRuns } from "../extraction-runs/api";
 import type { ExtractionRun } from "../extraction-runs/types";
 import { fetchPolicyVersions } from "../policy-versions/api";
 import type { PolicyVersionSummary } from "../policy-versions/types";
-import { formatExtractionRunStatus, shortenId } from "../extraction-runs/format";
+import { fetchExpenseReports } from "../api";
+import { fetchAllComplianceEvaluationRuns } from "../compliance-evaluation-runs/api";
+import type { ComplianceEvaluationRun } from "../compliance-evaluation-runs/types";
+import { fetchComplianceReviews } from "../compliance-review/api";
+import {
+	formatExtractionRunStatus,
+	shortenId,
+} from "../extraction-runs/format";
 import { useCallback, useMemo } from "react";
 import { REVIEW_QUEUE_LIFECYCLE_STATES } from "../candidate-rules/format";
 import { formatUploadDate } from "../policy-documents/format";
-import { formatPolicyVersionDate, formatRuleCount, latestPolicyVersionId } from "../policy-versions/format";
+import {
+	formatPolicyVersionDate,
+	formatRuleCount,
+	latestPolicyVersionId,
+} from "../policy-versions/format";
 import { useAsyncResource } from "../shared/ui/useAsyncResource";
-
-type DashboardSection =
-	| "documents"
-	| "extraction-runs"
-	| "review"
-	| "policy-versions";
+import type { DashboardSectionId } from "../app/navigation";
 
 interface DashboardPageProps {
 	onOpenRun: (extractionRunId: string) => void;
-	onOpenSection: (section: DashboardSection) => void;
+	onOpenSection: (section: DashboardSectionId) => void;
+	onStartGuidedTour: () => void;
 }
 
 function sortNewestFirst<T extends { created_at: string }>(
@@ -34,35 +41,84 @@ interface DashboardData {
 	pendingReviews: CandidateRuleReview[];
 	policyVersions: PolicyVersionSummary[];
 	extractionRuns: ExtractionRun[];
+	expenseReportCount: number;
+	evaluationRuns: ComplianceEvaluationRun[];
+	complianceReviewCount: number;
+}
+
+function formatPassRate(run: ComplianceEvaluationRun | null): string {
+	if (!run || run.summary.total_count === 0) {
+		return "—";
+	}
+	const passRate = Math.round(
+		(run.summary.pass_count / run.summary.total_count) * 100,
+	);
+	return `${passRate}% pass`;
+}
+
+function passRateTone(run: ComplianceEvaluationRun | null): "neutral" | "good" | "alert" {
+	if (!run || run.summary.total_count === 0) {
+		return "neutral";
+	}
+	const passRate = Math.round(
+		(run.summary.pass_count / run.summary.total_count) * 100,
+	);
+	if (passRate >= 80) {
+		return "good";
+	}
+	if (passRate === 0) {
+		return "alert";
+	}
+	return "neutral";
 }
 
 export default function DashboardPage({
 	onOpenRun,
 	onOpenSection,
+	onStartGuidedTour,
 }: DashboardPageProps) {
 	const fetchDashboard = useCallback(async (): Promise<DashboardData> => {
-		const [reviewsResponse, versionsResponse, runsResponse] =
-			await Promise.all([
-				fetchCandidateRules({
-					lifecycleStates: [...REVIEW_QUEUE_LIFECYCLE_STATES],
-				}),
-				fetchPolicyVersions(),
-				fetchExtractionRuns(),
-			]);
+		const [
+			reviewsResponse,
+			versionsResponse,
+			runsResponse,
+			expenseReportsResponse,
+			evaluationRuns,
+			complianceReviewsResponse,
+		] = await Promise.all([
+			fetchCandidateRules({
+				lifecycleStates: [...REVIEW_QUEUE_LIFECYCLE_STATES],
+			}),
+			fetchPolicyVersions(),
+			fetchExtractionRuns(),
+			fetchExpenseReports(),
+			fetchAllComplianceEvaluationRuns(),
+			fetchComplianceReviews(),
+		]);
 
 		return {
 			pendingReviews: reviewsResponse.items,
 			policyVersions: sortNewestFirst(versionsResponse.items),
 			extractionRuns: sortNewestFirst(runsResponse.items),
+			expenseReportCount: expenseReportsResponse.items.length,
+			evaluationRuns,
+			complianceReviewCount: complianceReviewsResponse.items.length,
 		};
 	}, []);
 
-	const { status, data, error: errorMessage, reload: loadDashboard } =
-		useAsyncResource(fetchDashboard, "Unable to load dashboard summary.");
+	const {
+		status,
+		data,
+		error: errorMessage,
+		reload: loadDashboard,
+	} = useAsyncResource(fetchDashboard, "Unable to load dashboard summary.");
 
 	const pendingReviews = data?.pendingReviews ?? [];
 	const policyVersions = data?.policyVersions ?? [];
 	const extractionRuns = data?.extractionRuns ?? [];
+	const expenseReportCount = data?.expenseReportCount ?? 0;
+	const evaluationRuns = data?.evaluationRuns ?? [];
+	const complianceReviewCount = data?.complianceReviewCount ?? 0;
 
 	const latestPolicyVersion = policyVersions[0] ?? null;
 	const latestVersionId = latestPolicyVersionId(policyVersions);
@@ -70,6 +126,7 @@ export default function DashboardPage({
 		() => extractionRuns.slice(0, 6),
 		[extractionRuns],
 	);
+	const latestEvaluationRun = evaluationRuns[0] ?? null;
 	const flaggedPendingCount = pendingReviews.filter(
 		(review) => (review.qa_flags?.length ?? 0) > 0,
 	).length;
@@ -81,13 +138,11 @@ export default function DashboardPage({
 	const scopeSummary =
 		status === "ready"
 			? [
-					`${pendingReviews.length} pending`,
-					flaggedPendingCount > 0 ? `${flaggedPendingCount} flagged` : null,
-					latestVersionId ? `latest ${latestVersionId}` : "no Policy Version",
-					`${extractionRuns.length} run${extractionRuns.length === 1 ? "" : "s"}`,
-				]
-					.filter(Boolean)
-					.join(" · ")
+					`${expenseReportCount} expense report${expenseReportCount === 1 ? "" : "s"}`,
+					`${evaluationRuns.length} evaluation run${evaluationRuns.length === 1 ? "" : "s"}`,
+					`${complianceReviewCount} in review queue`,
+					`${pendingReviews.length} rules pending`,
+				].join(" · ")
 			: null;
 
 	return (
@@ -114,70 +169,182 @@ export default function DashboardPage({
 
 			{status === "ready" ? (
 				<>
-					<div className="catalog-toolbar">
-						<p className="catalog-scope">{scopeSummary}</p>
-						<button
-							type="button"
-							className="document-command"
-							onClick={() => onOpenSection("review")}
-						>
-							Review queue
-						</button>
+					<div className="dashboard-hero">
+						<p className="dashboard-hero-summary">{scopeSummary}</p>
+						<div className="dashboard-hero-actions">
+							<button
+								type="button"
+								className="guided-tour-btn guided-tour-btn-primary"
+								onClick={onStartGuidedTour}
+							>
+								Start guided tour
+							</button>
+							<button
+								type="button"
+								className="desk-action"
+								onClick={() => onOpenSection("review")}
+							>
+								Review queue
+							</button>
+						</div>
 					</div>
 
-					<section className="db-properties" aria-label="Summary">
-						<button
-							type="button"
-							className="db-property"
-							onClick={() => onOpenSection("review")}
+					<div className="dashboard-columns">
+						<section
+							className="dashboard-column dashboard-column-operate reveal"
+							style={{ animationDelay: "40ms" }}
+							aria-label="Operate summary"
 						>
-							<span className="db-property-label">Review queue</span>
-							<span className="db-property-value">{pendingReviews.length}</span>
-							{flaggedPendingCount > 0 ? (
-								<span className="db-property-meta">
-									{flaggedPendingCount} flagged
-								</span>
-							) : null}
-						</button>
+							<header className="dashboard-column-head">
+								<span className="dashboard-column-kicker">Operate</span>
+								<h3 className="dashboard-column-title">Run compliance</h3>
+								<p className="dashboard-column-summary">
+									Evaluate expenses and resolve outcomes needing review.
+								</p>
+							</header>
 
-						<button
-							type="button"
-							className="db-property"
-							onClick={() => onOpenSection("policy-versions")}
-						>
-							<span className="db-property-label">Policy version</span>
-							<span className="db-property-value">
-								{latestVersionId ?? "—"}
-							</span>
-							{latestPolicyVersion ? (
-								<span className="db-property-meta">
-									{formatRuleCount(latestPolicyVersion.rule_count)} ·{" "}
-									{formatPolicyVersionDate(latestPolicyVersion.created_at)}
-								</span>
-							) : null}
-						</button>
+							<div className="dashboard-column-metrics">
+								<button
+									type="button"
+									className="dashboard-metric"
+									onClick={() => onOpenSection("expense-reports")}
+								>
+									<span className="dashboard-metric-label">
+										Expense reports
+									</span>
+									<span className="dashboard-metric-value">
+										{expenseReportCount}
+									</span>
+									<span className="dashboard-metric-meta">
+										Imported batches
+									</span>
+								</button>
 
-						<button
-							type="button"
-							className="db-property"
-							onClick={() => onOpenSection("extraction-runs")}
+								<button
+									type="button"
+									className="dashboard-metric"
+									onClick={() => onOpenSection("evaluation-runs")}
+								>
+									<span className="dashboard-metric-label">
+										Evaluation runs
+									</span>
+									<span className="dashboard-metric-value">
+										{evaluationRuns.length}
+									</span>
+									<span
+										className={`dashboard-metric-meta is-${passRateTone(latestEvaluationRun)}`}
+									>
+										{latestEvaluationRun
+											? `Latest ${formatPassRate(latestEvaluationRun)}`
+											: "No runs yet"}
+									</span>
+								</button>
+
+								<button
+									type="button"
+									className="dashboard-metric"
+									onClick={() => onOpenSection("compliance-review")}
+								>
+									<span className="dashboard-metric-label">Review queue</span>
+									<span
+										className={`dashboard-metric-value${complianceReviewCount > 0 ? " is-emphasis" : ""}`}
+									>
+										{complianceReviewCount}
+									</span>
+									<span className="dashboard-metric-meta">
+										Needs human resolution
+									</span>
+								</button>
+							</div>
+						</section>
+
+						<section
+							className="dashboard-column dashboard-column-author reveal"
+							style={{ animationDelay: "120ms" }}
+							aria-label="Author policy summary"
 						>
-							<span className="db-property-label">Extraction runs</span>
-							<span className="db-property-value">
-								{extractionRuns.length}
-							</span>
-							<span className="db-property-meta">
-								{failedRunCount > 0
-									? `${completedRunCount} completed · ${failedRunCount} failed`
-									: `${completedRunCount} completed`}
-							</span>
-						</button>
-					</section>
+							<header className="dashboard-column-head">
+								<span className="dashboard-column-kicker">Author Policy</span>
+								<h3 className="dashboard-column-title">
+									Build executable rules
+								</h3>
+								<p className="dashboard-column-summary">
+									Extract rules from policy and publish compiled sets.
+								</p>
+							</header>
+
+							<div className="dashboard-column-metrics">
+								<button
+									type="button"
+									className="dashboard-metric"
+									onClick={() => onOpenSection("review")}
+								>
+									<span className="dashboard-metric-label">Rule review</span>
+									<span className="dashboard-metric-value">
+										{pendingReviews.length}
+									</span>
+									{flaggedPendingCount > 0 ? (
+										<span className="dashboard-metric-meta is-caution">
+											{flaggedPendingCount} flagged
+										</span>
+									) : (
+										<span className="dashboard-metric-meta">
+											Awaiting approver
+										</span>
+									)}
+								</button>
+
+								<button
+									type="button"
+									className="dashboard-metric"
+									onClick={() => onOpenSection("policy-versions")}
+								>
+									<span className="dashboard-metric-label">
+										Policy version
+									</span>
+									<span
+										className="dashboard-metric-value dashboard-metric-value-mono"
+										title={latestVersionId ?? undefined}
+									>
+										{latestVersionId ?? "—"}
+									</span>
+									{latestPolicyVersion ? (
+										<span className="dashboard-metric-meta">
+											{formatRuleCount(latestPolicyVersion.rule_count)} ·{" "}
+											{formatPolicyVersionDate(latestPolicyVersion.created_at)}
+										</span>
+									) : (
+										<span className="dashboard-metric-meta">Not published</span>
+									)}
+								</button>
+
+								<button
+									type="button"
+									className="dashboard-metric"
+									onClick={() => onOpenSection("extraction-runs")}
+								>
+									<span className="dashboard-metric-label">
+										Extraction runs
+									</span>
+									<span className="dashboard-metric-value">
+										{extractionRuns.length}
+									</span>
+									<span
+										className={`dashboard-metric-meta${failedRunCount > 0 ? " is-caution" : ""}`}
+									>
+										{failedRunCount > 0
+											? `${completedRunCount} completed · ${failedRunCount} failed`
+											: `${completedRunCount} completed`}
+									</span>
+								</button>
+							</div>
+						</section>
+					</div>
 
 					<section className="desk-ledger" aria-label="Recent Extraction Runs">
 						<div className="catalog-toolbar">
 							<p className="catalog-scope">
-								{recentRuns.length} recent run
+								{recentRuns.length} recent extraction run
 								{recentRuns.length === 1 ? "" : "s"}
 							</p>
 							<button
@@ -210,17 +377,13 @@ export default function DashboardPage({
 													<button
 														type="button"
 														className="desk-row-link mono"
-														onClick={() =>
-															onOpenRun(run.extraction_run_id)
-														}
+														onClick={() => onOpenRun(run.extraction_run_id)}
 													>
 														{shortenId(run.extraction_run_id)}
 													</button>
 												</td>
 												<td>
-													<span
-														className={`extraction-status ${run.status}`}
-													>
+													<span className={`extraction-status ${run.status}`}>
 														{formatExtractionRunStatus(run.status)}
 													</span>
 												</td>

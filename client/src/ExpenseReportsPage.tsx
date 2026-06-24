@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ApiError, fetchExpenseReport, fetchExpenseReports, importExpenseReportCsv } from "./api";
 import { hasAnyRole } from "./shared/permissions";
 import type { AuthenticatedPrincipal } from "./shared/auth/types";
-import type { ExpenseReport, ExpenseReportImportErrorResponse, ExpenseReportSummary } from "./types";
+import type { ExpenseReport, ExpenseReportImportErrorResponse, ExpenseReportRow, ExpenseReportSummary } from "./types";
 import Breadcrumbs from "./shared/ui/Breadcrumbs";
 import RecordPageHeader, {
 	type RecordPropertyGroup,
@@ -10,6 +10,7 @@ import RecordPageHeader, {
 import StatusPill from "./shared/ui/StatusPill";
 import { ExpenseReportPageIcon, RecordPageIcon } from "./shared/ui/PageIcons";
 import { ComplianceEvaluationSection } from "./compliance-evaluation-runs";
+import { formatExpenseRowValue } from "./compliance-review/format";
 import { formatDateTime } from "./shared/format/common";
 import { formatRelativeTime } from "./shared/format/relativeTime";
 import TablePagination, {
@@ -33,11 +34,42 @@ const OPTIONAL_CSV_COLUMNS = [
 	"manager_approval",
 	"receipt_attached",
 	"trip_id",
+	"submission_days",
 ] as const;
+
+const DEFERRED_SCOPE_DIMENSIONS = [
+	"employee_group",
+	"department",
+	"role",
+	"seniority",
+	"state",
+	"city",
+	"region",
+] as const;
+
+const EXPENSE_ROW_TABLE_COLUMNS: {
+	key: keyof ExpenseReportRow;
+	label: string;
+}[] = [
+	{ key: "employee_id", label: "Employee" },
+	{ key: "expense_date", label: "Date" },
+	{ key: "expense_category", label: "Category" },
+	{ key: "amount", label: "Amount" },
+	{ key: "currency", label: "Currency" },
+	{ key: "country", label: "Country" },
+	{ key: "travel_type", label: "Travel type" },
+	{ key: "business_purpose", label: "Business purpose" },
+	{ key: "attendee_list", label: "Attendees" },
+	{ key: "manager_approval", label: "Manager approval" },
+	{ key: "receipt_attached", label: "Receipt attached" },
+	{ key: "trip_id", label: "Trip ID" },
+	{ key: "submission_days", label: "Submission days" },
+];
 
 interface ExpenseReportsPageProps {
 	principal: AuthenticatedPrincipal;
 	onOpenEvaluationRun?: (complianceEvaluationRunId: string) => void;
+	onOpenCompiledRuleSet?: (compiledRuleSetId: string) => void;
 }
 
 const ADMIN_ONLY_ROLES = ["admin"] as const;
@@ -96,13 +128,6 @@ function coerceImportErrors(
 	};
 }
 
-function formatBoolean(value: boolean | null): string {
-	if (value === null) {
-		return "Not set";
-	}
-	return value ? "Yes" : "No";
-}
-
 function formatRowCount(count: number): string {
 	return `${count} ${count === 1 ? "row" : "rows"}`;
 }
@@ -112,6 +137,7 @@ interface ExpenseReportDetailProps {
 	principal: AuthenticatedPrincipal;
 	onBack: () => void;
 	onOpenEvaluationRun?: (complianceEvaluationRunId: string) => void;
+	onOpenCompiledRuleSet?: (compiledRuleSetId: string) => void;
 }
 
 function ExpenseReportDetailLoading({ onBack }: { onBack: () => void }) {
@@ -159,6 +185,7 @@ function ExpenseReportDetail({
 	principal,
 	onBack,
 	onOpenEvaluationRun,
+	onOpenCompiledRuleSet,
 }: ExpenseReportDetailProps) {
 	const [rowsPage, setRowsPage] = useState(1);
 
@@ -180,10 +207,29 @@ function ExpenseReportDetail({
 				{ label: "Imported by", value: report.imported_by },
 				{
 					label: "Status",
-					value: <StatusPill label="Imported" variant="neutral" />,
+					value: <StatusPill label="Immutable" variant="neutral" />,
 				},
 			],
 		},
+		...(report.input_fingerprint
+			? [
+					{
+						title: "Input fingerprint",
+						properties: [
+							{
+								label: "Content hash",
+								value: (
+									<code className="db-mono">{report.input_fingerprint.content_hash}</code>
+								),
+							},
+							{
+								label: "Pinned rows",
+								value: String(report.input_fingerprint.row_count),
+							},
+						],
+					},
+				]
+			: []),
 		{
 			title: "Report",
 			properties: [
@@ -227,6 +273,11 @@ function ExpenseReportDetail({
 			/>
 
 			<h4 className="record-section-heading">Expense rows</h4>
+			<p className="expense-report-table-note">
+				Imported reports are immutable — upload a new CSV to change inputs. Optional
+				fields normalize to null when blank. Compliance Evaluation Runs pin the
+				content hash shown above.
+			</p>
 			<div className="db-table-wrap expense-report-rows-wrap">
 				<table
 					id="expense-report-rows-panel"
@@ -240,14 +291,11 @@ function ExpenseReportDetail({
 				>
 					<thead>
 						<tr>
-							<th scope="col">Employee</th>
-							<th scope="col">Date</th>
-							<th scope="col">Category</th>
-							<th scope="col">Amount</th>
-							<th scope="col">Currency</th>
-							<th scope="col">Business purpose</th>
-							<th scope="col">Manager approval</th>
-							<th scope="col">Receipt attached</th>
+							{EXPENSE_ROW_TABLE_COLUMNS.map((column) => (
+								<th key={column.key} scope="col">
+									{column.label}
+								</th>
+							))}
 						</tr>
 					</thead>
 					<tbody>
@@ -257,14 +305,18 @@ function ExpenseReportDetail({
 								<tr
 									key={`${report.expense_report_id}:${row.employee_id}:${rowIndex}`}
 								>
-									<td className="db-mono">{row.employee_id}</td>
-									<td>{row.expense_date}</td>
-									<td>{row.expense_category}</td>
-									<td>{row.amount}</td>
-									<td>{row.currency}</td>
-									<td>{row.business_purpose ?? "Not set"}</td>
-									<td>{formatBoolean(row.manager_approval)}</td>
-									<td>{formatBoolean(row.receipt_attached)}</td>
+									{EXPENSE_ROW_TABLE_COLUMNS.map((column) => (
+										<td
+											key={column.key}
+											className={
+												column.key === "employee_id" || column.key === "trip_id"
+													? "db-mono"
+													: undefined
+											}
+										>
+											{formatExpenseRowValue(row[column.key])}
+										</td>
+									))}
 								</tr>
 							);
 						})}
@@ -284,6 +336,7 @@ function ExpenseReportDetail({
 				rowCount={report.row_count}
 				principal={principal}
 				onOpenRun={onOpenEvaluationRun}
+				onOpenCompiledRuleSet={onOpenCompiledRuleSet}
 			/>
 		</div>
 	);
@@ -292,6 +345,7 @@ function ExpenseReportDetail({
 export default function ExpenseReportsPage({
 	principal,
 	onOpenEvaluationRun,
+	onOpenCompiledRuleSet,
 }: ExpenseReportsPageProps) {
 	const [reports, setReports] = useState<ExpenseReportSummary[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
@@ -467,6 +521,7 @@ export default function ExpenseReportsPage({
 				principal={principal}
 				onBack={() => setSelectedReportId(null)}
 				onOpenEvaluationRun={onOpenEvaluationRun}
+				onOpenCompiledRuleSet={onOpenCompiledRuleSet}
 			/>
 		);
 	}
@@ -508,8 +563,12 @@ export default function ExpenseReportsPage({
 				>
 					<h4 className="record-section-heading">Import CSV</h4>
 					<p className="expense-report-import-note">
-						Choose a UTF-8 CSV with a header row. Row-level validation errors
-						are returned before anything is saved.
+						Choose a UTF-8 CSV with a header row. Import is all-or-nothing: fix
+						file-level and row-level validation errors before anything is saved.
+						Employee group and jurisdiction scope dimensions (department, role,
+						seniority, state, city, region) are preserved on Rules but are not
+						carried on Expense Report rows in v1 — evaluation routes those Rules
+						to needs review when other scope dimensions match.
 					</p>
 
 					<div
@@ -534,6 +593,20 @@ export default function ExpenseReportsPage({
 								{OPTIONAL_CSV_COLUMNS.map((column) => (
 									<code key={column}>{column}</code>
 								))}
+							</p>
+						</div>
+						<div>
+							<span className="expense-report-column-label">
+								Deferred scope dimensions
+							</span>
+							<p className="expense-report-column-list expense-report-deferred-note">
+								{DEFERRED_SCOPE_DIMENSIONS.map((column) => (
+									<code key={column}>{column}</code>
+								))}
+								<span>
+									Not on CSV rows in v1 — carried on Rule scope and resolved via
+									future HR or jurisdiction lookup.
+								</span>
 							</p>
 						</div>
 					</div>
@@ -660,7 +733,8 @@ export default function ExpenseReportsPage({
 				<>
 					<h4 className="record-section-heading">Imported reports</h4>
 					<p className="expense-report-table-note">
-						Open a report to review employee rows, amounts, and receipt flags.
+						Open a report to review normalized rows, optional evaluator fields,
+						and the pinned input fingerprint used by Compliance Evaluation Runs.
 					</p>
 					<div className="db-table-wrap">
 						<table className="db-table" aria-label="Expense Reports">

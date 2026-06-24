@@ -147,6 +147,13 @@ export interface ExpenseReportRow {
   manager_approval: boolean | null;
   receipt_attached: boolean | null;
   trip_id: string | null;
+  submission_days: number | null;
+}
+
+export interface ExpenseInputFingerprint {
+  source_filename: string;
+  row_count: number;
+  content_hash: string;
 }
 
 export interface ExpenseReportSummary {
@@ -164,6 +171,7 @@ export interface ExpenseReport {
   row_count: number;
   rows: ExpenseReportRow[];
   created_at: string;
+  input_fingerprint?: ExpenseInputFingerprint | null;
 }
 
 export interface ExpenseReportListResponse {
@@ -262,6 +270,12 @@ export interface Scope {
   expense_category: string | null;
   travel_type: string | null;
   employee_group: string | null;
+  department?: string | null;
+  role?: string | null;
+  seniority?: string | null;
+  state?: string | null;
+  city?: string | null;
+  region?: string | null;
   effective_start_date: string | null;
   effective_end_date: string | null;
 }

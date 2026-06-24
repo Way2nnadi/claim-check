@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import re
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -31,26 +33,78 @@ _OPTIONAL_COLUMNS = (
     "trip_id",
     "submission_days",
 )
+REQUIRED_CSV_COLUMNS = _REQUIRED_COLUMNS
+OPTIONAL_CSV_COLUMNS = _OPTIONAL_COLUMNS
 _ALLOWED_COLUMNS = frozenset((*_REQUIRED_COLUMNS, *_OPTIONAL_COLUMNS))
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _TRUE_VALUES = {"true", "yes", "1"}
 _FALSE_VALUES = {"false", "no", "0"}
 
 
+class ExpenseInputFingerprint(BaseModel):
+    """Stable hash of normalized row content for Compliance Evaluation replay."""
+
+    source_filename: str = Field(
+        min_length=1,
+        description="Original CSV filename at import time (metadata only; not hashed).",
+    )
+    row_count: int = Field(ge=0, description="Number of normalized rows.")
+    content_hash: str = Field(
+        min_length=64,
+        max_length=64,
+        description="SHA-256 of normalized row JSON (sorted keys, compact separators).",
+    )
+
+
 class ExpenseReportRow(BaseModel):
-    employee_id: str = Field(min_length=1)
-    expense_date: date
-    expense_category: str = Field(min_length=1)
-    amount: str = Field(min_length=1)
-    currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
-    country: str | None = None
-    travel_type: str | None = None
-    business_purpose: str | None = None
-    attendee_list: str | None = None
-    manager_approval: bool | None = None
-    receipt_attached: bool | None = None
-    trip_id: str | None = None
-    submission_days: int | None = Field(default=None, ge=0)
+    """Normalized v1 Expense Report row used by the Compliance Evaluator."""
+
+    employee_id: str = Field(min_length=1, description="Employee identifier.")
+    expense_date: date = Field(description="Expense date in ISO YYYY-MM-DD format.")
+    expense_category: str = Field(min_length=1, description="Expense category.")
+    amount: str = Field(
+        min_length=1,
+        description="Decimal amount stored as a normalized string.",
+    )
+    currency: str = Field(
+        min_length=3,
+        max_length=3,
+        pattern=r"^[A-Z]{3}$",
+        description="Uppercase ISO 4217 currency code.",
+    )
+    country: str | None = Field(
+        default=None,
+        description="Optional country or region scope value.",
+    )
+    travel_type: str | None = Field(
+        default=None,
+        description="Optional travel type scope value.",
+    )
+    business_purpose: str | None = Field(
+        default=None,
+        description="Optional business purpose for subjective Rules.",
+    )
+    attendee_list: str | None = Field(
+        default=None,
+        description="Optional attendee list for per-attendee aggregation.",
+    )
+    manager_approval: bool | None = Field(
+        default=None,
+        description="Optional manager approval flag.",
+    )
+    receipt_attached: bool | None = Field(
+        default=None,
+        description="Optional receipt attachment flag.",
+    )
+    trip_id: str | None = Field(
+        default=None,
+        description="Optional trip identifier for per-trip aggregation.",
+    )
+    submission_days: int | None = Field(
+        default=None,
+        ge=0,
+        description="Optional days since submission for timeliness Rules.",
+    )
 
 
 class ExpenseReportSummary(BaseModel):
@@ -68,6 +122,13 @@ class ExpenseReport(BaseModel):
     row_count: int = Field(ge=0)
     rows: list[ExpenseReportRow] = Field(default_factory=list)
     created_at: datetime
+    input_fingerprint: ExpenseInputFingerprint | None = Field(
+        default=None,
+        description=(
+            "Computed fingerprint of normalized row content. "
+            "Compliance Evaluation Runs pin the same hash at execution time."
+        ),
+    )
 
 
 class ExpenseReportListResponse(BaseModel):
@@ -80,9 +141,17 @@ class ExpenseReportImportRowError(BaseModel):
 
 
 class ExpenseReportImportErrorResponse(BaseModel):
+    """422 response when CSV validation fails. Nothing is persisted."""
+
     detail: str = "Expense Report import rejected."
-    file_errors: list[str] = Field(default_factory=list)
-    row_errors: list[ExpenseReportImportRowError] = Field(default_factory=list)
+    file_errors: list[str] = Field(
+        default_factory=list,
+        description="File-level issues such as missing headers or unknown columns.",
+    )
+    row_errors: list[ExpenseReportImportRowError] = Field(
+        default_factory=list,
+        description="Per-row validation issues keyed by 1-based CSV row number.",
+    )
 
 
 class ExpenseReportImportValidationError(Exception):
@@ -95,6 +164,25 @@ class ExpenseReportImportValidationError(Exception):
         self.file_errors = list(file_errors or [])
         self.row_errors = list(row_errors or [])
         super().__init__("Expense Report import rejected.")
+
+
+def compute_expense_input_fingerprint(
+    *,
+    source_filename: str,
+    rows: list[ExpenseReportRow],
+) -> ExpenseInputFingerprint:
+    normalized_rows = [row.model_dump(mode="json") for row in rows]
+    content_payload = json.dumps(
+        normalized_rows,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    content_hash = hashlib.sha256(content_payload.encode("utf-8")).hexdigest()
+    return ExpenseInputFingerprint(
+        source_filename=source_filename,
+        row_count=len(rows),
+        content_hash=content_hash,
+    )
 
 
 def validate_expense_report_upload_filename(filename: str | None) -> str:
@@ -131,7 +219,14 @@ def import_expense_report(
         )
     )
     session.flush()
-    return report
+    return report.model_copy(
+        update={
+            "input_fingerprint": compute_expense_input_fingerprint(
+                source_filename=source_filename,
+                rows=rows,
+            ),
+        },
+    )
 
 
 def list_expense_reports(session: Session) -> list[ExpenseReportSummary]:
@@ -166,13 +261,18 @@ def expense_report_summary_from_record(record: ExpenseReportRecord) -> ExpenseRe
 
 
 def expense_report_from_record(record: ExpenseReportRecord) -> ExpenseReport:
+    rows = [ExpenseReportRow.model_validate(row) for row in record.rows]
     return ExpenseReport(
         expense_report_id=record.expense_report_id,
         imported_by=record.imported_by,
         source_filename=record.source_filename,
         row_count=record.row_count,
-        rows=[ExpenseReportRow.model_validate(row) for row in record.rows],
+        rows=rows,
         created_at=_normalize_created_at(record.created_at),
+        input_fingerprint=compute_expense_input_fingerprint(
+            source_filename=record.source_filename,
+            rows=rows,
+        ),
     )
 
 

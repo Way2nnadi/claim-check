@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from policy_pipeline.auth.auth import require_roles
 from policy_pipeline.auth.identity import AuthenticatedPrincipal, Role
 from policy_pipeline.expense_reports import (
+    OPTIONAL_CSV_COLUMNS,
+    REQUIRED_CSV_COLUMNS,
     ExpenseReport,
     ExpenseReportImportErrorResponse,
     ExpenseReportImportValidationError,
@@ -20,8 +22,21 @@ from policy_pipeline.shared.database import get_session
 
 router = APIRouter()
 
+_EXPENSE_REPORT_CONTRACT = (
+    "Imported Expense Reports are immutable append-only records. "
+    f"Required CSV columns: {', '.join(REQUIRED_CSV_COLUMNS)}. "
+    f"Optional CSV columns: {', '.join(OPTIONAL_CSV_COLUMNS)}. "
+    "CSV import is all-or-nothing: file-level and row-level validation errors "
+    "return 422 and nothing is saved."
+)
 
-@router.get("/expense-reports", response_model=ExpenseReportListResponse)
+
+@router.get(
+    "/expense-reports",
+    response_model=ExpenseReportListResponse,
+    summary="List imported Expense Reports",
+    description=_EXPENSE_REPORT_CONTRACT,
+)
 def list_expense_report_catalog(
     principal: Annotated[
         AuthenticatedPrincipal,
@@ -33,7 +48,16 @@ def list_expense_report_catalog(
     return ExpenseReportListResponse(items=list_expense_reports(session))
 
 
-@router.get("/expense-reports/{expense_report_id}", response_model=ExpenseReport)
+@router.get(
+    "/expense-reports/{expense_report_id}",
+    response_model=ExpenseReport,
+    summary="Get an immutable Expense Report with normalized rows",
+    description=(
+        f"{_EXPENSE_REPORT_CONTRACT} "
+        "The response includes a computed input_fingerprint for traceability; "
+        "Compliance Evaluation Runs pin the same fingerprint at execution time."
+    ),
+)
 def get_expense_report_detail(
     expense_report_id: str,
     principal: Annotated[
@@ -56,9 +80,24 @@ def get_expense_report_detail(
     "/expense-reports",
     response_model=ExpenseReport,
     status_code=status.HTTP_201_CREATED,
+    summary="Import a UTF-8 CSV Expense Report",
+    description=(
+        f"{_EXPENSE_REPORT_CONTRACT} "
+        "Uploads must use a .csv filename. Booleans accept true/false, yes/no, "
+        "or 1/0. Currency codes are uppercased. Amounts are normalized to decimal strings."
+    ),
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ExpenseReportImportErrorResponse,
+            "description": "Validation failed; no Expense Report was created.",
+        },
+        status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: {
+            "description": "Upload filename must end with .csv.",
+        },
+    },
 )
 async def upload_expense_report(
-    file: Annotated[UploadFile, File()],
+    file: Annotated[UploadFile, File(description="UTF-8 CSV with a header row.")],
     principal: Annotated[
         AuthenticatedPrincipal,
         Depends(require_roles(Role.ADMIN)),

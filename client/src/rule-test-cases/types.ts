@@ -37,6 +37,15 @@ export interface RuleTestCase {
   disabled_at?: string | null;
   disabled_by?: string | null;
   disable_rationale?: string | null;
+  edited_at?: string | null;
+  edited_by?: string | null;
+  edit_rationale?: string | null;
+}
+
+export interface RuleTestCaseEditRequest {
+  rationale: string;
+  expense_fixture?: ExpenseFixture;
+  expected_outcome?: EvaluationOutcome;
 }
 
 export interface RuleTestCaseDisableRequest {

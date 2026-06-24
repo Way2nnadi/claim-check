@@ -13,11 +13,13 @@ from policy_pipeline.rule_test_cases.generator import (
     group_rule_test_cases,
 )
 from policy_pipeline.rule_test_cases.models import (
+    EvaluationOutcome,
     RuleTestCase,
     RuleTestCaseListResponse,
     RuleTestCaseStatus,
     RuleTestRun,
 )
+from policy_pipeline.expense_reports import ExpenseReportRow
 from policy_pipeline.rule_test_cases.records import RuleTestCaseRecord, RuleTestRunRecord
 
 
@@ -175,6 +177,53 @@ def enable_rule_test_case(
     return updated
 
 
+def edit_rule_test_case(
+    session: Session,
+    *,
+    rule_test_case_id: str,
+    edited_by: str,
+    rationale: str,
+    expense_fixture: ExpenseReportRow | None = None,
+    expected_outcome: EvaluationOutcome | None = None,
+) -> tuple[RuleTestCase, list[str]]:
+    record = session.get(RuleTestCaseRecord, rule_test_case_id)
+    if record is None:
+        raise RuleTestCaseNotFoundError(rule_test_case_id)
+
+    case = rule_test_case_from_record(record)
+    if not is_rule_test_case_active(case):
+        raise RuleTestCaseNotActiveError(rule_test_case_id)
+
+    updates: dict[str, object] = {}
+    updated_fields: list[str] = []
+
+    if expense_fixture is not None and expense_fixture != case.expense_fixture:
+        updates["expense_fixture"] = expense_fixture
+        updated_fields.append("expense_fixture")
+    if (
+        expected_outcome is not None
+        and expected_outcome != case.expected_outcome
+    ):
+        updates["expected_outcome"] = expected_outcome
+        updated_fields.append("expected_outcome")
+
+    if not updated_fields:
+        raise RuleTestCaseNoChangesError(rule_test_case_id)
+
+    edited_at = datetime.now(UTC)
+    updated = case.model_copy(
+        update={
+            **updates,
+            "edited_at": edited_at,
+            "edited_by": edited_by,
+            "edit_rationale": rationale,
+        }
+    )
+    record.payload = updated.model_dump(mode="json")
+    session.flush()
+    return updated, sorted(updated_fields)
+
+
 def list_rule_test_cases_grouped(
     session: Session,
     *,
@@ -234,6 +283,13 @@ def rule_test_case_from_record(record: RuleTestCaseRecord) -> RuleTestCase:
         else:
             disabled_at = disabled_at.astimezone(UTC)
         updates["disabled_at"] = disabled_at
+    if rule_test_case.edited_at is not None:
+        edited_at = rule_test_case.edited_at
+        if edited_at.tzinfo is None:
+            edited_at = edited_at.replace(tzinfo=UTC)
+        else:
+            edited_at = edited_at.astimezone(UTC)
+        updates["edited_at"] = edited_at
     return rule_test_case.model_copy(update=updates)
 
 
@@ -268,6 +324,18 @@ class RuleTestCaseAlreadyDisabledError(Exception):
 
 
 class RuleTestCaseAlreadyEnabledError(Exception):
+    def __init__(self, rule_test_case_id: str) -> None:
+        self.rule_test_case_id = rule_test_case_id
+        super().__init__(rule_test_case_id)
+
+
+class RuleTestCaseNotActiveError(Exception):
+    def __init__(self, rule_test_case_id: str) -> None:
+        self.rule_test_case_id = rule_test_case_id
+        super().__init__(rule_test_case_id)
+
+
+class RuleTestCaseNoChangesError(Exception):
     def __init__(self, rule_test_case_id: str) -> None:
         self.rule_test_case_id = rule_test_case_id
         super().__init__(rule_test_case_id)

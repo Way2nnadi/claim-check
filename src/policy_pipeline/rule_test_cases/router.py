@@ -11,6 +11,7 @@ from policy_pipeline.rule_test_cases.evaluator import UnsupportedRuleEvaluationE
 from policy_pipeline.rule_test_cases.models import (
     RuleTestCase,
     RuleTestCaseDisableRequest,
+    RuleTestCaseEditRequest,
     RuleTestCaseEnableRequest,
     RuleTestCaseGenerateResponse,
     RuleTestCaseListResponse,
@@ -30,9 +31,12 @@ from policy_pipeline.rule_test_cases.store import (
     NoEnforceableRulesError,
     RuleTestCaseAlreadyDisabledError,
     RuleTestCaseAlreadyEnabledError,
+    RuleTestCaseNoChangesError,
+    RuleTestCaseNotActiveError,
     RuleTestCaseNotFoundError,
     UnsupportedRuleConditionError,
     disable_rule_test_case,
+    edit_rule_test_case,
     enable_rule_test_case,
     generate_rule_test_cases_for_compiled_rule_set,
     list_rule_test_cases_grouped,
@@ -237,6 +241,64 @@ def enable_rule_test_case_endpoint(
         payload={
             "rule_test_case_id": rule_test_case_id,
             "rationale": enable_request.rationale,
+            "compiled_rule_set_id": rule_test_case.compiled_rule_set_id,
+            "rule_id": rule_test_case.rule_id,
+        },
+        commit=False,
+    )
+    session.commit()
+    return rule_test_case
+
+
+@router.patch(
+    "/rule-test-cases/{rule_test_case_id}",
+    response_model=RuleTestCase,
+)
+def edit_rule_test_case_endpoint(
+    rule_test_case_id: str,
+    edit_request: RuleTestCaseEditRequest,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_roles(Role.APPROVER)),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+) -> RuleTestCase:
+    try:
+        rule_test_case, updated_fields = edit_rule_test_case(
+            session,
+            rule_test_case_id=rule_test_case_id,
+            edited_by=principal.subject,
+            rationale=edit_request.rationale,
+            expense_fixture=edit_request.expense_fixture,
+            expected_outcome=edit_request.expected_outcome,
+        )
+    except RuleTestCaseNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rule Test Case was not found.",
+        ) from exc
+    except RuleTestCaseNotActiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Rule Test Case must be active to edit.",
+        ) from exc
+    except RuleTestCaseNoChangesError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No changes were provided for the Rule Test Case.",
+        ) from exc
+
+    record_audit_event(
+        session,
+        action="rule_test_case.edited",
+        actor_subject=principal.subject,
+        actor_roles=[role.value for role in principal.roles],
+        entity_type="rule_test_case",
+        entity_id=rule_test_case_id,
+        payload={
+            "rule_test_case_id": rule_test_case_id,
+            "rationale": edit_request.rationale,
+            "fields": updated_fields,
             "compiled_rule_set_id": rule_test_case.compiled_rule_set_id,
             "rule_id": rule_test_case.rule_id,
         },

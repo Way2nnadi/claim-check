@@ -105,6 +105,9 @@ async def test_admin_imports_expense_report_csv_and_persists_normalized_rows(
             "trip_id": "trip-7",
             "submission_days": None,
         }
+        assert payload["input_fingerprint"]["source_filename"] == "expenses.csv"
+        assert payload["input_fingerprint"]["row_count"] == 1
+        assert len(payload["input_fingerprint"]["content_hash"]) == 64
 
         assert list_response.status_code == 200
         assert len(list_response.json()["items"]) == 1
@@ -123,6 +126,12 @@ async def test_admin_imports_expense_report_csv_and_persists_normalized_rows(
 
     assert detail_response.status_code == 200
     assert detail_response.json()["rows"] == payload["rows"]
+    assert detail_response.json()["input_fingerprint"] == {
+        "source_filename": "expenses.csv",
+        "row_count": 1,
+        "content_hash": payload["input_fingerprint"]["content_hash"],
+    }
+    assert len(detail_response.json()["input_fingerprint"]["content_hash"]) == 64
 
 
 @pytest.mark.anyio
@@ -324,3 +333,80 @@ async def test_expense_report_detail_returns_not_found_for_unknown_id(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Expense Report was not found."}
+
+
+@pytest.mark.anyio
+async def test_expense_report_import_rejects_non_csv_uploads(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/expense-reports",
+            headers={"Authorization": "Bearer admin-token"},
+            files=_csv_upload("expenses.txt", "employee_id\n"),
+        )
+
+    assert response.status_code == 415
+    assert response.json() == {
+        "detail": "Expense Report imports require a .csv file.",
+    }
+
+
+@pytest.mark.anyio
+async def test_expense_reports_have_no_mutation_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "policy-pipeline.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    _configure_local_auth(monkeypatch, database_url)
+
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    csv_contents = """employee_id,expense_date,expense_category,amount,currency
+emp-001,2026-06-21,meals,42.50,USD
+"""
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        create_response = await client.post(
+            "/expense-reports",
+            headers={"Authorization": "Bearer admin-token"},
+            files=_csv_upload("expenses.csv", csv_contents),
+        )
+        expense_report_id = create_response.json()["expense_report_id"]
+
+        patch_response = await client.patch(
+            f"/expense-reports/{expense_report_id}",
+            headers={"Authorization": "Bearer admin-token"},
+            json={"source_filename": "changed.csv"},
+        )
+        put_response = await client.put(
+            f"/expense-reports/{expense_report_id}",
+            headers={"Authorization": "Bearer admin-token"},
+            json={"source_filename": "changed.csv"},
+        )
+        delete_response = await client.delete(
+            f"/expense-reports/{expense_report_id}",
+            headers={"Authorization": "Bearer admin-token"},
+        )
+
+    assert patch_response.status_code == 405
+    assert put_response.status_code == 405
+    assert delete_response.status_code == 405

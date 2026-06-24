@@ -15,4 +15,8 @@ export interface AuditEventListResponse {
 export interface AuditEventFilters {
   entityType?: string;
   entityId?: string;
+  complianceEvaluationRunId?: string;
+  employeeId?: string;
+  expenseDate?: string;
+  rowIndex?: number;
 }

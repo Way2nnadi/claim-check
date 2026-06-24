@@ -87,6 +87,12 @@ class Scope(BaseModel):
     expense_category: str | None = None
     travel_type: str | None = None
     employee_group: str | None = None
+    department: str | None = None
+    role: str | None = None
+    seniority: str | None = None
+    state: str | None = None
+    city: str | None = None
+    region: str | None = None
     effective_start_date: str | None = None
     effective_end_date: str | None = None
 

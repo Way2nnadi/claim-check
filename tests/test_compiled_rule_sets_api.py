@@ -7,6 +7,9 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from policy_pipeline.compliance_evaluation_runs.evaluator import (
+    EMPLOYEE_GROUP_SCOPE_V1_SKIP_REASON,
+)
 from policy_pipeline.compiled_rule_sets.models import CompileStatus
 from policy_pipeline.main import create_app
 from policy_pipeline.shared.database import Base, CompiledRuleSetRecord
@@ -131,22 +134,23 @@ async def test_admin_compiles_policy_version_with_mixed_rules(
     assert payload["policy_version_id"] == "policy-v1"
     assert payload["compiled_by"] == "admin-user"
     assert payload["summary"] == {
-        "compiled": 1,
-        "skipped_non_enforceable": 1,
+        "compiled": 0,
+        "skipped_non_enforceable": 2,
         "compile_error": 0,
     }
     assert len(payload["entries"]) == 2
 
-    compiled_entry = next(
+    employee_group_entry = next(
         entry for entry in payload["entries"] if entry["rule_id"] == build_manual_rule_payload()["rule_id"]
     )
-    skipped_entry = next(
+    guidance_entry = next(
         entry for entry in payload["entries"] if entry["rule_id"] == "rule-lodging-guidance"
     )
-    assert compiled_entry["status"] == CompileStatus.COMPILED.value
-    assert compiled_entry["compiled_rule"] is not None
-    assert skipped_entry["status"] == CompileStatus.SKIPPED_NON_ENFORCEABLE.value
-    assert skipped_entry["skip_reason"] == "Guidance Rules are not machine-checkable."
+    assert employee_group_entry["status"] == CompileStatus.SKIPPED_NON_ENFORCEABLE.value
+    assert employee_group_entry["compiled_rule"] is None
+    assert employee_group_entry["skip_reason"] == EMPLOYEE_GROUP_SCOPE_V1_SKIP_REASON
+    assert guidance_entry["status"] == CompileStatus.SKIPPED_NON_ENFORCEABLE.value
+    assert guidance_entry["skip_reason"] == "Guidance Rules are not machine-checkable."
 
     assert inspect_response.status_code == 200
     assert inspect_response.json() == payload

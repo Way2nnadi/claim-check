@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from policy_pipeline.main import create_app
 from policy_pipeline.shared.database import Base, RuleRecord
+from tests.rule_scope_helpers import full_rule_scope
 
 
 def _configure_local_auth(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
@@ -119,14 +120,10 @@ async def test_admin_and_approver_can_create_manual_rule_without_citation_and_au
             "rationale": payload["rationale"],
             "extraction_run_id": None,
         },
-        "scope": {
-            "country": None,
-            "expense_category": "meals",
-            "travel_type": None,
-            "employee_group": "employees",
-            "effective_start_date": None,
-            "effective_end_date": None,
-        },
+        "scope": full_rule_scope(
+            expense_category="meals",
+            employee_group="employees",
+        ),
         "citation": None,
         "condition": payload["condition"],
         "applicability": payload["applicability"],

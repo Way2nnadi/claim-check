@@ -241,10 +241,10 @@ describe("CandidateRuleLedger", () => {
 
 		renderLedger([firstReview, secondReview], { onOpenReview });
 
-		const firstRow = screen.getByRole("button", {
+		const firstRow = screen.getByRole("article", {
 			name: "Open Candidate Rule rule-meals-cap",
 		});
-		const secondRow = screen.getByRole("button", {
+		const secondRow = screen.getByRole("article", {
 			name: "Open Candidate Rule rule-lodging-cap",
 		});
 

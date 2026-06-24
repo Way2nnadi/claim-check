@@ -30,24 +30,69 @@ const expenseVersions = {
   ],
 };
 
+type FetchResponse = {
+  ok: boolean;
+  status?: number;
+  json?: () => Promise<unknown>;
+  blob?: () => Promise<Blob>;
+};
+
+function resolveFetchUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.toString();
+  }
+  return input.url;
+}
+
+function ancillaryFetchResponse(url: string): FetchResponse | null {
+  if (url.includes("/extraction-runs")) {
+    return { ok: true, json: async () => ({ items: [] }) };
+  }
+  if (url.includes("/prompt-templates")) {
+    return { ok: true, json: async () => ({ items: [] }) };
+  }
+  if (url.includes("/model-configurations")) {
+    return { ok: true, json: async () => ({ items: [] }) };
+  }
+  return null;
+}
+
+function stubFetchWithQueue(primaryQueue: FetchResponse[]): ReturnType<typeof vi.fn> {
+  let queueIndex = 0;
+  const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = resolveFetchUrl(input);
+    const ancillary = ancillaryFetchResponse(url);
+    if (ancillary) {
+      return Promise.resolve(ancillary);
+    }
+
+    const next = primaryQueue[queueIndex];
+    queueIndex += 1;
+    if (next) {
+      return Promise.resolve(next);
+    }
+
+    return Promise.resolve({ ok: true, json: async () => ({ items: [] }) });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("DocumentDetail", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
   it("lists all document versions including archived uploads", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => expenseVersions,
-      }),
-    );
+    stubFetchWithQueue([{ ok: true, json: async () => expenseVersions }]);
 
     render(<DocumentDetail documentId="expense-policy" onBack={() => undefined} />);
 
     expect(await screen.findByText("docv-expense-v2")).toBeInTheDocument();
-    expect(screen.getByText("expense-policy-v2.pdf")).toBeInTheDocument();
+    expect(screen.getAllByText("expense-policy-v2.pdf").length).toBeGreaterThan(0);
     expect(screen.queryByText("docv-expense-v1")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: /Archived/i }));
@@ -59,17 +104,10 @@ describe("DocumentDetail", () => {
 
   it("downloads active document versions as raw bytes", async () => {
     const blob = new Blob(["pdf-bytes"], { type: "application/pdf" });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => expenseVersions,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        blob: async () => blob,
-      });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetchWithQueue([
+      { ok: true, json: async () => expenseVersions },
+      { ok: true, blob: async () => blob },
+    ]);
 
     const clickMock = vi.fn();
     const link = {
@@ -113,13 +151,7 @@ describe("DocumentDetail", () => {
   });
 
   it("disables download for archived versions", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => expenseVersions,
-      }),
-    );
+    stubFetchWithQueue([{ ok: true, json: async () => expenseVersions }]);
 
     render(<DocumentDetail documentId="expense-policy" onBack={() => undefined} />);
 
@@ -133,13 +165,7 @@ describe("DocumentDetail", () => {
   });
 
   it("shows a not-found state for unknown document ids", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ items: [] }),
-      }),
-    );
+    stubFetchWithQueue([{ ok: true, json: async () => ({ items: [] }) }]);
 
     render(<DocumentDetail documentId="missing-policy" onBack={() => undefined} />);
 
@@ -151,13 +177,7 @@ describe("DocumentDetail", () => {
   });
 
   it("shows the upload drawer for admins and hides it for viewers", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => expenseVersions,
-      }),
-    );
+    stubFetchWithQueue([{ ok: true, json: async () => expenseVersions }]);
 
     const { rerender } = render(
       <DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />,
@@ -189,21 +209,11 @@ describe("DocumentDetail", () => {
       items: [newVersion, ...expenseVersions.items],
     };
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => expenseVersions,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => newVersion,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => refreshedVersions,
-      });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetchWithQueue([
+      { ok: true, json: async () => expenseVersions },
+      { ok: true, json: async () => newVersion },
+      { ok: true, json: async () => refreshedVersions },
+    ]);
 
     render(<DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />);
 
@@ -225,24 +235,20 @@ describe("DocumentDetail", () => {
 
     expect(await screen.findByText("docv-expense-v3")).toBeInTheDocument();
     expect(screen.getByText(/Prior Document Versions remain unchanged/)).toBeInTheDocument();
-    expect(screen.getByText("docv-expense-v2")).toBeInTheDocument();
+    expect(screen.getByTitle("docv-expense-v2")).toBeInTheDocument();
   });
 
   it("surfaces quality gate rejection messages from the backend", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => expenseVersions,
-      })
-      .mockResolvedValueOnce({
+    const fetchMock = stubFetchWithQueue([
+      { ok: true, json: async () => expenseVersions },
+      {
         ok: false,
         status: 422,
         json: async () => ({
           detail: "Malformed PDF files are not supported because the file could not be parsed.",
         }),
-      });
-    vi.stubGlobal("fetch", fetchMock);
+      },
+    ]);
 
     render(<DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />);
 
@@ -260,13 +266,7 @@ describe("DocumentDetail", () => {
   });
 
   it("rejects unsupported file formats before upload", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => expenseVersions,
-      }),
-    );
+    stubFetchWithQueue([{ ok: true, json: async () => expenseVersions }]);
 
     render(<DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />);
 
@@ -282,13 +282,7 @@ describe("DocumentDetail", () => {
   });
 
   it("shows archive controls for admins and hides them for viewers", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => expenseVersions,
-      }),
-    );
+    stubFetchWithQueue([{ ok: true, json: async () => expenseVersions }]);
 
     const { rerender } = render(
       <DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />,
@@ -303,13 +297,7 @@ describe("DocumentDetail", () => {
   });
 
   it("requires a deletion reason before archiving a version", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => expenseVersions,
-      }),
-    );
+    stubFetchWithQueue([{ ok: true, json: async () => expenseVersions }]);
 
     render(<DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />);
 
@@ -332,21 +320,11 @@ describe("DocumentDetail", () => {
       items: [archivedVersion, expenseVersions.items[1]],
     };
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => expenseVersions,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => archivedVersion,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => refreshedVersions,
-      });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetchWithQueue([
+      { ok: true, json: async () => expenseVersions },
+      { ok: true, json: async () => archivedVersion },
+      { ok: true, json: async () => refreshedVersions },
+    ]);
 
     render(<DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />);
 
@@ -375,21 +353,17 @@ describe("DocumentDetail", () => {
   });
 
   it("surfaces retention and not-found errors from the backend", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => expenseVersions,
-      })
-      .mockResolvedValueOnce({
+    const fetchMock = stubFetchWithQueue([
+      { ok: true, json: async () => expenseVersions },
+      {
         ok: false,
         status: 409,
         json: async () => ({
           detail:
             "Document Version is retained until 2099-01-01T00:00:00Z and cannot be deleted yet.",
         }),
-      });
-    vi.stubGlobal("fetch", fetchMock);
+      },
+    ]);
 
     render(<DocumentDetail documentId="expense-policy" canUpload onBack={() => undefined} />);
 

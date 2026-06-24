@@ -162,7 +162,7 @@ describe("ManualRulesPage", () => {
         expect(
           await screen.findByText("Manual Rule created and approved."),
         ).toBeInTheDocument();
-        expect(screen.getAllByText("Human-authored")).not.toHaveLength(0);
+        expect(screen.getByText("Manual Rule")).toBeInTheDocument();
         expect(screen.getByText(createdManualRule.statement)).toBeInTheDocument();
         },
         10000,

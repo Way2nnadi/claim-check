@@ -57,7 +57,7 @@ def evaluate_expense_for_rule(
         field_values = [getattr(expense, field, None) for field in exception_fields]
         if all(value is True for value in field_values):
             return EvaluationOutcome.PASS
-        if any(value is False for value in field_values):
+        if any(value is not True for value in field_values):
             return EvaluationOutcome.MISSING_EVIDENCE
     return EvaluationOutcome.VIOLATION
 
